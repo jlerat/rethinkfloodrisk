@@ -1,7 +1,4 @@
-# my code
-
-# What is package
-TODO
+This package supports the "Time to rethink flood risk assessment paper".
 
 # Installation
 - Create a suitable python environment. We recommend using [miniconda](https://docs.conda.io/projects/miniconda/en/latest/) combined with the environment specification provided in the [env\_mypackage.yml] (env_package.yml) file in this repository.

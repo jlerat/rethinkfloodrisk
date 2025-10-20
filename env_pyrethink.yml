@@ -1,4 +1,4 @@
-name: env_mypackage
+name: env_pyrethink
 channels:
   - conda-forge
   - defaults

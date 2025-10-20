@@ -7,7 +7,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mypackage"
+name = "pyrethink"
 authors = [{name = "Julien Lerat, CSIRO Environment", email="julien.lerat@csiro.au"}]
 description = "Tool supporting the workflows"
 readme = "README.md"
@@ -40,4 +40,4 @@ testpaths = ["tests"]
 where = ["src"]
 
 [tool.setuptools.dynamic]
-version = {attr = "mypackage.__version__"}
+version = {attr = "pyrethink.__version__"}
