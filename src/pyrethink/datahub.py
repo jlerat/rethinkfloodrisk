@@ -1,7 +1,7 @@
 from pathlib import Path
 import re
 import json
-
+import numpy as np
 from hydrodiy.io import csv
 
 FHERE = Path(__file__).resolve().parent
@@ -35,4 +35,9 @@ def get_stations():
 def get_truepeaks():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(ft, index_col="DAY", parse_dates=True)
+
+    # Remove -1
+    values = df._get_numeric_data()
+    values[values < 0] = np.nan
+
     return df

@@ -11,3 +11,4 @@ def test_get_stations():
 
 def test_truepeaks():
     df = datahub.get_truepeaks()
+    assert (df.min() > 0).all()
