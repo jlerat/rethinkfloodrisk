@@ -27,22 +27,21 @@ from hyncu import nc4stationdata as nc4sd
 
 from floodstan import annual_maximum_series
 
+from pyrethink import datahub
+
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Collect streamflow data",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-v", "--version",
-                    help="Version number",
-                    type=str, required=True)
 parser.add_argument("-d", "--debug", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-o", "--overwrite", help="Overwrite data",
                     action="store_true", default=False)
 args = parser.parse_args()
 
-version = args.version
+version = datahub.DATA_VERSION
 overwrite = args.overwrite
 debug = args.debug
 
@@ -64,8 +63,11 @@ froot = source_file.parent.parent.parent
 
 fnc_path = froot.parent.parent / "Data" / "characterisation_paper"
 
-fdata = froot / "data" / "ams"
+fdata = froot / "data"
 fdata.mkdir(exist_ok=True, parents=True)
+
+for subfold in ["ams", "dailymax"]:
+    (fdata / subfold).mkdir(exist_ok=True)
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -111,6 +113,10 @@ with Dataset(fncin, "r") as ncin:
 
     nstations = len(stations)
     for istation, (stationid, sinfo) in enumerate(stations.iterrows()):
+        fams = fdata / "ams" / f"AMS_streamflow_{stationid}_v{version}.csv"
+        if fams.exists() and not overwrite:
+            continue
+
         sinfo = stations.loc[stationid]
         LOGGER.context = f"{stationid} ({istation+1}/{nstations})"
         LOGGER.info("Processing")
@@ -118,29 +124,47 @@ with Dataset(fncin, "r") as ncin:
 
         qobs = daily.loc[:, col_obs]
         start, end = qobs.index[qobs.notnull()][[0, -1]]
-        end = min(end, end_timeseries)
-        qobs = qobs.loc[start:end]
+        qobs = qobs[start:end]
 
         wys = water_year_start
         ams = annual_maximum_series.compute_ams(qobs,
                                                 water_year_start=wys)
 
-        stations.loc[stationid, "DURATION[yr]"] = len(ams)
+        drop = ["EVENTID", "NVALYEAR", "WATER_YEAR", "WATER_YEAR_END"]
+        ams = ams.loc[ams.NVALYEAR >= 365]\
+            .drop(drop, axis=1)\
+            .set_index("WATER_YEAR_START")
 
-        fd = fdata / f"AMS_streamflow_{stationid}_v{version}.csv"
-        csv.write_csv(ams, fd, f"AMS streamflow data for station {stationid}.",
+        ams.columns = stationid + "_" + ams.columns
+
+        comment = f"AMS streamflow data for station {stationid}."\
+                  + " Water year starts on the 1/{wys}."
+        csv.write_csv(ams, fams, comment,
                       source_file, compress=False,
                       write_sys_info=False,
+                      write_index=True,
                       lineterminator="\n")
 
+        qobs = pd.DataFrame(qobs)
+        qobs.index.name = "DAY"
+        comment = f"Daily streamflow maximum for station {stationid}."
+        fq = fdata / "dailymax" / f"dailymax_streamflow_{stationid}_v{version}.csv"
+        csv.write_csv(qobs, fq, comment,
+                      source_file, compress=False,
+                      write_sys_info=False,
+                      write_index=True,
+                      lineterminator="\n")
+
+        stations.loc[stationid, "DURATION[yr]"] = len(ams)
 
 pat = "NAME|LONGITUDE\\[|LATITUDE\\[|CATCHMENTAREA\\["\
       + "|XOUT|YOUT|^STREAMFLOW_MAX|G_MAX_PROV"
 stations = stations.filter(regex=pat, axis=1)
 cc = ["NAME"] + [cn for cn in stations.columns.sort_values() if cn != "NAME"]
 
-fs = fdata.parent / f"AMS_stations_v{version}.csv"
+fs = fdata / f"AMS_stations_v{version}.csv"
 stations = stations.loc[:, cc]
+stations.index.name = "STATIONID"
 csv.write_csv(stations, fs, "Station metadata.",
               source_file, compress=False,
               write_index=True, write_sys_info=False,
