@@ -1,5 +1,6 @@
 {
     "LOCAL": {
-        "data_folder": "package_root_folder/data"
+        "data_folder": "package_root_folder/data",
+        "data_version": "5.0"
     }    
 }    
