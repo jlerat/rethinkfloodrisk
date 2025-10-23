@@ -42,6 +42,19 @@ jobs:
           echo "--- hydrodiy install : located in $PWD ---"
           pip install -e .
 
+      - name : Install floodstan package in conda env 
+        run: |
+          source $CONDA/etc/profile.d/conda.sh
+          conda activate env_pyrethink
+          cd $GITHUB_WORKSPACE
+          mkdir -p src
+          cd src
+          git clone https://github.com/jlerat/floodstan.git
+          cd floodstan
+          echo "--- hydrodiy floodstan : located in $PWD ---"
+          pip install -e .
+
+
       - name : Install pyrethink package in conda env 
         run: |
           source $CONDA/etc/profile.d/conda.sh
@@ -63,8 +76,8 @@ jobs:
           conda activate env_pyrethink
           cd $GITHUB_WORKSPACE
           echo "--- pyrethink test : located in $PWD ---"
-          pytest --ignore=src/hydrodiy --doctest-modules src
-          pytest --ignore=src/hydrodiy --cov=pyrethink --cov-report=xml --cov-report=html -cov-report=missing-term tests
+          pytest --ignore=src/hydrodiy --ignore=src/floodstan --doctest-modules src
+          pytest --ignore=src/hydrodiy --ignore=src/floodstan --cov=pyrethink --cov-report=xml --cov-report=html -cov-report=missing-term tests
       
       - name: Parse coverage report and create badge
         run: |
