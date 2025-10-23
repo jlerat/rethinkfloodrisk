@@ -20,6 +20,7 @@ from pathlib import Path
 from scipy.stats import norm, multivariate_normal as mvn
 from scipy.linalg import toeplitz
 from scipy.integrate import nquad
+from scipy.optimize import minimize
 
 import numpy as np
 import pandas as pd
@@ -45,7 +46,6 @@ fdata = froot / "data"
 fout = froot / "outputs" / "fit"
 fout.mkdir(exist_ok=True)
 
-
 # ----------------------------------------------------------------------
 # @Logging
 # ----------------------------------------------------------------------
@@ -58,6 +58,11 @@ LOGGER = iutils.get_logger(basename)
 stations = datahub.get_stations()
 
 truepeaks = datahub.get_truepeaks().filter(regex="^2", axis=1)
+
+truepeaks = truepeaks.iloc[:, :3]
+start, end = truepeaks.index[truepeaks.notnull().any(axis=1)][[0, -1]]
+truepeaks = truepeaks.loc[start:end]
+
 nstations = truepeaks.shape[1]
 
 # ----------------------------------------------------------------------
@@ -122,11 +127,11 @@ marginal_stations = [marginals.factory(marginal_name)
 # total number of params:
 # - 3 * nstations => GEVs
 # - nstations * (nstations - 1) / 2 => correlation
-def vect2raw(thetas, nstations):
-    gev_params = thetas[:3 * nstations].reshape((nstations, 3))
+def vect2raw(theta, nstations):
+    gev_params = theta[:3 * nstations].reshape((nstations, 3))
 
     cor = 0.5 * np.eye(nstations)
-    cor_elems = thetas[3 * nstations:]
+    cor_elems = theta[3 * nstations:]
     cor[np.triu_indices(nstations, 1)] = cor_elems
     cor = cor + cor.T
 
@@ -135,7 +140,7 @@ def vect2raw(thetas, nstations):
 # Setup data and initial parameters
 stnorm = np.zeros_like(truepeaks)
 cases = np.zeros_like(truepeaks, dtype=int)
-thetas0 = []
+theta0 = []
 censors = np.zeros(nstations)
 stcensors = np.zeros(nstations)
 
@@ -156,7 +161,7 @@ for ista in range(nstations):
     # Fit LH moment
     marg = marginal_stations[ista]
     marg.fit_lh_moments(values)
-    thetas0.extend(marg.params.tolist())
+    theta0.extend(marg.params.tolist())
 
 rk = truepeaks.rank()
 cor0 = ((rk / rk.max()).corr()).values
@@ -166,56 +171,106 @@ cor0 = P@np.diag(eig)@P.T
 d = (1 / np.sqrt(np.diag(cor0)))[:, None]
 cor0 = d * cor0 * d.T
 pcor0 = cor0[np.triu_indices(nstations, 1)]
-thetas0.extend(pcor0.tolist())
-thetas0 = np.array(thetas0)
+theta0.extend(pcor0.tolist())
+theta0 = np.array(theta0)
 
 # unique cases valid/censored/missing
 cases_unique = np.unique(cases, axis=0)
-
+ncases = len(cases_unique)
 
 # Log-likelihood function
-def loglike(thetas, nstations, censors, data, stnorm, stcensors):
-    gparams, cor = vect2raw(thetas, nstations)
+class NegLogLike():
+    def __init__(self, nstations, censors, data, stnorm, stcensors):
+        self.niter = 0
+        self.nstations = nstations
+        self.censors = censors
+        self.data = data
+        self.stnorm = stnorm
+        self.stcensors = stcensors
 
-    # Set GEV params
-    for ista in range(nstations):
-        marg = marginal_stations[ista]
-        marg.params = gparams[ista]
-        stcensors[ista] = norm.ppf(marg.cdf(censors[ista]))
+    def run(self, theta):
+        nstations = self.nstations
+        censors = self.censors
+        data = self.data
+        stnorm = self.stnorm
+        stcensors = self.stcensors
 
-    # Compute lpdf
-    lpdf = 0
-    for case in cases_unique:
-        match = (cases == case[None, :]).all(axis=1)
-        nmatch = match.sum()
+        gparams, cor = vect2raw(theta, nstations)
 
+        # Check ok
+        try:
+            np.linalg.cholesky(cor)
+        except:
+            return np.inf
+
+        # Set GEV params
         for ista in range(nstations):
             marg = marginal_stations[ista]
+            marg.params = gparams[ista]
+            stcensors[ista] = norm.ppf(marg.cdf(censors[ista]))
 
-            # Marginal logpdf
-            if case[ista] == 0:
-                lpdf += marg.logpdf(data[match, ista]).sum()
-            elif case[ista] == 1:
-                lpdf += marg.logcdf(censors[ista]) * nmatch
+        # Compute lpdf
+        lpdf = 0
+        for icase, case in enumerate(cases_unique):
+            match = (cases == case[None, :]).all(axis=1)
+            nmatch = match.sum()
 
-            # probabilities
-            stnorm[match, ista] = norm.ppf(marg.cdf(data[match, ista]))
+            for ista in range(nstations):
+                marg = marginal_stations[ista]
 
-        valid = case == 0
-        cens = case == 1
-        R11 = cor[valid][:, valid]
-        if cens.sum() == 0:
-            lpdf += mvn(cov=R11).logpdf(stnorm[match][:, valid]).sum()
-            continue
+                # Marginal logpdf
+                if case[ista] == 0:
+                    lpdf += marg.logpdf(data[match, ista]).sum()
+                elif case[ista] == 1:
+                    lpdf += marg.logcdf(censors[ista]) * nmatch
 
-        R22 = cor[cens][:, cens]
-        import pdb; pdb.set_trace()
+                # probabilities
+                stnorm[match, ista] = norm.ppf(marg.cdf(data[match, ista]))
 
-    return lpdf
+            valid = case == 0
+            cens = case == 1
+            R22 = cor[valid][:, valid]
+            if cens.sum() == 0:
+                lpdf += mvn(cov=R22).logpdf(stnorm[match][:, valid]).sum()
+                continue
+
+            R11 = cor[cens][:, cens]
+            R12 = cor[cens][:, valid]
+            R22i = np.linalg.inv(R22)
+
+            stn = stnorm[match][:, valid].T
+            stc = stcensors[cens]
+            u = stc[None, :] + (R12@R22i@stn).T
+            Rp = R11 - R12@R22i@R12.T
+
+            lpdf += nmatch * mvn(cov=Rp).logcdf(u).sum()
+            if valid.sum() > 0:
+                lpdf += mvn(cov=R22).logpdf(stnorm[match][:, valid]).sum()
+
+        self.niter += 1
+        LOGGER.info(f"lpdf[{self.niter:4,d}] = {lpdf:12.4f}")
+        return -lpdf
 
 data = truepeaks.values
-ll = loglike(thetas0, nstations, censors, data,
-             stnorm, stcensors)
+nl = NegLogLike(nstations, censors, data, stnorm, stcensors)
+
+m = theta0
+s = 0.1 * np.eye(len(m))
+samples = mvn(mean=theta0, cov=s).rvs(size=200)
+nlog0 = nl.run(theta0)
+
+# Exploration
+nlogmin = nlog0
+LOGGER.info(f"lpdf ini = {-nlogmin:12.4f}")
+for theta in samples:
+    nlog = nl.run(theta)
+    if nlog < nlogmin:
+        theta1 = theta
+        nlogmin = nlog
+
+# Optimisation
+opt = minimize(nl.run, theta1)
+gparams, cor = vect2raw(opt.x, nstations)
 
 LOGGER.completed()
 
