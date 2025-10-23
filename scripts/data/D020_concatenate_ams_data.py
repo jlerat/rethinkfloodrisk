@@ -48,9 +48,12 @@ LOGGER = iutils.get_logger(basename)
 # @Process
 # ----------------------------------------------------------------------
 ams = []
+daily = []
 dailymaxs = []
 for f in (fdata / "ams").glob(f"*_v{version}.csv"):
     df, _ = csv.read_csv(f, index_col="WATER_YEAR_START")
+    wateryear_start = pd.to_datetime(df.index[0]).month
+
     stationid = re.sub(".*_streamflow_|_v.*", "", f.stem)
     df.drop(f"{stationid}_NVALID", axis=1)
     df.index = df.index.str.replace("-.*", "", regex=True).astype(int)
@@ -60,8 +63,9 @@ for f in (fdata / "ams").glob(f"*_v{version}.csv"):
     f = f"dailymax_streamflow_{stationid}_v{version}.csv"
     f = fdata / "dailymax" / f
     df, _ = csv.read_csv(f, index_col="DAY", parse_dates=True)
-    df.columns = [f"{stationid}_dailymax"]
+    df.columns = [f"{stationid}"]
     q = df.squeeze()
+    daily.append(q)
 
     # Rolling window to avoid peak time differences
     qm = q.fillna(-1).rolling(maxwindow, center=True).max()
@@ -69,6 +73,7 @@ for f in (fdata / "ams").glob(f"*_v{version}.csv"):
     dailymaxs.append(qm)
 
 ams = pd.concat(ams, axis=1).sort_index()
+daily = pd.concat(daily, axis=1).sort_index()
 dailymaxs = pd.concat(dailymaxs, axis=1).sort_index()
 
 def process(x):
@@ -79,9 +84,14 @@ def process(x):
 truepeaks = []
 for year, values in ams.iterrows():
     ams_peaks = process(values.filter(regex="_PEAK"))
-    ams_tpeaks = process(pd.to_datetime(values.filter(regex="TIMEPEAK")))
 
-    qmaxs = dailymaxs.loc[ams_tpeaks.values].copy().drop_duplicates()
+    start = pd.to_datetime(f"{year}-{wateryear_start}-01")
+    end = start + pd.DateOffset(years=1) - pd.DateOffset(days=1)
+    qd = daily.loc[start:end, ams_peaks.index]
+    diff = np.abs(qd - ams_peaks)
+    times = qd.index[(diff < 1e-10).any(axis=1)]
+
+    qmaxs = dailymaxs.loc[times].copy().drop_duplicates()
     qmaxs["WATERYEAR"] = year
     truepeaks.append(qmaxs)
 

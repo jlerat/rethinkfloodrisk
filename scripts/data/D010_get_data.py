@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from hydrodiy.io import csv, iutils
+from hydrodiy.data import qualitycontrol
 
 from netCDF4 import Dataset
 from hyncu import nc4io
@@ -126,6 +127,12 @@ with Dataset(fncin, "r") as ncin:
         start, end = qobs.index[qobs.notnull()][[0, -1]]
         qobs = qobs[start:end]
 
+        # qaqc
+        values = np.ascontiguousarray(qobs.values).astype(np.float64)
+        islin = qualitycontrol.islinear(values)
+        qobs[islin > 0] = np.nan
+
+        # ams
         wys = water_year_start
         ams = annual_maximum_series.compute_ams(qobs,
                                                 water_year_start=wys)
@@ -156,6 +163,7 @@ with Dataset(fncin, "r") as ncin:
                       lineterminator="\n")
 
         stations.loc[stationid, "DURATION[yr]"] = len(ams)
+
 
 pat = "NAME|LONGITUDE\\[|LATITUDE\\[|CATCHMENTAREA\\["\
       + "|XOUT|YOUT|^STREAMFLOW_MAX|G_MAX_PROV"
