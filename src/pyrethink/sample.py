@@ -7,7 +7,7 @@ from floodstan.sample import STAN_SAMPLE_ARGS
 
 PCENSOR_DEFAULT = 0.3
 
-ETA_PRIOR_DEFAULT = 4
+ETA_PRIOR_DEFAULT = 2
 
 GUMBEL_MARGINAL = Gumbel()
 

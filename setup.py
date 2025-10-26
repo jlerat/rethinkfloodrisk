@@ -21,8 +21,9 @@ MODELS = [
     "test_mv",
     "test_functions",
     "test_indexing",
-    #"mv_censored",
-    #"mv_uncensored",
+    "test_cor",
+    "mv_censored",
+    "mv_uncensored",
     "mv_uncensored_nomissing"
     ]
 

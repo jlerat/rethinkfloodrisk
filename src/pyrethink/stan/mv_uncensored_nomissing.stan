@@ -57,7 +57,13 @@ model {
 
     for(i in 1:N) {
         real obs = y[i][ivar];
-        z[i][ivar] = inv_Phi_approx(gumbel_cdf(obs | tau, alpha));
+        real zval = inv_Phi(gumbel_cdf(obs | tau, alpha));
+        z[i][ivar] = zval;
+
+        // Jacobian z = inv_Phi(gumbel_cdf(obs))
+        // dz/dobs = gumbel_pdf(obs) / phi(z)
+        // Hence log(dz/dobs) =
+        target += gumbel_lpdf(obs | tau, alpha) - std_normal_lpdf(zval);
     }
   }
 

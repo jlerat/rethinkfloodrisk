@@ -10,18 +10,20 @@ STAN_FILES_FOLDER = Path(__file__).parent / "stan"
 stan_test_mv = load_stan_model("stan_test_mv",
                                sf_folder=STAN_FILES_FOLDER)
 stan_test_functions = load_stan_model("stan_test_functions",
-                               sf_folder=STAN_FILES_FOLDER)
+                                      sf_folder=STAN_FILES_FOLDER)
 stan_test_indexing = load_stan_model("stan_test_indexing",
-                               sf_folder=STAN_FILES_FOLDER)
+                                     sf_folder=STAN_FILES_FOLDER)
+stan_test_cor = load_stan_model("stan_test_cor",
+                                sf_folder=STAN_FILES_FOLDER)
 
 # Stan sampler
-#name = "mv_censored_sampling"
-#mv_censored_sampling = load_stan_model(name,
-#                                       sf_folder=STAN_FILES_FOLDER)
-#
-#name = "mv_uncensored_sampling"
-#mv_uncensored_sampling = load_stan_model(name,
-#                                         sf_folder=STAN_FILES_FOLDER)
+name = "mv_censored_sampling"
+mv_censored_sampling = load_stan_model(name,
+                                       sf_folder=STAN_FILES_FOLDER)
+
+name = "mv_uncensored_sampling"
+mv_uncensored_sampling = load_stan_model(name,
+                                         sf_folder=STAN_FILES_FOLDER)
 
 name = "mv_uncensored_nomissing_sampling"
 mv_uncensored_nomissing_sampling = load_stan_model(name,
