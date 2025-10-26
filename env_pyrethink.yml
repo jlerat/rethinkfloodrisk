@@ -4,14 +4,14 @@ channels:
   - defaults
 dependencies:
   - anybadge
+  - cmdstan=2.36.0
+  - cmdstanpy=1.2.5
   - cython=3.0.10
   - flake8=7.1.1
   - matplotlib=3.8.4
   - numpy=1.26.4
   - pandas=2.2.1
   - pip
-  - pyproj=3.5.0
-  - pyshp=2.3.1
   - pytest=7.2.0
   - pytest-cov
   - python=3.10.6
