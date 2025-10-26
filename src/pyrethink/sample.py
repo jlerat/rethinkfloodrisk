@@ -3,7 +3,6 @@ from scipy.stats import norm
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import Gumbel
-from floodstan.sample import STAN_SAMPLE_ARGS
 
 PCENSOR_DEFAULT = 0.3
 
