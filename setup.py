@@ -17,7 +17,14 @@ from wheel.bdist_wheel import bdist_wheel
 
 MODEL_DIR = "src/pyrethink/stan"
 
-MODELS = ["multivariate_censored"]
+MODELS = [
+    "test_mv",
+    "test_functions",
+    "test_indexing",
+    #"mv_censored",
+    #"mv_uncensored",
+    "mv_uncensored_nomissing"
+    ]
 
 CMDSTAN_VERSION = "2.36.0"
 BINARIES_DIR = "bin"

@@ -1,0 +1,19 @@
+real inv_Phi_approx(real p) {
+    // See Bowling et al. (2009), Equation 10
+    // Phi(x) ~ 1 / (1 + exp(-0.07056 x^3 - 1.5976 x))
+
+    // Error is too high here. Reverting to original inv_Phi
+    if (p < 0.0212 || p > 0.9788)
+        return inv_Phi(p);
+
+    // We need to solve z^3 + az + b = 0
+    real a = 1.5976 / 0.07056;
+    real b = log(1./p - 1) / 0.07056;
+
+    real sqdelta = sqrt(a^3 / 27 + b^2 / 4);
+    return cbrt(-b / 2 - sqdelta) + cbrt(-b / 2 + sqdelta);
+}
+
+real gumbel_quantile(real p, real tau, real alpha){
+    return tau - alpha * log(-log(p));
+}
