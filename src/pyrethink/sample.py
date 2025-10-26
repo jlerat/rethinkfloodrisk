@@ -60,6 +60,8 @@ class StanSamplingMultivariate():
         z = np.nan * np.zeros_like(self.data)
         gparams = np.zeros((P, 2))
 
+        censors = self.censors
+        pcensors = np.zeros(P)
         for ivar in range(P):
             vect = self.data[:, ivar]
             iok = ~np.isnan(vect)
@@ -68,19 +70,26 @@ class StanSamplingMultivariate():
             gparams[ivar] = GUMBEL_MARGINAL.params[:2]
             z[iok, ivar] = norm.ppf(GUMBEL_MARGINAL.cdf(vect))
 
+            pcensors[ivar] = GUMBEL_MARGINAL.cdf(censors[ivar])
+
         iall = np.all(~np.isnan(z), axis=1)
         cor = np.corrcoef(z[iall].T)
         L_cor = np.linalg.cholesky(cor)
 
         # latent variables
-        zmiss = np.random.uniform(-1., 1., len(self.idx_miss))
-        wcens = np.random.uniform(-1., 1., len(self.idx_cens))
+        zmiss = np.random.normal(size=len(self.idx_miss))
+
+        ucens = np.random.uniform(0, 1, size=self.data.shape)
+        ucens = ucens * pcensors[None, :]
+        i1 = self.idx_cens[:, 0] - 1
+        i2 = self.idx_cens[:, 1] - 1
+        zcens = norm.ppf(ucens)[i1, i2]
 
         self.initial_parameters = {
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "L_cor": L_cor,
-            "wcens": wcens,
+            "zcens": zcens,
             "zmiss": zmiss
         }
 

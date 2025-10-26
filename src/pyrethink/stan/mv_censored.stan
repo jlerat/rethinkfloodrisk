@@ -56,13 +56,10 @@ parameters {
   cholesky_factor_corr[P] L_cor;
   
   // Latent variables for missing data
-  vector[Nmiss] zmiss;
+  vector[Nmiss] zlat_miss;
   
-  // Latent variables for missing data
-  // we do not declare z variables directly here
-  // because the they are bounded up and the bounds
-  // varies depending on the variable.
-  vector[Ncens] wcens;
+  // Latent variables for censored data
+  vector[Ncens] zlat_cens;
 }  
 
 transformed parameters {
@@ -78,7 +75,17 @@ transformed parameters {
 }
 
 model {
-  // standard normal
+  // --- Priors ---
+  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
+  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
+
+  // Prior for cholesky factor of the correlation matrix
+  L_cor ~ lkj_corr_cholesky(eta_prior);
+
+  // Prior for missing latent variables
+  zlat_miss ~ std_normal();
+
+  // -- Latent variable matrix ---
   array[N] vector[P] z;
 
   // Transform data to uniform marginals
@@ -99,36 +106,23 @@ model {
     target += gumbel_lpdf(obs | tau, alpha) - std_normal_lpdf(zval);
   }
 
+  // Set missing latent variables
   for(i in 1:Nmiss) {
     int ival = idx_miss[i][1]; 
     int ivar = idx_miss[i][2]; 
-    z[ival][ivar] = zmiss[i];
+    z[ival][ivar] = zlat_miss[i];
   }
 
-  // Set censored latent using stan upper bound
-  // constraint formula value < upper = upper - exp(w)
-  // with w in R.
+  // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
 
-    real tau = ylocn[ivar];
-    real alpha = yscale[ivar];
-
-    real zc = zcensors[ivar];
-    z[ival][ivar] = zc - exp(wcens[i]);
+    z[ival][ivar] = zlat_cens[i];
     
-    // Jacobian zc = inv_Phi(gumbel_cdf(censor)) (see above)
-    real cval = censors[ivar];
-    target += gumbel_lpdf(cval | tau, alpha) - std_normal_lpdf(zc);
+    // Truncated prior for censored latent variable
+    zlat_cens[i] ~ std_normal() T[,zcensors[ivar]];
   }
-
-  // --- Priors ---
-  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
-  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
-
-  // Cholesky factor of the correlation matrix
-  L_cor ~ lkj_corr_cholesky(eta_prior);
 
   // --- Likelihood ---
   z ~ multi_normal_cholesky(zero_mean, L_cor);
@@ -141,6 +135,5 @@ generated quantities {
     for(i in 1:P) {
        yrnd[i] = gumbel_quantile(Phi(zrnd[i]), ylocn[i], yscale[i]);
     }
-    
 }
 

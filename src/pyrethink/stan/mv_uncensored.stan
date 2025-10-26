@@ -50,7 +50,7 @@ parameters {
   cholesky_factor_corr[P] L_cor;
   
   // Latent variables for missing data
-  vector[Nmiss] zmiss;
+  vector[Nmiss] zlat_miss;
 }  
 
 transformed parameters {
@@ -58,7 +58,17 @@ transformed parameters {
 }
 
 model {
-  // standard normal
+  // --- Priors ---
+  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
+  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
+
+  // Cholesky factor of the correlation matrix
+  L_cor ~ lkj_corr_cholesky(eta_prior);
+
+  // Latent variable
+  zlat_miss ~ std_normal();
+
+  // --- latent variables ---
   array[N] vector[P] z;
 
   // Transform data to uniform marginals
@@ -82,15 +92,9 @@ model {
   for(i in 1:Nmiss) {
     int ival = idx_miss[i][1]; 
     int ivar = idx_miss[i][2]; 
-    z[ival][ivar] = zmiss[i];
+    z[ival][ivar] = zlat_miss[i];
   }
 
-  // --- Priors ---
-  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
-  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
-
-  // Cholesky factor of the correlation matrix
-  L_cor ~ lkj_corr_cholesky(eta_prior);
 
   // --- Likelihood ---
   z ~ multi_normal_cholesky(zero_mean, L_cor);
