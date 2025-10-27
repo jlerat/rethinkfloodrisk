@@ -6,7 +6,9 @@ from floodstan.marginals import Gumbel
 
 PCENSOR_DEFAULT = 0.3
 
-ETA_PRIOR_DEFAULT = 2
+ETA_PRIOR_DEFAULT = 1.5
+
+SIGMA_PRIOR_LATENT_DEFAULT = 5.
 
 GUMBEL_MARGINAL = Gumbel()
 
@@ -76,20 +78,22 @@ class StanSamplingMultivariate():
         L_cor = np.linalg.cholesky(cor)
 
         # latent variables
-        zmiss = np.random.normal(size=len(self.idx_miss))
+        zlat_miss = np.random.normal(size=len(self.idx_miss))
 
         ucens = np.random.uniform(0, 1, size=self.data.shape)
-        ucens = ucens * pcensors[None, :]
+        # We allow a safety margin on the censor of 0.2 to ensures
+        # MCMC can start
+        ucens = ucens * pcensors[None, :] * 0.8
         i1 = self.idx_cens[:, 0] - 1
         i2 = self.idx_cens[:, 1] - 1
-        zcens = norm.ppf(ucens)[i1, i2]
+        zlat_cens = norm.ppf(ucens)[i1, i2]
 
         self.initial_parameters = {
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "L_cor": L_cor,
-            "zcens": zcens,
-            "zmiss": zmiss
+            "zlat_cens": zlat_cens,
+            "zlat_miss": zlat_miss
         }
 
     def to_dict(self):
@@ -110,6 +114,7 @@ class StanSamplingMultivariate():
             "logscale_lower": float(GUMBEL_MARGINAL.logscale_prior.lower),
             "logscale_upper": float(GUMBEL_MARGINAL.logscale_prior.upper),
             "censors": self.censors,
-            "eta_prior": ETA_PRIOR_DEFAULT
+            "eta_prior": ETA_PRIOR_DEFAULT,
+            "sigma_prior_latent": SIGMA_PRIOR_LATENT_DEFAULT
         }
         return dd

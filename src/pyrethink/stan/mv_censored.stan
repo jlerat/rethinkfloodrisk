@@ -39,6 +39,7 @@ data {
   real<lower=logscale_lower, upper=20> logscale_upper;
   
   real<lower=1, upper=10> eta_prior;
+  real<lower=0> sigma_prior_latent;
 
   vector[P] censors;
 }
@@ -83,7 +84,7 @@ model {
   L_cor ~ lkj_corr_cholesky(eta_prior);
 
   // Prior for missing latent variables
-  zlat_miss ~ std_normal();
+  zlat_miss ~ normal(0., sigma_prior_latent);
 
   // -- Latent variable matrix ---
   array[N] vector[P] z;
@@ -117,11 +118,13 @@ model {
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-
     z[ival][ivar] = zlat_cens[i];
     
     // Truncated prior for censored latent variable
-    zlat_cens[i] ~ std_normal() T[,zcensors[ivar]];
+    if(zlat_cens[i] > zcensors[ivar])
+        reject("Censored latent variable should be lower than censor");
+
+    zlat_cens[i] ~ normal(0., sigma_prior_latent) T[, zcensors[ivar]];
   }
 
   // --- Likelihood ---

@@ -4,7 +4,8 @@ from scipy.stats import norm, gumbel_r
 import pytest
 
 from floodstan import report
-from floodstan.sample import get_logger
+from floodstan import sample as fsample
+from floodstan import marginals
 
 from pyrethink import sample
 from pyrethink import datahub
@@ -20,8 +21,7 @@ FTESTS = Path(__file__).resolve().parent
 SEED = 5446
 
 PROGRESS = True
-LOGGER = get_logger(stan_logger=PROGRESS)
-
+LOGGER = fsample.get_logger(stan_logger=PROGRESS)
 
 def test_sample_data(allclose):
     data = datahub.get_truepeaks()
@@ -141,7 +141,7 @@ def test_uncensored_nomissing(nvars, allclose):
     stan_nwarm = 5000
     stan_nsamples = 5000
 
-    fout = FTESTS / "sampling"
+    fout = FTESTS / "sampling_uncensored_nomissing"
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
         f.unlink()
@@ -179,7 +179,7 @@ def test_uncensored(nvars, allclose):
     stan_nwarm = 5000
     stan_nsamples = 5000
 
-    fout = FTESTS / "sampling"
+    fout = FTESTS / "sampling_uncensored"
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
         f.unlink()
@@ -205,9 +205,44 @@ def test_uncensored(nvars, allclose):
     assert diag["effsamplesz"] == "satisfactory"
 
 
+def test_uncensored_vs_floodstan(nvars, allclose):
+    pytest.skip("WIP")
+    data = datahub.get_truepeaks().iloc[:, :2]
+    y, z = data.values.T
+    censor = y.median()
+    marginal = marginals.Gumbel()
+    yv = fsample.StanSamplingVariable(marginal, y, censor,
+                                      ninits=stan_nchains)
+
+    censor = z.median()
+    zv = fsample.StanSamplingVariable(marginal, z, censor,
+                                      ninits=stan_nchains)
+
+    fsv = sample.StanSamplingDataset([yv, zv], "Gaussian")
+    fstan_data = fsv.to_dict()
+    fstan_inits = fsv.initial_parameters
+
+    fout = FTESTS / "sampling_uncensored_vs_floodstan"
+    fout.mkdir(parents=True, exist_ok=True)
+    for f in fout.glob("*.*"):
+        f.unlink()
+
+    msg = "Error during sampling"
+    smp = bivariate_censored_sampling(data=stan_data,
+                                  chains=stan_nchains,
+                                  seed=SEED,
+                                  iter_warmup=stan_nwarm,
+                                  iter_sampling=
+                                  stan_nsamples//stan_nchains,
+                                  parallel_chains=stan_nchains,
+                                  inits=stan_inits,
+                                  show_progress=False)
+
+
+
 @pytest.mark.parametrize("nvars", [3])
 def test_censored(nvars, allclose):
-    pytest.skip("wip")
+    pytest.skip("WIP")
     data = datahub.get_truepeaks().iloc[:, :nvars]
     sv = sample.StanSamplingMultivariate(data)
     stan_data = sv.to_dict()
@@ -218,7 +253,7 @@ def test_censored(nvars, allclose):
     stan_nwarm = 5000
     stan_nsamples = 5000
 
-    fout = FTESTS / "sampling"
+    fout = FTESTS / "sampling_censored"
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
         f.unlink()
@@ -244,4 +279,5 @@ def test_censored(nvars, allclose):
     assert diag["rhat"] == "satisfactory"
     assert diag["ebfmi"] == "satisfactory"
     assert diag["effsamplesz"] == "satisfactory"
+
 

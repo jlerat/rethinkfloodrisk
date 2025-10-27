@@ -35,6 +35,7 @@ data {
   real<lower=logscale_lower, upper=20> logscale_upper;
   
   real<lower=1, upper=10> eta_prior;
+  real<lower=0> sigma_prior_latent;
 }
 
 transformed data {
@@ -66,7 +67,7 @@ model {
   L_cor ~ lkj_corr_cholesky(eta_prior);
 
   // Latent variable
-  zlat_miss ~ std_normal();
+  zlat_miss ~ normal(0., sigma_prior_latent);
 
   // --- latent variables ---
   array[N] vector[P] z;
@@ -94,7 +95,6 @@ model {
     int ivar = idx_miss[i][2]; 
     z[ival][ivar] = zlat_miss[i];
   }
-
 
   // --- Likelihood ---
   z ~ multi_normal_cholesky(zero_mean, L_cor);
