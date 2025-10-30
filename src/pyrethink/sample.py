@@ -78,21 +78,17 @@ class StanSamplingMultivariate():
         L_cor = np.linalg.cholesky(cor)
 
         # latent variables
-        zlat_miss = np.random.normal(size=len(self.idx_miss))
+        nmiss = len(self.idx_miss)
+        zlat_miss = np.random.normal(size=nmiss)
 
-        ucens = np.random.uniform(0, 1, size=self.data.shape)
-        # We allow a safety margin on the censor of 0.2 to ensures
-        # MCMC can start
-        ucens = ucens * pcensors[None, :] * 0.8
-        i1 = self.idx_cens[:, 0] - 1
-        i2 = self.idx_cens[:, 1] - 1
-        zlat_cens = norm.ppf(ucens)[i1, i2]
+        ncens = len(self.idx_cens)
+        wlat_cens = np.log(2 * np.random.uniform(0, 1, size=ncens))
 
         self.initial_parameters = {
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "L_cor": L_cor,
-            "zlat_cens": zlat_cens,
+            "wlat_cens": wlat_cens,
             "zlat_miss": zlat_miss
         }
 

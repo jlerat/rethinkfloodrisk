@@ -7,5 +7,6 @@ outputs/
 *.swp
 *.pyc
 *.exe
+*.hpp
 tests/sampling/*
 

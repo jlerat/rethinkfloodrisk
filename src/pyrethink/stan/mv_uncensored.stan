@@ -84,7 +84,7 @@ model {
     real zval = inv_Phi(gumbel_cdf(obs | tau, alpha));
     z[ival][ivar] = zval;
 
-    // Jacobian z = inv_Phi(gumbel_cdf(obs))
+    // log-Jacobian z = inv_Phi(gumbel_cdf(obs))
     // dz/dobs = gumbel_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
     target += gumbel_lpdf(obs | tau, alpha) - std_normal_lpdf(zval);

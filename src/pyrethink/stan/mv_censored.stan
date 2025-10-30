@@ -60,18 +60,27 @@ parameters {
   vector[Nmiss] zlat_miss;
   
   // Latent variables for censored data
-  vector[Ncens] zlat_cens;
+  vector[Ncens] wlat_cens;
 }  
 
 transformed parameters {
   vector[P] yscale = exp(ylogscale);
 
+  // Compute censors in normal space
   vector[P] zcensors;
   for(ivar in 1:P) {
     real tau = ylocn[ivar];
     real alpha = yscale[ivar];
     real cval = censors[ivar];
     zcensors[ivar] = inv_Phi(gumbel_cdf(cval | tau, alpha));
+  }
+
+  // Latent variable for censored data
+  vector[Ncens] zlat_cens;
+  for(i in 1:Ncens){
+    int ival = idx_cens[i][1]; 
+    int ivar = idx_cens[i][2]; 
+    zlat_cens[i] = zcensors[ivar] - exp(wlat_cens[i]);
   }
 }
 
@@ -83,8 +92,9 @@ model {
   // Prior for cholesky factor of the correlation matrix
   L_cor ~ lkj_corr_cholesky(eta_prior);
 
-  // Prior for missing latent variables
+  // Prior for latent variables
   zlat_miss ~ normal(0., sigma_prior_latent);
+  zlat_cens ~ normal(0., sigma_prior_latent);
 
   // -- Latent variable matrix ---
   array[N] vector[P] z;
@@ -101,7 +111,7 @@ model {
     real zval = inv_Phi(gumbel_cdf(obs | tau, alpha));
     z[ival][ivar] = zval;
 
-    // Jacobian z = inv_Phi(gumbel_cdf(obs))
+    // log-Jacobian of z = inv_Phi(gumbel_cdf(obs))
     // dz/dobs = gumbel_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
     target += gumbel_lpdf(obs | tau, alpha) - std_normal_lpdf(zval);
@@ -120,11 +130,8 @@ model {
     int ivar = idx_cens[i][2]; 
     z[ival][ivar] = zlat_cens[i];
     
-    // Truncated prior for censored latent variable
-    if(zlat_cens[i] > zcensors[ivar])
-        reject("Censored latent variable should be lower than censor");
-
-    zlat_cens[i] ~ normal(0., sigma_prior_latent) T[, zcensors[ivar]];
+    // log=Jacobian of censored latent variable transform
+    target += wlat_cens[i]; 
   }
 
   // --- Likelihood ---
