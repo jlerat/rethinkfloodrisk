@@ -248,7 +248,7 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
 
     LOGGER.info("")
     LOGGER.info("-----------------")
-    LOGGER.info(f"pcensor={pcensor:0.2f} missing={missing}")
+    LOGGER.info(f"station={station} pcensor={pcensor:0.2f} missing={missing}")
     for pname2 in pnames:
         x2 = df2.loc[:, pname2]
 
