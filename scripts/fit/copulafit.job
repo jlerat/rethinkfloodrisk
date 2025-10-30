@@ -1,0 +1,52 @@
+#!/bin/bash -l
+
+#SBATCH --job-name=copulafit
+#SBATCH --array=0
+#SBATCH --time=23:59:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=5gb
+#SBATCH --output=logs/copulafit/copulafit_TASK%a_JOB%A.out
+#SBATCH --error=logs/copulatfit/copulafit_TASK%a_JOB%A.err
+#SBATCH --mail-type=end # send email when job ends
+#SBATCH --mail-user=julien.lerat@csiro.au
+
+# ----- VARIABLES TO SET ----------
+# VERSION: e.g. 1
+#
+
+#set -xv
+conda activate env_jl_v2_pet
+
+echo --- System info ---
+echo whoami  : `whoami`
+echo date    : `date -u`
+echo hostname: `hostname -f`
+echo uname   : `uname -a`
+echo issue   : `cat /etc/issue`
+echo release : `lsb_release -a` 
+echo python  : `which python`
+
+
+BASE=copulafit
+PYSCRIPT= TODO   $BASE.py
+FLOG= TODO logs/copulafit
+
+## WARNING !
+## Don't forget to export ALL as well otherwise the script won't load the
+## the python env
+## e.g. sbatch --export=ALL,VERSION=1 calmodel.job
+
+# Extract IDs
+jobid=$SLURM_ARRAY_JOB_ID
+taskid=$SLURM_ARRAY_TASK_ID
+
+# Run job
+echo
+echo --- Job info ---
+echo calsac - taskid=$taskid 
+
+ferr=$FLOG/copulafit_TASK${taskid}_JOB${jobid}.err
+srun --ntasks=1 --error=$ferr python $PYSCRIPT
+
+
