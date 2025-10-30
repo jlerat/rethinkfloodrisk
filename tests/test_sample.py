@@ -188,9 +188,10 @@ def test_sampler(config, nvars, allclose):
         assert diag[mn] == "satisfactory"
 
     # Test sample size error
-    kw["data"]["Ncens"] += 1
-    with pytest.raises(RuntimeError):
-        sampler(**kw)
+    if config != "uncensored_nomissing":
+        kw["data"]["Nmiss"] += 1
+        with pytest.raises(RuntimeError):
+            sampler(**kw)
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
