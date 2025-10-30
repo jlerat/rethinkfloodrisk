@@ -1,13 +1,14 @@
 #!/bin/bash -l
 
+#SBATCH --account=OD-228777
 #SBATCH --job-name=copulafit
 #SBATCH --array=0
-#SBATCH --time=23:59:00
+#SBATCH --time=11:59:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=5gb
 #SBATCH --output=logs/copulafit/copulafit_TASK%a_JOB%A.out
-#SBATCH --error=logs/copulatfit/copulafit_TASK%a_JOB%A.err
+#SBATCH --error=logs/copulafit/copulafit_TASK%a_JOB%A.err
 #SBATCH --mail-type=end # send email when job ends
 #SBATCH --mail-user=julien.lerat@csiro.au
 
@@ -29,8 +30,8 @@ echo python  : `which python`
 
 
 BASE=copulafit
-PYSCRIPT= TODO   $BASE.py
-FLOG= TODO logs/copulafit
+PYSCRIPT=$NFRSK/scripts/fit/$BASE.py
+FLOG=$NFRSK/logs/copulafit
 
 ## WARNING !
 ## Don't forget to export ALL as well otherwise the script won't load the
@@ -47,6 +48,6 @@ echo --- Job info ---
 echo calsac - taskid=$taskid 
 
 ferr=$FLOG/copulafit_TASK${taskid}_JOB${jobid}.err
-srun --ntasks=1 --error=$ferr python $PYSCRIPT
+srun --ntasks=1 --error=$ferr python $PYSCRIPT -p
 
 

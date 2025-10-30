@@ -41,7 +41,7 @@ parser.add_argument("-d", "--debug", help="Debug mode",
 parser.add_argument("-p", "--progress", help="Show progress",
                     action="store_true", default=False)
 parser.add_argument("-c", "--pcensor", help="Censoring threshold",
-                    type=float, default=0.1)
+                    type=float, default=0.3)
 args = parser.parse_args()
 
 debug = args.debug
@@ -68,14 +68,14 @@ stan_seed = 5446
 source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
-fout = froot / "outputs" / "fit"
+fout = froot / "outputs" / basename
 fout.mkdir(exist_ok=True, parents=True)
 
 # ----------------------------------------------------------------------
 # @Logging
 # ----------------------------------------------------------------------
 basename = source_file.stem
-flog = froot / "logs" / "fit_copula" / f"{basename}.log"
+flog = froot / "logs" / basename / f"{basename}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
 if flog.exists():
     try:
@@ -85,9 +85,14 @@ if flog.exists():
 
 LOGGER = get_logger(stan_logger=stan_logger, flog=flog)
 
+if debug:
+    fout = flog.parent / "outputs"
+    fout.mkdir(exist_ok=True)
+
 # ----------------------------------------------------------------------
 # @Get data
 # ----------------------------------------------------------------------
+LOGGER.info("Load data")
 stations = datahub.get_stations()
 
 truepeaks = datahub.get_truepeaks().drop("WATERYEAR", axis=1)
@@ -98,6 +103,7 @@ if debug:
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
+LOGGER.info("Configure stan sampler")
 sv = sample.StanSamplingMultivariate(truepeaks, pcensor=pcensor)
 stan_data = sv.to_dict()
 stan_inits = sv.initial_parameters
@@ -117,7 +123,10 @@ kw = dict(data=stan_data,
           show_progress=stan_progress,
           inits=stan_inits)
 
+LOGGER.info("Start sampling")
 smp = mv_censored_sampling(**kw)
+
+LOGGER.info("Process samples and save to disk")
 df = smp.draws_pd()
 diag = report.process_stan_diagnostic(smp.diagnose())
 
