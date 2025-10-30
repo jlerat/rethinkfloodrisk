@@ -39,6 +39,9 @@ data {
 }
 
 transformed data {
+  // Check number of data in each category adds up 
+  int<lower=0, upper=0> Ncheck = N * P - Nobs - Nmiss;
+
   row_vector[P] zero_mean = zeros_row_vector(P);
 }
 

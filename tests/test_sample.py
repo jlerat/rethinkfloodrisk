@@ -175,18 +175,22 @@ def test_sampler(config, nvars, allclose):
               show_progress=PROGRESS)
 
     if config == "uncensored_nomissing":
-        smp = mv_uncensored_nomissing_sampling(**kw)
+        sampler = mv_uncensored_nomissing_sampling
     elif config == "uncensored_missing":
-        smp = mv_uncensored_sampling(**kw)
+        sampler = mv_uncensored_sampling
     elif config == "censored_missing":
-        smp = mv_censored_sampling(**kw)
+        sampler = mv_censored_sampling
 
+    smp = sampler(**kw)
     df = smp.draws_pd()
     diag = report.process_stan_diagnostic(smp.diagnose())
-    assert diag["treedepth"] == "satisfactory"
-    assert diag["rhat"] == "satisfactory"
-    assert diag["ebfmi"] == "satisfactory"
-    assert diag["effsamplesz"] == "satisfactory"
+    for mn in ["treedepth", "rhat", "ebfmi", "effsamplesz"]:
+        assert diag[mn] == "satisfactory"
+
+    # Test sample size error
+    kw["data"]["Ncens"] += 1
+    with pytest.raises(RuntimeError):
+        sampler(**kw)
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
