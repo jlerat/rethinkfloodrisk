@@ -27,6 +27,11 @@ SEED = 5446
 
 PROGRESS = False
 FLOG = FTESTS / "test_sample.log"
+if FLOG.exists():
+    try:
+        FLOG.unlink()
+    except:
+        pass
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 5
@@ -217,8 +222,8 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
 
     nwarm = STAN_NWARM_DEFAULT
     nsamples = STAN_NSAMPLES_DEFAULT
-    nwarm = 100
-    nsamples = 100
+    #nwarm = 100
+    #nsamples = 100
 
     nsmp = nsamples // STAN_NCHAINS_DEFAULT
     kw = dict(data=fstan_data,
@@ -249,6 +254,10 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
     LOGGER.info("")
     LOGGER.info("-----------------")
     LOGGER.info(f"station={station} pcensor={pcensor:0.2f} missing={missing}")
+    LOGGER.info(f"nwarm = {nwarm}")
+    LOGGER.info(f"nsamples = {nsamples}")
+    LOGGER.info("")
+
     for pname2 in pnames:
         x2 = df2.loc[:, pname2]
 
@@ -265,6 +274,7 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
         x1 = df1.loc[:, pname1]
         if pname1 == "rho":
             # Convert kendall tau to correlation
+            # then convert to normal std to facilitate comparison
             x1 = np.sin(x1 * math.pi / 2)
         elif re.search("zcensor", pname2):
             # Convert probability to normal cdf
@@ -276,11 +286,12 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
         rest = ttest_ind(x1, x2)
         tpv = math.log10(rest.pvalue) if rest.pvalue > 0 else -np.inf
 
-        msg = f"[{pname2:15s}] mean(x1)={x1.mean():6.2f}"\
-              + f" mean(x2)={x2.mean():6.2f}"\
-              + f" ks-logpv={kspv:5.2f} t-logpv={tpv:5.2f}"
+        msg = f"[{pname2:15s}] x1:m={x1.mean():6.2f} s={x1.std():6.2f}"\
+              + f" // x2:m={x2.mean():6.2f} s={x2.std():6.2f}"\
+              + f" // test: ks-logpv={kspv:5.2f} t-logpv={tpv:5.2f}"
         LOGGER.info(msg)
 
         #if pcensor == 0:
         #    assert kspv > -3
         #    assert tpv > -3
+
