@@ -8,5 +8,6 @@ outputs/
 *.pyc
 *.exe
 *.hpp
+*.log
 tests/sampling/*
 

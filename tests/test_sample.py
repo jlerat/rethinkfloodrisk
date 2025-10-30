@@ -26,7 +26,8 @@ FTESTS = Path(__file__).resolve().parent
 SEED = 5446
 
 PROGRESS = False
-LOGGER = fsample.get_logger(stan_logger=PROGRESS)
+FLOG = FTESTS / "test_sample.log"
+LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 5
 STAN_NWARM_DEFAULT = 5000
@@ -214,10 +215,10 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
     for f in fout.glob("*.*"):
         f.unlink()
 
-    #nwarm = 100
-    #nsamples = 100
     nwarm = STAN_NWARM_DEFAULT
     nsamples = STAN_NSAMPLES_DEFAULT
+    nwarm = 100
+    nsamples = 100
 
     nsmp = nsamples // STAN_NCHAINS_DEFAULT
     kw = dict(data=fstan_data,
@@ -245,8 +246,9 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
     pnames = df2.columns.to_series().filter(regex="^yl|^zcensor").to_list()
     pnames.append("L_cor[2,1]")
 
-    print("")
-    print(f"---- pcensor={pcensor:0.2f} missing={missing} ----")
+    LOGGER.info("")
+    LOGGER.info("-----------------")
+    LOGGER.info(f"pcensor={pcensor:0.2f} missing={missing}")
     for pname2 in pnames:
         x2 = df2.loc[:, pname2]
 
@@ -276,11 +278,9 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
 
         msg = f"[{pname2:15s}] mean(x1)={x1.mean():6.2f}"\
               + f" mean(x2)={x2.mean():6.2f}"\
-              + f" ks-logpv={kspv:4.2f} t-logpv={tpv:4.2f}"
-        print(msg)
+              + f" ks-logpv={kspv:5.2f} t-logpv={tpv:5.2f}"
+        LOGGER.info(msg)
 
         #if pcensor == 0:
         #    assert kspv > -3
         #    assert tpv > -3
-
-    print("")
