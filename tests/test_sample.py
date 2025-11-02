@@ -28,17 +28,25 @@ SEED = 5446
 
 PROGRESS = False
 FLOG = FTESTS / "test_sample.log"
+
+# Clean files
 if FLOG.exists():
     try:
         FLOG.unlink()
     except:
         pass
 
+for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
+    f.unlink()
+
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 5
 STAN_NWARM_DEFAULT = 5000
 STAN_NSAMPLES_DEFAULT = 5000
+
+STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
+
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
@@ -179,8 +187,8 @@ def test_sampler(config, nvars, allclose):
     smp = mv_censored_sampling(**kw)
     df = smp.draws_pd()
     diag = report.process_stan_diagnostic(smp.diagnose())
-    for mn in ["treedepth", "rhat", "ebfmi", "effsamplesz"]:
-        assert diag[mn] == "satisfactory"
+    for met in STAN_DIAG_METRICS:
+        assert diag[met] == "satisfactory"
 
     # Test sample size error
     kw["data"]["Nmiss"] += 1
@@ -234,9 +242,13 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
               parallel_chains=STAN_NCHAINS_DEFAULT,
               iter_warmup=nwarm,
               show_progress=PROGRESS)
+
     smp1 = bivariate_censored_sampling(**kw)
     df1 = smp1.draws_pd()
     diag1 = report.process_stan_diagnostic(smp1.diagnose())
+
+    for met in STAN_DIAG_METRICS:
+        assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
     sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
@@ -246,6 +258,9 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     smp2 = mv_censored_sampling(**kw)
     df2 = smp2.draws_pd()
     diag2 = report.process_stan_diagnostic(smp2.diagnose())
+
+    for met in STAN_DIAG_METRICS:
+        assert diag2[met] == "satisfactory"
 
     pnames = df2.columns.to_series().filter(regex="^yl|^ucensor").to_list()
     pnames.append("L_cor[2,1]")
@@ -303,18 +318,22 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         #    assert tpv > -3
 
         ax = axs[pname2]
+
         xa = min(x1.min(), x2.min())
         xb = max(x1.max(), x2.max())
         bins = np.linspace(xa, xb, 30)
         ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
         ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
 
-        ax.set_title(pname2, x=0.05, y=0.95, fontweight="bold",
-                     va="top", ha="left")
+        ax.set_title(pname2, fontweight="bold")
+        ax.legend(fontsize="x-small")
+
+    ftitle = f"Station={station} pcens={pcensor:0.2f} missing={missing}"
+    fig.suptitle(ftitle, fontsize="large")
 
     fp = f"test_mv_censored_vs_floodstan_station{station}"\
         + f"_pcens{pcensor*100:0.02f}"\
         + f"_missing{missing}.png"
     fp = FTESTS / fp
-    fig.savefig(fp)
 
+    fig.savefig(fp)

@@ -9,5 +9,6 @@ outputs/
 *.exe
 *.hpp
 *.log
+*.png
 tests/sampling/*
 
