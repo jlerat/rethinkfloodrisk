@@ -63,7 +63,7 @@ parameters {
   vector<lower=0, upper=1>[Nmiss] wlat_miss;
   
   // Latent variables for censored data
-  vector<lower=0,upper=1>[Ncens] wlat_cens;
+  vector<lower=0, upper=1>[Ncens] wlat_cens;
 }  
 
 transformed parameters {
@@ -119,18 +119,22 @@ model {
   for(i in 1:Nmiss) {
     int ival = idx_miss[i][1]; 
     int ivar = idx_miss[i][2]; 
-    z[ival][ivar] = inv_Phi(wlat_miss[i]);
+    real zmiss = inv_Phi(wlat_miss[i]);
+    z[ival][ivar] = zmiss;
+
+    // Log-jacobian of missing Latent variable
+    target += -std_normal_lpdf(zmiss);
   }
 
   // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-    real zl = inv_Phi(ulat_cens[i]);
-    z[ival][ivar] = zl;
+    real zcens = inv_Phi(ulat_cens[i]);
+    z[ival][ivar] = zcens;
     
-    // log=Jacobian of censored latent variable transform
-    target += log(ucensors[ivar]) - std_normal_lpdf(zl); 
+    // log-Jacobian of censored latent variable transform
+    target += log(ucensors[ivar]) - std_normal_lpdf(zcens); 
   }
 
   // --- Likelihood ---

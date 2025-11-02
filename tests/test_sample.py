@@ -310,7 +310,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
 
         msg = f"[{pname2:15s}] x1:m={x1.mean():6.2f} s={x1.std():6.2f}"\
               + f" // x2:m={x2.mean():6.2f} s={x2.std():6.2f}"\
-              + f" // test: ks-logpv={kspv:5.2f} t-logpv={tpv:5.2f}"
+              + f" // test: ks-logpv={kspv:4.1f} t-logpv={tpv:4.1f}"
         LOGGER.info(msg)
 
         #if pcensor == 0:
@@ -325,7 +325,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
         ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
 
-        ax.set_title(pname2, fontweight="bold")
+        title = f"{pname2} - ks-logpv={kspv:0.1f}"
+        ax.set_title(title, fontweight="bold")
         ax.legend(fontsize="x-small")
 
     ftitle = f"Station={station} pcens={pcensor:0.2f} missing={missing}"
