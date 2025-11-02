@@ -12,6 +12,25 @@ SIGMA_PRIOR_LATENT_DEFAULT = 5.
 
 GUMBEL_MARGINAL = Gumbel()
 
+# TODO
+# Rewrite stan code to have
+# array[P] array[N] data_type -> 0=missing 1=cens 2=obs
+#
+# in data transform section:
+# array[P] Nmiss
+# array[P] Ncens
+# array[P] Nobs
+#
+# for(i in 1:N) {
+#   for(ivar in 1:P) {
+#     // Missing
+#     if(data_type[ivar][i] == 0) {
+#
+#     }
+#   }
+# }
+#
+
 
 class StanSamplingMultivariate():
     def __init__(self, data, pcensor=PCENSOR_DEFAULT):
@@ -79,17 +98,17 @@ class StanSamplingMultivariate():
 
         # latent variables
         nmiss = len(self.idx_miss)
-        zlat_miss = np.random.normal(size=nmiss)
+        wlat_miss = np.random.uniform(0, 1, size=nmiss)
 
         ncens = len(self.idx_cens)
-        wlat_cens = np.log(2 * np.random.uniform(0, 1, size=ncens))
+        wlat_cens = np.random.uniform(0, 1, size=ncens)
 
         self.initial_parameters = {
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "L_cor": L_cor,
             "wlat_cens": wlat_cens,
-            "zlat_miss": zlat_miss
+            "wlat_miss": wlat_miss
         }
 
     def to_dict(self):

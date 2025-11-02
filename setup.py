@@ -22,9 +22,7 @@ MODELS = [
     "test_functions",
     "test_indexing",
     "test_cor",
-    "mv_censored",
-    "mv_uncensored",
-    "mv_uncensored_nomissing"
+    "mv_censored"
     ]
 
 CMDSTAN_VERSION = "2.36.0"

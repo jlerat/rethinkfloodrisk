@@ -60,30 +60,29 @@ parameters {
   cholesky_factor_corr[P] L_cor;
   
   // Latent variables for missing data
-  vector[Nmiss] zlat_miss;
+  vector<lower=0, upper=1>[Nmiss] wlat_miss;
   
   // Latent variables for censored data
-  vector[Ncens] wlat_cens;
+  vector<lower=0,upper=1>[Ncens] wlat_cens;
 }  
 
 transformed parameters {
   vector[P] yscale = exp(ylogscale);
 
-  // Compute censors in normal space
-  vector[P] zcensors;
+  // Compute censors probability
+  vector[P] ucensors;
   for(ivar in 1:P) {
     real tau = ylocn[ivar];
     real alpha = yscale[ivar];
-    real cval = censors[ivar];
-    zcensors[ivar] = inv_Phi(gumbel_cdf(cval | tau, alpha));
+    ucensors[ivar] = gumbel_cdf(censors[ivar] | tau, alpha);
   }
 
   // Latent variable for censored data
-  vector[Ncens] zlat_cens;
+  vector[Ncens] ulat_cens;
   for(i in 1:Ncens){
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-    zlat_cens[i] = zcensors[ivar] - exp(wlat_cens[i]);
+    ulat_cens[i] = wlat_cens[i] * ucensors[ivar];
   }
 }
 
@@ -94,10 +93,6 @@ model {
 
   // Prior for cholesky factor of the correlation matrix
   L_cor ~ lkj_corr_cholesky(eta_prior);
-
-  // Prior for latent variables
-  zlat_miss ~ normal(0., sigma_prior_latent);
-  zlat_cens ~ normal(0., sigma_prior_latent);
 
   // -- Latent variable matrix ---
   array[N] vector[P] z;
@@ -124,17 +119,18 @@ model {
   for(i in 1:Nmiss) {
     int ival = idx_miss[i][1]; 
     int ivar = idx_miss[i][2]; 
-    z[ival][ivar] = zlat_miss[i];
+    z[ival][ivar] = inv_Phi(wlat_miss[i]);
   }
 
   // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-    z[ival][ivar] = zlat_cens[i];
+    real zl = inv_Phi(ulat_cens[i]);
+    z[ival][ivar] = zl;
     
     // log=Jacobian of censored latent variable transform
-    target += wlat_cens[i]; 
+    target += log(ucensors[ivar]) - std_normal_lpdf(zl); 
   }
 
   // --- Likelihood ---

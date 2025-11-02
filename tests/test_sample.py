@@ -1,11 +1,14 @@
 import re
 from pathlib import Path
+
+import pytest
+
 import math
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, gumbel_r
 from scipy.stats import ttest_ind, ks_2samp
-import pytest
+import matplotlib.pyplot as plt
 
 from floodstan import report
 from floodstan import sample as fsample
@@ -15,8 +18,6 @@ from floodstan import bivariate_censored_sampling
 from pyrethink import sample
 from pyrethink import datahub
 from pyrethink import mv_censored_sampling
-from pyrethink import mv_uncensored_sampling
-from pyrethink import mv_uncensored_nomissing_sampling
 from pyrethink import stan_test_indexing
 from pyrethink import stan_test_functions
 from pyrethink import stan_test_cor
@@ -32,6 +33,7 @@ if FLOG.exists():
         FLOG.unlink()
     except:
         pass
+
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 5
@@ -65,7 +67,7 @@ def test_sample_data(pcensor, allclose):
 
     stan_inits = sv.initial_parameters
     assert len(stan_inits) == 5
-    assert len(stan_inits["zlat_miss"]) == nmiss
+    assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
     for ivar in range(data.shape[1]):
@@ -174,30 +176,22 @@ def test_sampler(config, nvars, allclose):
               iter_warmup=STAN_NWARM_DEFAULT,
               show_progress=PROGRESS)
 
-    if config == "uncensored_nomissing":
-        sampler = mv_uncensored_nomissing_sampling
-    elif config == "uncensored_missing":
-        sampler = mv_uncensored_sampling
-    elif config == "censored_missing":
-        sampler = mv_censored_sampling
-
-    smp = sampler(**kw)
+    smp = mv_censored_sampling(**kw)
     df = smp.draws_pd()
     diag = report.process_stan_diagnostic(smp.diagnose())
     for mn in ["treedepth", "rhat", "ebfmi", "effsamplesz"]:
         assert diag[mn] == "satisfactory"
 
     # Test sample size error
-    if config != "uncensored_nomissing":
-        kw["data"]["Nmiss"] += 1
-        with pytest.raises(RuntimeError):
-            sampler(**kw)
+    kw["data"]["Nmiss"] += 1
+    with pytest.raises(RuntimeError):
+        mv_censored_sampling(**kw)
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
 @pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize("station", [0, 5])
-def test_censored_vs_floodstan(station, pcensor, missing, allclose):
+def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     # Two variables only
     data = datahub.get_truepeaks().iloc[:, station: station + 2]
     data = data.loc[data.notnull().any(axis=1)]
@@ -253,7 +247,7 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
     df2 = smp2.draws_pd()
     diag2 = report.process_stan_diagnostic(smp2.diagnose())
 
-    pnames = df2.columns.to_series().filter(regex="^yl|^zcensor").to_list()
+    pnames = df2.columns.to_series().filter(regex="^yl|^ucensor").to_list()
     pnames.append("L_cor[2,1]")
 
     LOGGER.info("")
@@ -263,13 +257,24 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
     LOGGER.info(f"nsamples = {nsamples}")
     LOGGER.info("")
 
+    plt.close("all")
+    n = len(pnames)
+    ncols = n // 2 + 1
+    mosaic = [[pn for pn in pnames[:ncols]],
+              [pn for pn in pnames[ncols:]] + ["."] * (n % 2)]
+    nrows = 2
+    w = 3
+    fig = plt.figure(figsize=(w * ncols, w * nrows),
+                     layout="constrained")
+    axs = fig.subplot_mosaic(mosaic)
+
     for pname2 in pnames:
         x2 = df2.loc[:, pname2]
 
         # Get floodstan sample
         if re.search("L_cor", pname2):
             pname1 = "rho"
-        elif re.search("zcensor", pname2):
+        elif re.search("ucensor", pname2):
             pname1 = "ucensor" if re.search("1", pname2) else "vcensor"
         else:
             pname1 = re.sub("\\[.*", "", pname2)
@@ -281,9 +286,6 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
             # Convert kendall tau to correlation
             # then convert to normal std to facilitate comparison
             x1 = np.sin(x1 * math.pi / 2)
-        elif re.search("zcensor", pname2):
-            # Convert probability to normal cdf
-            x1 = norm.ppf(x1)
 
         resk = ks_2samp(x1, x2)
         kspv = math.log10(resk.pvalue) if resk.pvalue > 0 else -np.inf
@@ -299,4 +301,20 @@ def test_censored_vs_floodstan(station, pcensor, missing, allclose):
         #if pcensor == 0:
         #    assert kspv > -3
         #    assert tpv > -3
+
+        ax = axs[pname2]
+        xa = min(x1.min(), x2.min())
+        xb = max(x1.max(), x2.max())
+        bins = np.linspace(xa, xb, 30)
+        ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
+        ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
+
+        ax.set_title(pname2, x=0.05, y=0.95, fontweight="bold",
+                     va="top", ha="left")
+
+    fp = f"test_mv_censored_vs_floodstan_station{station}"\
+        + f"_pcens{pcensor*100:0.02f}"\
+        + f"_missing{missing}.png"
+    fp = FTESTS / fp
+    fig.savefig(fp)
 

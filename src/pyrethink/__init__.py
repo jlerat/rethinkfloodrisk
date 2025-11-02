@@ -20,11 +20,3 @@ stan_test_cor = load_stan_model("stan_test_cor",
 name = "mv_censored_sampling"
 mv_censored_sampling = load_stan_model(name,
                                        sf_folder=STAN_FILES_FOLDER)
-
-name = "mv_uncensored_sampling"
-mv_uncensored_sampling = load_stan_model(name,
-                                         sf_folder=STAN_FILES_FOLDER)
-
-name = "mv_uncensored_nomissing_sampling"
-mv_uncensored_nomissing_sampling = load_stan_model(name,
-                                                   sf_folder=STAN_FILES_FOLDER)
