@@ -313,9 +313,9 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
               + f" // test: ks-logpv={kspv:4.1f} t-logpv={tpv:4.1f}"
         LOGGER.info(msg)
 
-        #if pcensor == 0:
-        #    assert kspv > -3
-        #    assert tpv > -3
+        # Test on matching the two dist
+        assert kspv > -3.5
+        assert tpv > -3.5
 
         ax = axs[pname2]
 
