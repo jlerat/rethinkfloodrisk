@@ -38,7 +38,7 @@ data {
   real<lower=-20> logscale_lower;
   real<lower=logscale_lower, upper=20> logscale_upper;
   
-  real<lower=1, upper=10> eta_prior;
+  real<lower=1e-2, upper=2> eta_prior;
   real<lower=0> sigma_prior_latent;
 
   vector[P] censors;

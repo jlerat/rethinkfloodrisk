@@ -6,7 +6,7 @@ from floodstan.marginals import Gumbel
 
 PCENSOR_DEFAULT = 0.3
 
-ETA_PRIOR_DEFAULT = 1.5
+ETA_PRIOR_DEFAULT = 0.5
 
 SIGMA_PRIOR_LATENT_DEFAULT = 5.
 
