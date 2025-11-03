@@ -17,6 +17,7 @@ data {
   
   vector[P] ylocn;
   vector[P] ylogscale;
+  vector[P] yshape1;
 
   cholesky_factor_corr[P] L_cor;
 }
@@ -31,7 +32,7 @@ generated quantities {
     
     vector[P] yrnd;
     for(i in 1:P) {
-       yrnd[i] = gumbel_quantile(Phi(zrnd[i]), ylocn[i], yscale[i]);
+       yrnd[i] = gev_quantile(Phi(zrnd[i]), ylocn[i], yscale[i], yshape1[i]);
     }
     
 }

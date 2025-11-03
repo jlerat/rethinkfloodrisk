@@ -262,7 +262,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     for met in STAN_DIAG_METRICS:
         assert diag2[met] == "satisfactory"
 
-    pnames = df2.columns.to_series().filter(regex="^yl|^ucensor").to_list()
+    pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
     pnames.append("L_cor[2,1]")
 
     LOGGER.info("")

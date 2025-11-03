@@ -38,7 +38,12 @@ data {
   real<lower=-20> logscale_lower;
   real<lower=logscale_lower, upper=20> logscale_upper;
   
+  vector[2] yshape1_prior;
+  real shape1_lower;
+  real<lower=shape1_lower> shape1_upper;
+
   real<lower=1e-2, upper=2> eta_prior;
+  
   real<lower=0> sigma_prior_latent;
 
   vector[P] censors;
@@ -52,9 +57,10 @@ transformed data {
 }
 
 parameters {
-  // Gumbel parameter vectors
+  // GEV parameter vectors
   vector[P] ylocn;
   vector<lower=logscale_lower, upper=logscale_upper>[P] ylogscale;
+  vector<lower=shape1_lower, upper=shape1_upper>[P] yshape1;
 
   // Correlation
   cholesky_factor_corr[P] L_cor;
@@ -74,7 +80,8 @@ transformed parameters {
   for(ivar in 1:P) {
     real tau = ylocn[ivar];
     real alpha = yscale[ivar];
-    ucensors[ivar] = gumbel_cdf(censors[ivar] | tau, alpha);
+    real kappa = yshape1[ivar];
+    ucensors[ivar] = gev_cdf(censors[ivar] | tau, alpha, kappa);
   }
 
   // Latent variable for censored data
@@ -90,6 +97,7 @@ model {
   // --- Priors ---
   ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
   ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
+  yshape1 ~ normal(yshape1_prior[1], yshape1_prior[2]) T[shape1_lower, shape1_upper];
 
   // Prior for cholesky factor of the correlation matrix
   L_cor ~ lkj_corr_cholesky(eta_prior);
@@ -104,15 +112,16 @@ model {
 
     real tau = ylocn[ivar];
     real alpha = yscale[ivar];
+    real kappa = yshape1[ivar];
 
     real obs = y[ival][ivar];
-    real zval = inv_Phi(gumbel_cdf(obs | tau, alpha));
+    real zval = inv_Phi(gev_cdf(obs | tau, alpha, kappa));
     z[ival][ivar] = zval;
 
-    // log-Jacobian of z = inv_Phi(gumbel_cdf(obs))
-    // dz/dobs = gumbel_pdf(obs) / phi(z)
+    // log-Jacobian of z = inv_Phi(gev_cdf(obs))
+    // dz/dobs = gev_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
-    target += gumbel_lpdf(obs | tau, alpha) - std_normal_lpdf(zval);
+    target += gev_lpdf(obs | tau, alpha, kappa) - std_normal_lpdf(zval);
   }
 
   // Set missing latent variables
@@ -145,8 +154,11 @@ generated quantities {
     vector[P] zrnd = multi_normal_cholesky_rng(zero_mean, L_cor);
     
     vector[P] yrnd;
-    for(i in 1:P) {
-       yrnd[i] = gumbel_quantile(Phi(zrnd[i]), ylocn[i], yscale[i]);
+    for(ivar in 1:P) {
+       real tau = ylocn[ivar];
+       real alpha = yscale[ivar];
+       real kappa = yshape1[ivar];
+       yrnd[ivar] = gev_quantile(Phi(zrnd[ivar]), tau, alpha, kappa);
     }
 }
 

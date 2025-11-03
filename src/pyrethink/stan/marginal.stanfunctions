@@ -1,19 +1,86 @@
-real inv_Phi_approx(real p) {
-    // See Bowling et al. (2009), Equation 10
-    // Phi(x) ~ 1 / (1 + exp(-0.07056 x^3 - 1.5976 x))
+// -------------- GEV distribution ------------------------------
+// tau Bounds when kappa > 0 : [ymax-alpha/kapp, +infty[
+// tau Bounds when kappa < 0 : ]-infty, ycensor-alpha/kapp]
 
-    // Error is too high here. Reverting to original inv_Phi
-    if (p < 0.0212 || p > 0.9788)
-        return inv_Phi(p);
+real gev_lpdf(real y, real tau, real alpha, real kappa){
+    real logalpha = log(alpha);
+    real u = (y - tau) / alpha;
+    real v;
 
-    // We need to solve z^3 + az + b = 0
-    real a = 1.5976 / 0.07056;
-    real b = log(1./p - 1) / 0.07056;
+    // Threshold to transition from GEV to Gumbel
+    real GEV2Gumbel_trans = 1e-10;
 
-    real sqdelta = sqrt(a^3 / 27 + b^2 / 4);
-    return cbrt(-b / 2 - sqdelta) + cbrt(-b / 2 + sqdelta);
+    real y0 = tau + alpha / kappa;
+    if(kappa < -GEV2Gumbel_trans) {
+        if(y < y0)
+            reject("[gev_lpdf] y (", y, ") is lower than y0 (", y0, 
+                   ") with tau=", tau, " alpha=", alpha, " kappa=", kappa);
+    }
+    else if (kappa > GEV2Gumbel_trans){
+        if(y > y0)
+            reject("[gev_lpdf] y (", y, ") is greater than y0 (", y0,
+                   ") with tau=", tau, " alpha=", alpha, " kappa=", kappa);
+    }
+    
+    if(abs(kappa) > GEV2Gumbel_trans) {
+        // This is GEV log pdf
+        v = -pow(1 - kappa * u, 1 / kappa);
+        return -logalpha + v + (1 / kappa - 1) * log(1 - kappa * u);
+
+    } else {
+        // This Gumbel log pdf
+        return -logalpha - u - exp(-u);
+    }
 }
 
-real gumbel_quantile(real p, real tau, real alpha){
-    return tau - alpha * log(-log(p));
+real gev_cdf(real y, real tau, real alpha, real kappa){
+    real u = (y - tau) / alpha;
+    real v;
+   
+    // Threshold to transition from GEV to Gumbel
+    real GEV2Gumbel_trans = 1e-10;
+
+    real y0 = tau + alpha / kappa;
+    if(kappa < -GEV2Gumbel_trans && y < y0) {
+       reject("[gev_lcdf] y (", y, ") is lower than y0 (", y0, 
+              ") with tau=", tau, " alpha=", alpha, " kappa=", kappa);
+    }
+    else if (kappa > GEV2Gumbel_trans && y > y0){
+       reject("[gev_lcdf] y (", y, ") is greater than y0 (", y0,
+              ") with tau=", tau, " alpha=", alpha, " kappa=", kappa);
+    }
+ 
+    if(abs(kappa) > GEV2Gumbel_trans) {
+        return exp(-pow(1. - kappa * u, 1. / kappa));
+    } else {
+        return exp(-exp(-u));
+    }
 }
+
+real gev_quantile(real p, real tau, real alpha, real kappa){
+    //
+    // p = exp(-pow(1. - kappa * u, 1. / kappa));
+    // -log(p) = (1 - kappa * u)**(1/kappa)
+    // -log(p)**kappa = 1 - kappa * u
+    // u = (1 + log(p)**kappa) / kappa
+    // y = tau + alpha * (1 + log(p)**kappa) / kappa
+    //
+    // p = exp(-exp(-u))
+    // -log(p) = exp(-u)
+    // -log(-log(p)) = u
+   
+    // Threshold to transition from GEV to Gumbel
+    real GEV2Gumbel_trans = 1e-10;
+
+    if(p <= 0 || p >= 1) {
+       reject("[gev_quantile] p (", p, ") is <=0 or >=1",
+              " with tau=", tau, " alpha=", alpha, " kappa=", kappa);
+    }
+
+    if(abs(kappa) > GEV2Gumbel_trans) {
+        return tau + alpha / kappa * (1 + pow(log(p), kappa));
+    } else {
+        return tau - alpha * log(-log(p));
+    }
+}
+
