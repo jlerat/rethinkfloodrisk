@@ -65,7 +65,7 @@ class StanSamplingMultivariate():
             vect = vect[iok]
             MARGINAL.fit_lh_moments(vect, eta=2)
             locn, logscale, shape1 = MARGINAL.params
-            shape1 = -1e-2 # To avoid boundary problems with GEV
+            shape1 = -1e-2  # To avoid boundary problems with GEV
             gparams[ivar] = [locn, logscale, shape1]
             z[iok, ivar] = norm.ppf(MARGINAL.cdf(vect))
 
