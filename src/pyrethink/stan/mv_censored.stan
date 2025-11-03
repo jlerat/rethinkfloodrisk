@@ -44,8 +44,6 @@ data {
 
   real<lower=1e-2, upper=2> eta_prior;
   
-  real<lower=0> sigma_prior_latent;
-
   vector[P] censors;
 }
 

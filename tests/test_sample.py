@@ -6,7 +6,7 @@ import pytest
 import math
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, gumbel_r
+from scipy.stats import norm
 from scipy.stats import ttest_ind, ks_2samp
 import matplotlib.pyplot as plt
 
@@ -26,7 +26,7 @@ FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-PROGRESS = False
+PROGRESS = True
 FLOG = FTESTS / "test_sample.log"
 
 # Clean files
@@ -54,7 +54,7 @@ def test_sample_data(pcensor, allclose):
     sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
     stan_data = sv.to_dict()
 
-    assert len(stan_data) == 18
+    assert len(stan_data) == 20
 
     data = pd.DataFrame(stan_data["y"])
     assert data.notnull().any(axis=1).all()
@@ -74,7 +74,8 @@ def test_sample_data(pcensor, allclose):
     assert nmiss == nval - nok
 
     stan_inits = sv.initial_parameters
-    assert len(stan_inits) == 5
+
+    assert len(stan_inits) == 6
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
@@ -82,6 +83,9 @@ def test_sample_data(pcensor, allclose):
         censor = np.nanpercentile(data.iloc[:, ivar], pcensor * 100)
         assert allclose(censor, stan_data["censors"][ivar])
 
+    data = np.nan * np.zeros_like(data)
+    with pytest.raises(ValueError, match="Expected at least"):
+        sv = sample.StanSamplingMultivariate(data)
 
 def test_stan_indexing():
     data = datahub.get_truepeaks()
@@ -103,26 +107,37 @@ def test_stan_indexing():
         assert all(z[~iscens, ivar] != 2)
 
 
-def test_stan_functions(allclose):
-    tau = 0.5
-    alpha = 3.
+@pytest.mark.parametrize("kappa", [-1., -0.5, 0., 0.5, 1.])
+def test_stan_functions(kappa, allclose):
+    tau = 100.
+    alpha = 50.
+
+    mname = "GEV" if abs(kappa) > 0 else "Gumbel"
+    marginal = marginals.factory(mname)
+    marginal.params = [tau, math.log(alpha), kappa]
 
     stan_data = {
         "Q": 10000,
         "tau": tau,
-        "alpha": alpha
+        "alpha": alpha,
+        "kappa": kappa
     }
     df = stan_test_functions(data=stan_data)
 
-    u = df.filter(regex="^u").squeeze().values
-    z = df.filter(regex="^z").squeeze().values
-    expected = norm.ppf(u)
-    assert allclose(z, expected, atol=1.5e-3)
+    u = df.filter(regex="^u\\[").squeeze().values
+    q = df.filter(regex="^qq").squeeze().values
+    expected = marginal.ppf(u)
+    atol = 1e-4
+    rtol = 5e-4
+    assert allclose(q, expected, atol=atol, rtol=rtol)
 
-    gq = df.filter(regex="^gq").squeeze().values
-    rv = gumbel_r(loc=tau, scale=alpha)
-    expected = rv.ppf(u)
-    assert allclose(gq, expected, atol=5e-4)
+    uu = df.filter(regex="^uu").squeeze().values
+    expected = marginal.cdf(q)
+    assert allclose(uu, expected, atol=atol, rtol=rtol)
+
+    lp = df.filter(regex="^lp\\[").squeeze().values
+    expected = marginal.logpdf(q)
+    assert allclose(lp, expected, atol=atol, rtol=rtol)
 
 
 def test_stan_cor(allclose):
@@ -210,7 +225,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     # -- floodstan --
     y, z = data.values.T
     censor = np.nanpercentile(y, pcensor * 100)
-    marginal = marginals.Gumbel()
+    marginal = marginals.GEV()
     yv = fsample.StanSamplingVariable(marginal, y, censor,
                                       ninits=STAN_NCHAINS_DEFAULT)
 

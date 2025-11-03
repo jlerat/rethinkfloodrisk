@@ -64,7 +64,9 @@ class StanSamplingMultivariate():
             iok = ~np.isnan(vect)
             vect = vect[iok]
             MARGINAL.fit_lh_moments(vect, eta=2)
-            gparams[ivar] = MARGINAL.params
+            locn, logscale, shape1 = MARGINAL.params
+            shape1 = -1e-2 # To avoid boundary problems with GEV
+            gparams[ivar] = [locn, logscale, shape1]
             z[iok, ivar] = norm.ppf(MARGINAL.cdf(vect))
 
         iall = np.all(~np.isnan(z), axis=1)
@@ -100,6 +102,7 @@ class StanSamplingMultivariate():
             "idx_miss": self.idx_miss,
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
+            "yshape1_prior": MARGINAL.shape1_prior.to_list(),
             "locn_lower": float(MARGINAL.locn_prior.lower),
             "locn_upper": float(MARGINAL.locn_prior.upper),
             "logscale_lower": float(MARGINAL.logscale_prior.lower),

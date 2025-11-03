@@ -14,11 +14,15 @@ data {
 
 generated quantities {
   vector[Q] u = linspaced_vector(Q, 1./Q, 1 - 1./Q);
-  vector[Q] z;
-  vector[Q] gq;
+  vector[Q] uu;
+  vector[Q] qq;
+  vector[Q] lp;
+
   for(i in 1:Q) {
-    z[i] = inv_Phi(u[i]);
-    gq[i] = gev_quantile(u[i], tau, alpha, kappa);
+    real q = gev_quantile(u[i], tau, alpha, kappa);
+    qq[i] = q;
+    uu[i] = gev_cdf(q | tau, alpha, kappa);
+    lp[i] = gev_lpdf(q | tau, alpha, kappa);
   }  
 }
 

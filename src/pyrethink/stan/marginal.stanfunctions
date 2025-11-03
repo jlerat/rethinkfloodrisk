@@ -61,9 +61,9 @@ real gev_quantile(real p, real tau, real alpha, real kappa){
     //
     // p = exp(-pow(1. - kappa * u, 1. / kappa));
     // -log(p) = (1 - kappa * u)**(1/kappa)
-    // -log(p)**kappa = 1 - kappa * u
-    // u = (1 + log(p)**kappa) / kappa
-    // y = tau + alpha * (1 + log(p)**kappa) / kappa
+    // (-log(p))**kappa = 1 - kappa * u
+    // u = (1 - (-log(p))**kappa) / kappa
+    // y = tau + alpha * (1 - (-log(p))**kappa) / kappa
     //
     // p = exp(-exp(-u))
     // -log(p) = exp(-u)
@@ -78,7 +78,7 @@ real gev_quantile(real p, real tau, real alpha, real kappa){
     }
 
     if(abs(kappa) > GEV2Gumbel_trans) {
-        return tau + alpha / kappa * (1 + pow(log(p), kappa));
+        return tau + alpha / kappa * (1 - pow(-log(p), kappa));
     } else {
         return tau - alpha * log(-log(p));
     }
