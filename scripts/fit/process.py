@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from pandas.plotting import scatter_matrix
 from scipy.stats import norm, multivariate_normal as mvn
 import matplotlib.pyplot as plt
 
@@ -115,22 +116,52 @@ ax.text(0.98, 0.02, txt,
 fp = fimg / "standard_normal_bivariate.png"
 fig.savefig(fp)
 
-#above = (x - aeps.loc[ari_ref].values[None, :] > 0).astype(int)
-#
-#uref = norm.ppf(1 - 1./ari_ref)
-#above_all = np.all(above > 0, axis=1)
-#th = rv.cdf(-uref * np.ones(nstations))
-#LOGGER.info(f"ALL freq = {above_all.sum() / nsamples:2.2e} / theory={th:2.2e}")
-#
-#above_any = np.any(above > 0, axis=1)
-#th = 1 - rv.cdf(uref * np.ones(nstations))
-#LOGGER.info(f"ANY freq = {above_any.sum() / nsamples:2.2e} / theory={th:2.2e}")
+LOGGER.info("MCMC plots")
+
+cols = df.columns.to_series()
+mosaic = [cols.filter(regex="ylocn\\[[1-2]\\]").tolist(),
+          cols.filter(regex="ylogscale\\[[1-2]\\]").tolist(),
+          cols.filter(regex="wlat_cens\\[[1-2]\\]").tolist(),
+          cols.filter(regex="wlat_miss\\[[1-2]\\]").tolist()]
+nrows = len(mosaic)
+ncols = len(mosaic[0])
+w, h = 6, 2
+plt.close("all")
+fig = plt.figure(figsize=(w * ncols, h * nrows),
+                 layout="constrained")
+axs = fig.subplot_mosaic(mosaic, sharex=True)
+for aname, ax in axs.items():
+    pname = aname
+    ddf = pd.pivot_table(df,
+                         index="iter__",
+                         columns="chain__",
+                         values=pname)
+    ddf.iloc[-200:, :3].plot(ax=ax, legend=False)
+
+    title = pname
+    ax.set_title(title, x=0.05, y=0.93,
+                 fontweight="bold",
+                 va="top", ha="left")
+
+fp = fimg / "mcmc_traces.png"
+fig.savefig(fp)
+
+plt.close("all")
+pnames = [m for mm in mosaic for m in mm]
+fig, ax = plt.subplots(figsize=(13, 13),
+                 layout="constrained")
+scatter_matrix(df.loc[:, pnames], diagonal="kde",
+               alpha=0.05, ax=ax)
+fp = fimg / "mcmc_corr.png"
+fig.savefig(fp)
+
 
 LOGGER.info("Frequency plots")
 smp = df.filter(regex="yrnd", axis=1)
 
 nplots = nstations
 w, h = 10, 4
+plt.close("all")
 fig, axs = plt.subplots(ncols=2, nrows=nplots,
                         figsize=(w, h * nplots),
                         layout="constrained")
@@ -168,4 +199,3 @@ fp = fimg / "ffa_plots.png"
 fig.savefig(fp)
 
 LOGGER.completed()
-

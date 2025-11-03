@@ -68,13 +68,13 @@ stan_seed = 5446
 source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
+basename = source_file.stem
 fout = froot / "outputs" / basename
 fout.mkdir(exist_ok=True, parents=True)
 
 # ----------------------------------------------------------------------
 # @Logging
 # ----------------------------------------------------------------------
-basename = source_file.stem
 flog = froot / "logs" / basename / f"{basename}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
 if flog.exists():
