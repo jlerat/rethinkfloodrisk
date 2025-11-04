@@ -35,7 +35,7 @@ from pyrethink import mv_censored_sampling
 parser = argparse.ArgumentParser(description="Fit copula model",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
-                    type=int, default=50000)
+                    type=int, default=10000)
 parser.add_argument("-d", "--debug", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-p", "--progress", help="Show progress",
@@ -95,16 +95,20 @@ if debug:
 LOGGER.info("Load data")
 stations = datahub.get_stations()
 
-truepeaks = datahub.get_truepeaks().drop("WATERYEAR", axis=1)
+potpeaks = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
 
 if debug:
-    truepeaks = truepeaks.iloc[:, :4]
+    potpeaks = potpeaks.iloc[:, :4]
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
 LOGGER.info("Configure stan sampler")
-sv = sample.StanSamplingMultivariate(truepeaks, pcensor=pcensor)
+LOGGER.info("\tnwarm    = {stan_nwarm}")
+LOGGER.info("\tnchains  = {stan_nchains}")
+LOGGER.info("\tnsamples = {stan_nsamples}")
+
+sv = sample.StanSamplingMultivariate(potpeaks, pcensor=pcensor)
 stan_data = sv.to_dict()
 stan_inits = sv.initial_parameters
 

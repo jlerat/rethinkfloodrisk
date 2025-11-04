@@ -2,34 +2,13 @@ import numpy as np
 from scipy.stats import norm
 
 from floodstan.data_processing import univariate2cases
-from floodstan.marginals import Gumbel
+from floodstan.marginals import GEV
 
 PCENSOR_DEFAULT = 0.3
 
 ETA_PRIOR_DEFAULT = 0.5
 
-SIGMA_PRIOR_LATENT_DEFAULT = 5.
-
-GUMBEL_MARGINAL = Gumbel()
-
-# TODO
-# Rewrite stan code to have
-# array[P] array[N] data_type -> 0=missing 1=cens 2=obs
-#
-# in data transform section:
-# array[P] Nmiss
-# array[P] Ncens
-# array[P] Nobs
-#
-# for(i in 1:N) {
-#   for(ivar in 1:P) {
-#     // Missing
-#     if(data_type[ivar][i] == 0) {
-#
-#     }
-#   }
-# }
-#
+MARGINAL = GEV()
 
 
 class StanSamplingMultivariate():
@@ -74,23 +53,21 @@ class StanSamplingMultivariate():
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
     def set_initial_parameters(self):
-        # Gumbel parameters and priors
+        # GEV parameters and priors
         P = self.data.shape[1]
 
         z = np.nan * np.zeros_like(self.data)
-        gparams = np.zeros((P, 2))
+        gparams = np.zeros((P, 3))
 
-        censors = self.censors
-        pcensors = np.zeros(P)
         for ivar in range(P):
             vect = self.data[:, ivar]
             iok = ~np.isnan(vect)
             vect = vect[iok]
-            GUMBEL_MARGINAL.fit_lh_moments(vect, eta=2)
-            gparams[ivar] = GUMBEL_MARGINAL.params[:2]
-            z[iok, ivar] = norm.ppf(GUMBEL_MARGINAL.cdf(vect))
-
-            pcensors[ivar] = GUMBEL_MARGINAL.cdf(censors[ivar])
+            MARGINAL.fit_lh_moments(vect, eta=2)
+            locn, logscale, shape1 = MARGINAL.params
+            shape1 = -1e-2  # To avoid boundary problems with GEV
+            gparams[ivar] = [locn, logscale, shape1]
+            z[iok, ivar] = norm.ppf(MARGINAL.cdf(vect))
 
         iall = np.all(~np.isnan(z), axis=1)
         cor = np.corrcoef(z[iall].T)
@@ -106,6 +83,7 @@ class StanSamplingMultivariate():
         self.initial_parameters = {
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
+            "yshape1": gparams[:, 2],
             "L_cor": L_cor,
             "wlat_cens": wlat_cens,
             "wlat_miss": wlat_miss
@@ -122,14 +100,16 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
-            "ylocn_prior": GUMBEL_MARGINAL.locn_prior.to_list(),
-            "ylogscale_prior": GUMBEL_MARGINAL.logscale_prior.to_list(),
-            "locn_lower": float(GUMBEL_MARGINAL.locn_prior.lower),
-            "locn_upper": float(GUMBEL_MARGINAL.locn_prior.upper),
-            "logscale_lower": float(GUMBEL_MARGINAL.logscale_prior.lower),
-            "logscale_upper": float(GUMBEL_MARGINAL.logscale_prior.upper),
+            "ylocn_prior": MARGINAL.locn_prior.to_list(),
+            "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
+            "yshape1_prior": MARGINAL.shape1_prior.to_list(),
+            "locn_lower": float(MARGINAL.locn_prior.lower),
+            "locn_upper": float(MARGINAL.locn_prior.upper),
+            "logscale_lower": float(MARGINAL.logscale_prior.lower),
+            "logscale_upper": float(MARGINAL.logscale_prior.upper),
+            "shape1_lower": float(MARGINAL.shape1_prior.lower),
+            "shape1_upper": float(MARGINAL.shape1_prior.upper),
             "censors": self.censors,
-            "eta_prior": ETA_PRIOR_DEFAULT,
-            "sigma_prior_latent": SIGMA_PRIOR_LATENT_DEFAULT
+            "eta_prior": ETA_PRIOR_DEFAULT
         }
         return dd

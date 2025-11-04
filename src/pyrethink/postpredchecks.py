@@ -6,7 +6,7 @@ from scipy.stats import norm
 from scipy.stats import kendalltau
 
 from floodstan.marginals import lh_moments
-from floodstan.marginals import Gumbel
+from floodstan.marginals import GEV
 
 
 def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
@@ -45,6 +45,7 @@ def bivariate_dependence_statistics(data):
 def generate_samples(params, nval):
     ylocn = params.filter(regex="ylocn").values
     ylogscale = params.filter(regex="ylogscale").values
+    yshape1 = params.filter(regex="yshape1").values
 
     P = len(ylocn)
     L_cor = params.filter(regex="L_cor").values.reshape((P, P)).T
@@ -52,12 +53,12 @@ def generate_samples(params, nval):
 
     z = np.random.multivariate_normal(mean=np.zeros(P), cov=cor,
                                       size=nval)
-    gum = Gumbel()
+    ge = GEV()
     y = np.zeros_like(z)
     for i in range(P):
-        gum.params = [ylocn[i], ylogscale[i], 0.]
+        ge.params = [ylocn[i], ylogscale[i], yshape1[i]]
         u = norm.cdf(z[:, i])
-        y[:, i] = gum.ppf(u)
+        y[:, i] = ge.ppf(u)
 
     return y
 

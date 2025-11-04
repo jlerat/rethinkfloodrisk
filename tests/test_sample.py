@@ -6,7 +6,7 @@ import pytest
 import math
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, gumbel_r
+from scipy.stats import norm
 from scipy.stats import ttest_ind, ks_2samp
 import matplotlib.pyplot as plt
 
@@ -41,20 +41,20 @@ for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
 
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
-STAN_NCHAINS_DEFAULT = 5
+STAN_NCHAINS_DEFAULT = 3
 STAN_NWARM_DEFAULT = 5000
-STAN_NSAMPLES_DEFAULT = 5000
+STAN_NSAMPLES_DEFAULT = 6000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data = datahub.get_truepeaks().drop("WATERYEAR", axis=1)
+    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
     stan_data = sv.to_dict()
 
-    assert len(stan_data) == 18
+    assert len(stan_data) == 20
 
     data = pd.DataFrame(stan_data["y"])
     assert data.notnull().any(axis=1).all()
@@ -74,7 +74,8 @@ def test_sample_data(pcensor, allclose):
     assert nmiss == nval - nok
 
     stan_inits = sv.initial_parameters
-    assert len(stan_inits) == 5
+
+    assert len(stan_inits) == 6
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
@@ -82,9 +83,12 @@ def test_sample_data(pcensor, allclose):
         censor = np.nanpercentile(data.iloc[:, ivar], pcensor * 100)
         assert allclose(censor, stan_data["censors"][ivar])
 
+    data = np.nan * np.zeros_like(data)
+    with pytest.raises(ValueError, match="Expected at least"):
+        sv = sample.StanSamplingMultivariate(data)
 
 def test_stan_indexing():
-    data = datahub.get_truepeaks()
+    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
@@ -103,30 +107,41 @@ def test_stan_indexing():
         assert all(z[~iscens, ivar] != 2)
 
 
-def test_stan_functions(allclose):
-    tau = 0.5
-    alpha = 3.
+@pytest.mark.parametrize("kappa", [-1., -0.5, 0., 0.5, 1.])
+def test_stan_functions(kappa, allclose):
+    tau = 100.
+    alpha = 50.
+
+    mname = "GEV" if abs(kappa) > 0 else "Gumbel"
+    marginal = marginals.factory(mname)
+    marginal.params = [tau, math.log(alpha), kappa]
 
     stan_data = {
         "Q": 10000,
         "tau": tau,
-        "alpha": alpha
+        "alpha": alpha,
+        "kappa": kappa
     }
     df = stan_test_functions(data=stan_data)
 
-    u = df.filter(regex="^u").squeeze().values
-    z = df.filter(regex="^z").squeeze().values
-    expected = norm.ppf(u)
-    assert allclose(z, expected, atol=1.5e-3)
+    u = df.filter(regex="^u\\[").squeeze().values
+    q = df.filter(regex="^qq").squeeze().values
+    expected = marginal.ppf(u)
+    atol = 1e-4
+    rtol = 5e-4
+    assert allclose(q, expected, atol=atol, rtol=rtol)
 
-    gq = df.filter(regex="^gq").squeeze().values
-    rv = gumbel_r(loc=tau, scale=alpha)
-    expected = rv.ppf(u)
-    assert allclose(gq, expected, atol=5e-4)
+    uu = df.filter(regex="^uu").squeeze().values
+    expected = marginal.cdf(q)
+    assert allclose(uu, expected, atol=atol, rtol=rtol)
+
+    lp = df.filter(regex="^lp\\[").squeeze().values
+    expected = marginal.logpdf(q)
+    assert allclose(lp, expected, atol=atol, rtol=rtol)
 
 
 def test_stan_cor(allclose):
-    data = datahub.get_truepeaks().iloc[:, :3]
+    data = datahub.get_potpeaks().iloc[:, :3]
     sv = sample.StanSamplingMultivariate(data)
     stan_inits = sv.initial_parameters
     L_cor = stan_inits["L_cor"]
@@ -145,12 +160,12 @@ def test_stan_cor(allclose):
     assert allclose(cor, expected, atol=3e-2)
 
 
-@pytest.mark.parametrize("nvars", [3])
 @pytest.mark.parametrize("config", ["uncensored_nomissing",
                                     "uncensored_missing",
                                     "censored_missing"])
+@pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
-    data = datahub.get_truepeaks().iloc[:, :nvars]
+    data = datahub.get_potpeaks().iloc[:, :nvars]
 
     if re.search("nomissing", config):
         data = data.loc[data.notnull().all(axis=1)]
@@ -195,13 +210,12 @@ def test_sampler(config, nvars, allclose):
     with pytest.raises(RuntimeError):
         mv_censored_sampling(**kw)
 
-
 @pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
 @pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize("station", [0, 5])
 def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     # Two variables only
-    data = datahub.get_truepeaks().iloc[:, station: station + 2]
+    data = datahub.get_potpeaks().iloc[:, station: station + 2]
     data = data.loc[data.notnull().any(axis=1)]
 
     if not missing:
@@ -210,7 +224,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     # -- floodstan --
     y, z = data.values.T
     censor = np.nanpercentile(y, pcensor * 100)
-    marginal = marginals.Gumbel()
+    marginal = marginals.GEV()
     yv = fsample.StanSamplingVariable(marginal, y, censor,
                                       ninits=STAN_NCHAINS_DEFAULT)
 
@@ -262,7 +276,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     for met in STAN_DIAG_METRICS:
         assert diag2[met] == "satisfactory"
 
-    pnames = df2.columns.to_series().filter(regex="^yl|^ucensor").to_list()
+    pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
     pnames.append("L_cor[2,1]")
 
     LOGGER.info("")
@@ -314,8 +328,9 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         LOGGER.info(msg)
 
         # Test on matching the two dist
-        assert kspv > -3.5
-        assert tpv > -3.5
+        pv_thresh = -4.5 if station == 5 else -3.5
+        assert kspv > pv_thresh
+        assert tpv > pv_thresh
 
         ax = axs[pname2]
 

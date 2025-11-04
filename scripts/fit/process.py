@@ -34,7 +34,7 @@ from pyrethink import datahub
 # ----------------------------------------------------------------------
 marginal_name = "Gumbel"
 
-design_aris = [5, 10, 20, 50, 100, 500]
+design_aris = np.logspace(math.log10(5), 3., 30)
 
 ari_ref = 100
 
@@ -60,8 +60,9 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 stations = datahub.get_stations()
-truepeaks = datahub.get_truepeaks().filter(regex="^2", axis=1)
-nstations = truepeaks.shape[1]
+potpeaks = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
+potpeaks.columns = potpeaks.columns.to_series().str.replace("_PEAK", "")
+nstations = potpeaks.shape[1]
 
 fs = fout / "copulafit_samples.zip"
 df = pd.read_csv(fs, skiprows=15)
@@ -83,7 +84,7 @@ fig, axs = plt.subplots(ncols=nc, nrows=nr,
                         layout="constrained")
 for iplot, (i1, i2) in enumerate(comb(np.arange(nstations), 2)):
     ax = axs.flat[iplot]
-    xy = truepeaks.iloc[:, [i1, i2]]
+    xy = potpeaks.iloc[:, [i1, i2]]
     xy = xy.loc[xy.notnull().all(axis=1)].values
     putils.bivarnplot(ax, xy)
 
@@ -93,8 +94,8 @@ for iplot, (i1, i2) in enumerate(comb(np.arange(nstations), 2)):
     if iplot < nc * (nr - 1):
         ax.set_xticks([])
 
-    txt = f"X={truepeaks.columns[i1]}\n"\
-          + f"Y={truepeaks.columns[i2]}"
+    txt = f"X={potpeaks.columns[i1]}\n"\
+          + f"Y={potpeaks.columns[i2]}"
     ax.text(0.98, 0.02, txt,
             va="bottom", ha="right",
             transform=ax.transAxes,
@@ -105,7 +106,7 @@ axs.flat[-2].axis("off")
 
 ax = axs.flat[-1]
 rho = 0.8
-xy = mvn(cov=[[1, rho], [rho, 1]]).rvs(size=len(truepeaks))
+xy = mvn(cov=[[1, rho], [rho, 1]]).rvs(size=len(potpeaks))
 putils.bivarnplot(ax, xy)
 ax.set(xlabel="", ylabel="", yticks=[])
 txt = f"Random normal $ρ$={rho:0.2f}"
@@ -121,6 +122,7 @@ LOGGER.info("MCMC plots")
 cols = df.columns.to_series()
 mosaic = [cols.filter(regex="ylocn\\[[1-2]\\]").tolist(),
           cols.filter(regex="ylogscale\\[[1-2]\\]").tolist(),
+          cols.filter(regex="yshape1\\[[1-2]\\]").tolist(),
           cols.filter(regex="wlat_cens\\[[1-2]\\]").tolist(),
           cols.filter(regex="wlat_miss\\[[1-2]\\]").tolist()]
 nrows = len(mosaic)
@@ -167,10 +169,10 @@ fig, axs = plt.subplots(ncols=2, nrows=nplots,
                         layout="constrained")
 for ista in range(nplots):
     ax = axs[ista, 0]
-    xx = truepeaks.iloc[:, ista].values
+    xx = potpeaks.iloc[:, ista].values
     ax.plot(xx)
 
-    stationid = int(truepeaks.columns[ista])
+    stationid = int(potpeaks.columns[ista])
     name = stations.NAME[stationid]
     title = f"{name} - {stationid}"
     ax.set_title(title, x=0.01, y=0.95, fontweight="bold",

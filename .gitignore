@@ -11,4 +11,9 @@ outputs/
 *.log
 *.png
 tests/sampling/*
+src/pyrethink/stan/mv_censored
+src/pyrethink/stan/test_cor
+src/pyrethink/stan/test_functions
+src/pyrethink/stan/test_indexing
+src/pyrethink/stan/test_mv
 
