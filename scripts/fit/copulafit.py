@@ -95,7 +95,7 @@ if debug:
 LOGGER.info("Load data")
 stations = datahub.get_stations()
 
-truepeaks = datahub.get_truepeaks().drop("WATERYEAR", axis=1)
+truepeaks = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
 
 if debug:
     truepeaks = truepeaks.iloc[:, :4]
@@ -104,6 +104,10 @@ if debug:
 # @Process
 # ----------------------------------------------------------------------
 LOGGER.info("Configure stan sampler")
+LOGGER.info("nwarm    = {stan_nwarm}", ntab=1)
+LOGGER.info("nchains  = {stan_nchains}", ntab=1)
+LOGGER.info("nsamples = {stan_nsamples}", ntab=1)
+
 sv = sample.StanSamplingMultivariate(truepeaks, pcensor=pcensor)
 stan_data = sv.to_dict()
 stan_inits = sv.initial_parameters
