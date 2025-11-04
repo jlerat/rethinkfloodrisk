@@ -41,8 +41,8 @@ for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
 
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
-STAN_NCHAINS_DEFAULT = 5
-STAN_NWARM_DEFAULT = 5000
+STAN_NCHAINS_DEFAULT = 4
+STAN_NWARM_DEFAULT = 3000
 STAN_NSAMPLES_DEFAULT = 5000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]

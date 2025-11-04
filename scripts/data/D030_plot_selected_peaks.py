@@ -58,7 +58,7 @@ froot = source_file.parent.parent.parent
 
 fdata = froot / "data"
 
-fimg = froot / "images" / "truepeaks"
+fimg = froot / "images" / "potpeaks"
 fimg.mkdir(exist_ok=True, parents=True)
 
 # ----------------------------------------------------------------------
@@ -71,10 +71,11 @@ LOGGER = iutils.get_logger(basename)
 # @Get data
 # ----------------------------------------------------------------------
 stations = datahub.get_stations()
-truepeaks = datahub.get_truepeaks()
+potpeaks = datahub.get_potpeaks()
+qthresh = datahub.get_potpeaks_thresh()
 
 if debug:
-    truepeaks = truepeaks.loc["1974"]
+    potpeaks = potpeaks.loc["1974"]
 
 daily = {}
 
@@ -90,20 +91,20 @@ daily = pd.DataFrame(daily)
 # ----------------------------------------------------------------------
 ncols = 3
 nrows = 3
-stationids = truepeaks.columns.to_series()\
+stationids = potpeaks.columns.to_series()\
     .filter(regex="_PEAK").str.replace("_PEAK", "").astype(int).tolist()
 stationids = stationids + ["."] * (ncols * nrows - len(stationids))
 mosaic = [[stationids[ncols * irow + icol] for icol in range(ncols)]
           for irow in range(nrows)]
 
 Tqt = 5
-quantiles = truepeaks.filter(regex="_PEAK").quantile(1 - 1/Tqt)
+quantiles = potpeaks.filter(regex="_PEAK").quantile(1 - 1/Tqt)
 quantiles.index = quantiles.index.to_series().str.replace("_PEAK", "")
 
-fpdf = fimg / "truepeaks.pdf"
+fpdf = fimg / "potpeaks.pdf"
 with PdfPages(fpdf) as pdf:
-    for ievent, (day, event) in enumerate(truepeaks.iterrows()):
-        LOGGER.info(f"Event {ievent + 1} / {truepeaks.shape[0]}")
+    for ievent, (day, event) in enumerate(potpeaks.iterrows()):
+        LOGGER.info(f"Event {ievent + 1} / {potpeaks.shape[0]}")
         plt.close("all")
         fig = plt.figure(figsize=(axwidth * ncols, axheight * nrows),
                          layout="constrained")
@@ -133,15 +134,17 @@ with PdfPages(fpdf) as pdf:
                 ax.set(xticks=[], yticks=[])
                 continue
 
-            se_plot.plot(ax=ax)
+            se_plot.plot(ax=ax, label="")
 
             y0, y1 = ax.get_ylim()
             y0 = 0
-            y1 = max(y1, quantiles[str(stationid)])
+            qq = quantiles[str(stationid)]
+            qt = qthresh[str(stationid)]
+            y1 = np.max([y1, qq * 1.1, qt * 1.1])
 
             sem = se.loc[[se.idxmax()]]
             ax.plot([sem.index] * 2, [y0, y1], "--",
-                    color="tab:red", label="Qmax")
+                    color="tab:red", label="Qmax day")
 
             v1 = sem.squeeze()
             v2 = event[f"{stationid}_PEAK"]
@@ -149,9 +152,15 @@ with PdfPages(fpdf) as pdf:
                 line = se * 0 + v2
                 line.plot(ax=ax, color="purple",
                           label="Qmax event")
-                ax.legend()
+
+            line = se_plot * 0 + qq
+            line.plot(ax=ax, color="0.5", lw=0.9, label=f"Quantile {Tqt}")
+
+            line = se_plot * 0 + qt
+            line.plot(ax=ax, color="0.5", lw=0.9, ls="--", label=f"POT thresh")
 
             ax.set(xlabel="", ylim=(y0, y1))
+            ax.legend(fontsize="small", framealpha=0.)
 
         ftitle = f"{day.strftime('%b %y')} flood"
         fig.suptitle(ftitle, fontweight="bold", fontsize="large")
