@@ -104,9 +104,9 @@ if debug:
 # @Process
 # ----------------------------------------------------------------------
 LOGGER.info("Configure stan sampler")
-LOGGER.info("nwarm    = {stan_nwarm}", ntab=1)
-LOGGER.info("nchains  = {stan_nchains}", ntab=1)
-LOGGER.info("nsamples = {stan_nsamples}", ntab=1)
+LOGGER.info("\tnwarm    = {stan_nwarm}")
+LOGGER.info("\tnchains  = {stan_nchains}")
+LOGGER.info("\tnsamples = {stan_nsamples}")
 
 sv = sample.StanSamplingMultivariate(potpeaks, pcensor=pcensor)
 stan_data = sv.to_dict()
