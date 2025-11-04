@@ -47,7 +47,8 @@ def get_potpeaks():
 def get_potpeaks_thresh():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     _, comments = csv.read_csv(ft, index_col="DAY", parse_dates=True)
-    qthresh = {re.sub(".*_|\\[.*", "", key): float(val) for key, val in comments.items()
+    qthresh = {re.sub(".*_|\\[.*", "", key): float(val)
+               for key, val in comments.items()
                if re.search("^pot", key)}
 
     qthresh = pd.Series(qthresh)

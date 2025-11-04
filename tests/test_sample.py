@@ -329,7 +329,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         LOGGER.info(msg)
 
         # Test on matching the two dist
-        pv_thresh = -4.5 if station==5 else -3.5
+        pv_thresh = -4.5 if station == 5 else -3.5
         assert kspv > pv_thresh
         assert tpv > pv_thresh
 
