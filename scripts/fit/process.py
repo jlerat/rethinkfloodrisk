@@ -60,7 +60,8 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 stations = datahub.get_stations()
-truepeaks = datahub.get_truepeaks().filter(regex="^2", axis=1)
+truepeaks = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
+truepeaks.columns = truepeaks.columns.to_series().str.replace("_PEAK", "")
 nstations = truepeaks.shape[1]
 
 fs = fout / "copulafit_samples.zip"
@@ -121,6 +122,7 @@ LOGGER.info("MCMC plots")
 cols = df.columns.to_series()
 mosaic = [cols.filter(regex="ylocn\\[[1-2]\\]").tolist(),
           cols.filter(regex="ylogscale\\[[1-2]\\]").tolist(),
+          cols.filter(regex="yshape1\\[[1-2]\\]").tolist(),
           cols.filter(regex="wlat_cens\\[[1-2]\\]").tolist(),
           cols.filter(regex="wlat_miss\\[[1-2]\\]").tolist()]
 nrows = len(mosaic)
