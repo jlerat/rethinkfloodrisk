@@ -41,9 +41,9 @@ for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
 
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
 
-STAN_NCHAINS_DEFAULT = 4
-STAN_NWARM_DEFAULT = 3000
-STAN_NSAMPLES_DEFAULT = 5000
+STAN_NCHAINS_DEFAULT = 3
+STAN_NWARM_DEFAULT = 5000
+STAN_NSAMPLES_DEFAULT = 6000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
@@ -160,10 +160,10 @@ def test_stan_cor(allclose):
     assert allclose(cor, expected, atol=3e-2)
 
 
-@pytest.mark.parametrize("nvars", [3])
 @pytest.mark.parametrize("config", ["uncensored_nomissing",
                                     "uncensored_missing",
                                     "censored_missing"])
+@pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
     data = datahub.get_potpeaks().iloc[:, :nvars]
 
@@ -209,7 +209,6 @@ def test_sampler(config, nvars, allclose):
     kw["data"]["Nmiss"] += 1
     with pytest.raises(RuntimeError):
         mv_censored_sampling(**kw)
-
 
 @pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
 @pytest.mark.parametrize("missing", [False, True])
