@@ -11,4 +11,5 @@ def test_get_stations():
 
 def test_truepeaks():
     df = datahub.get_truepeaks()
+    df = df.filter(regex="_PEAK", axis=1)
     assert (df.min() > 0).all()

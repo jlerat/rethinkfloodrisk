@@ -50,7 +50,7 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data = datahub.get_truepeaks().drop("WATERYEAR", axis=1)
+    data = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
     stan_data = sv.to_dict()
 
@@ -88,7 +88,7 @@ def test_sample_data(pcensor, allclose):
         sv = sample.StanSamplingMultivariate(data)
 
 def test_stan_indexing():
-    data = datahub.get_truepeaks()
+    data = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
