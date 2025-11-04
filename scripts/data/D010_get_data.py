@@ -46,7 +46,7 @@ version = datahub.DATA_VERSION
 overwrite = args.overwrite
 debug = args.debug
 
-col_obs = "STREAMFLOW_DAILYMAX_9AM[m3.s-1]"
+col_max = "STREAMFLOW_DAILYMAX_9AM[m3.s-1]"
 
 duration_min = 30
 
@@ -123,18 +123,18 @@ with Dataset(fncin, "r") as ncin:
         LOGGER.info("Processing")
         daily, _ = svarin.read_data_from_single_station(stationid)
 
-        qobs = daily.loc[:, col_obs]
-        start, end = qobs.index[qobs.notnull()][[0, -1]]
-        qobs = qobs[start:end]
+        qmax = daily.loc[:, col_max]
+        start, end = qmax.index[qmax.notnull()][[0, -1]]
+        qmax = qmax[start:end]
 
         # qaqc
-        values = np.ascontiguousarray(qobs.values).astype(np.float64)
+        values = np.ascontiguousarray(qmax.values).astype(np.float64)
         islin = qualitycontrol.islinear(values)
-        qobs[islin > 0] = np.nan
+        qmax[islin > 0] = np.nan
 
         # ams
         wys = water_year_start
-        ams = annual_maximum_series.compute_ams(qobs,
+        ams = annual_maximum_series.compute_ams(qmax,
                                                 water_year_start=wys)
 
         drop = ["EVENTID", "NVALYEAR", "WATER_YEAR", "WATER_YEAR_END"]
@@ -152,11 +152,12 @@ with Dataset(fncin, "r") as ncin:
                       write_index=True,
                       lineterminator="\n")
 
-        qobs = pd.DataFrame(qobs)
-        qobs.index.name = "DAY"
-        comment = f"Daily streamflow maximum for station {stationid}."
+        df = pd.DataFrame({"STREAMFLOW_MAX[m3.s-1]": qmax})
+        df.index.name = "DAY"
+
+        comment = f"Daily streamflow maximum and mean for station {stationid}."
         fq = fdata / "dailymax" / f"dailymax_streamflow_{stationid}_v{version}.csv"
-        csv.write_csv(qobs, fq, comment,
+        csv.write_csv(df, fq, comment,
                       source_file, compress=False,
                       write_sys_info=False,
                       write_index=True,

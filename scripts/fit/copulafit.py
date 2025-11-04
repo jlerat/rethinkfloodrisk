@@ -35,7 +35,7 @@ from pyrethink import mv_censored_sampling
 parser = argparse.ArgumentParser(description="Fit copula model",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
-                    type=int, default=50000)
+                    type=int, default=10000)
 parser.add_argument("-d", "--debug", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-p", "--progress", help="Show progress",
