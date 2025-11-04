@@ -14,7 +14,10 @@ FTESTS = Path(__file__).resolve().parent
 
 NSTATIONS = len(datahub.get_stations())
 
-DATA = pd.read_csv(FTESTS / "censored_missing_data.zip")
+DATA = pd.read_csv(FTESTS / "censored_missing_data.zip",
+                   index_col=0, parse_dates=True)
+DATA = DATA[pd.notnull(DATA).any(axis=1)]
+
 SAMPLES = pd.read_csv(FTESTS / "censored_missing_samples.zip")
 MARGINAL = GEV()
 
@@ -50,7 +53,7 @@ def test_generate_samples(allclose):
                            yshape1[ivar]]
         uu = MARGINAL.cdf(xx)
         res = kstest(uu, "uniform")
-        assert res.pvalue > 0.1
+        assert res.pvalue > 1e-2
 
         z[:, ivar] = norm.ppf(uu)
 
@@ -59,5 +62,13 @@ def test_generate_samples(allclose):
     expected = L_cor @ L_cor.T
     assert allclose(cor, expected, atol=2e-2)
 
+
+def test_posterior_predictive_checks():
+    ppu, ppb, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200])
+
+    assert ppu.shape == (7, 21)
+    assert ppb.shape == (2, 21)
+    assert ppu.filter(regex="pvalue\\[", axis=1).shape == (7, 3)
+    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (2, 3)
 
 

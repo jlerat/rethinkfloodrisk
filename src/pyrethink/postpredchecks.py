@@ -91,45 +91,72 @@ def posterior_predictive_checks(yobs, params):
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
-                             for v in yobs.T])
-    P = yobs.shape[1]
-    univ_obs.columns = [f"univ_{i}" for i in range(P)]
+                             for v in yobs.T]).T
+    nvar = yobs.shape[1]
+    univ_obs.columns = [f"univ[{ivar + 1}]" for ivar in range(nvar)]
 
     biv_obs = []
-    for i1, i2 in combs(range(P), 2):
+    for i1, i2 in combs(range(nvar), 2):
         m = bivariate_dependence_statistics(yobs[:, [i1, i2]])
-        m.name = "bivariate_{i1}_{i2}"
+        m.name = f"bivariate[{i1 + 1},{i2 + 1}]"
         biv_obs.append(m)
-    biv_obs = pd.DataFrame(biv_obs)
+
+    biv_obs = pd.DataFrame(biv_obs).T
 
     # Loop over params
     nval = len(yobs)
-    univ_sim = []
-    biv_sim = []
+    univ_sim = {ivar: [] for ivar in range(nvar)}
+    biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nvar), 2)}
+
     for iparam, param in params.iterrows():
         ysim = generate_samples(param, nval)
 
-        univ = pd.DataFrame([univariate_statistics(v)
-                             for v in ysim.T])
-        univ_sim.append(univ)
+        for ivar in range(nvar):
+            un = univariate_statistics(ysim[:, ivar])
+            univ_sim[ivar].append(un)
 
-        biv = []
-        for i1, i2 in combs(range(P), 2):
-            m = bivariate_dependence_statistics(yobs[:, [i1, i2]])
-            m.name = "bivariate_{i1}_{i2}"
-            biv.append(m)
-        biv = pd.DataFrame(biv)
-        biv_sim.append(biv)
+        for i1, i2 in combs(range(nvar), 2):
+            bi = bivariate_dependence_statistics(ysim[:, [i1, i2]])
+            biv_sim[(i1, i2)].append(bi)
 
-    # pcheck_y = compute_predictive_checks(univy_obs, univy_sim)
-    # pcheck_z = compute_predictive_checks(univz_obs, univz_sim)
-    # pcheck_dep = compute_predictive_checks(dep_obs, dep_sim)
+    # Compute predictiive checks
+    # .. univariate
+    pcheck_univ = []
+    for ivar in range(nvar):
+        # Reformat univ sim stats
+        usim = pd.concat(univ_sim[ivar], axis=1).T
+        univ_sim[ivar] = usim
 
+        # Get univ obs stats
+        uobs = univ_obs.loc[:, f"univ[{ivar + 1}]"]
+
+        # Compute pred check
+        pc = compute_predictive_checks(uobs, usim)
+        pc.columns = [f"{cn}[{ivar + 1}]" for cn in pc.columns]
+        pcheck_univ.append(pc)
+
+    pcheck_univ = pd.concat(pcheck_univ, axis=1)
+
+    # .. bivariate
+    pcheck_biv = []
+    for i1, i2 in combs(range(nvar), 2):
+        # Reformat biv sim stats
+        bsim = pd.concat(biv_sim[(i1, i2)], axis=1).T
+        biv_sim[(i1, i2)] = bsim
+
+        # Get biv obs stats
+        bobs = biv_obs.loc[:, f"bivariate[{i1 + 1},{i2 + 1}]"]
+
+        # Compute pred check
+        pc = compute_predictive_checks(bobs, bsim)
+        pc.columns = [f"{cn}[{i1 + 1},{i2 + 1}]" for cn in pc.columns]
+        pcheck_biv.append(pc)
+
+    pcheck_biv = pd.concat(pcheck_biv, axis=1)
     data = {
         "univ_obs": univ_obs,
         "univ_sim": univ_sim,
         "biv_obs": biv_obs,
         "biv_sim": biv_sim
         }
-
-    return data
+    return pcheck_univ, pcheck_biv, data
