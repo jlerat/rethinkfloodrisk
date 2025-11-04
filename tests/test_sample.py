@@ -50,7 +50,7 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
+    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
     stan_data = sv.to_dict()
 
@@ -88,7 +88,7 @@ def test_sample_data(pcensor, allclose):
         sv = sample.StanSamplingMultivariate(data)
 
 def test_stan_indexing():
-    data = datahub.get_truepeaks().filter(regex="_PEAK", axis=1)
+    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
@@ -141,7 +141,7 @@ def test_stan_functions(kappa, allclose):
 
 
 def test_stan_cor(allclose):
-    data = datahub.get_truepeaks().iloc[:, :3]
+    data = datahub.get_potpeaks().iloc[:, :3]
     sv = sample.StanSamplingMultivariate(data)
     stan_inits = sv.initial_parameters
     L_cor = stan_inits["L_cor"]
@@ -165,7 +165,7 @@ def test_stan_cor(allclose):
                                     "uncensored_missing",
                                     "censored_missing"])
 def test_sampler(config, nvars, allclose):
-    data = datahub.get_truepeaks().iloc[:, :nvars]
+    data = datahub.get_potpeaks().iloc[:, :nvars]
 
     if re.search("nomissing", config):
         data = data.loc[data.notnull().all(axis=1)]
@@ -216,7 +216,7 @@ def test_sampler(config, nvars, allclose):
 @pytest.mark.parametrize("station", [0, 5])
 def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     # Two variables only
-    data = datahub.get_truepeaks().iloc[:, station: station + 2]
+    data = datahub.get_potpeaks().iloc[:, station: station + 2]
     data = data.loc[data.notnull().any(axis=1)]
 
     if not missing:
