@@ -86,7 +86,9 @@ def compute_predictive_checks(metric_obs, metric_sim):
     return pd.DataFrame(pchecks)
 
 
-def posterior_predictive_checks(yobs, params):
+def posterior_predictive_checks(yobs, params,
+                                logger=None,
+                                iterlog=1000):
     yobs = np.array(yobs)
 
     # Compute obs
@@ -108,7 +110,11 @@ def posterior_predictive_checks(yobs, params):
     univ_sim = {ivar: [] for ivar in range(nvar)}
     biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nvar), 2)}
 
-    for iparam, param in params.iterrows():
+    for isample, param in params.iterrows():
+        if logger is not None and isample % iterlog == 0:
+            msg = f"Processing param {isample + 1:5d} / {nsamples}."
+            logger.info(msg)
+
         ysim = generate_samples(param, nval)
 
         for ivar in range(nvar):

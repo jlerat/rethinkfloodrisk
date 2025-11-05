@@ -12,7 +12,9 @@ MARGINAL = GEV()
 
 
 def ffa_report(params,
-               design_eris=DESIGN_ARIS):
+               design_eris=DESIGN_ARIS,
+               logger=None,
+               iterlog=1000):
     """ Generate report variables.
 
     Parameters
@@ -21,6 +23,8 @@ def ffa_report(params,
         List of parameter sets
     design_eris : list
         List of design flood event return interval (eri) to be computed.
+    logger : Logger
+        Logger object.
 
     Returns
     -------
@@ -88,6 +92,10 @@ def ffa_report(params,
     # Loop through parameters
     for ivar in range(nvar):
         for isample in range(nsamples):
+            if logger is not None and isample % iterlog == 0:
+                msg = f"Variable {ivar + 1:2d} / processing "\
+                      + f"param {isample + 1:5d} / {nsamples}."
+                logger.info(msg)
             # .. set parameters
             try:
                 for pname in PARAMETERS:
