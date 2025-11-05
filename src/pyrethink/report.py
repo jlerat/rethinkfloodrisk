@@ -168,7 +168,8 @@ def ffa_report(params,
         report_stat.loc[:, cn] = np.nan
 
     for eri, qp, qm in zip(design_eris, design_post, design_meanp):
-        idx = [f"DESIGN_ERI{eri}[{ivar + 1}]" for ivar in range(nvar)]
+        idx = [re.sub("\\.0", "", f"DESIGN_ERI{eri}[{ivar + 1}]")
+               for ivar in range(nvar)]
         report_stat.loc[idx, cnp] = qp
         report_stat.loc[idx, cnm] = qm
 
