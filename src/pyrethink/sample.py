@@ -1,3 +1,4 @@
+from itertools import combinations_with_replacement as combsr
 import numpy as np
 from scipy.stats import norm
 
@@ -69,8 +70,26 @@ class StanSamplingMultivariate():
             gparams[ivar] = [locn, logscale, shape1]
             z[iok, ivar] = norm.ppf(MARGINAL.cdf(vect))
 
-        iall = np.all(~np.isnan(z), axis=1)
-        cor = np.corrcoef(z[iall].T)
+        # Compute pairwise covariance matrix
+        cov = np.eye(P)
+        for i1, i2 in combsr(range(P), 2):
+            z12 = z[:, [i1, i2]]
+            iok = np.all(~np.isnan(z12), axis=1)
+            co = np.cov(z12[iok].T)[0, 1]
+            cov[i1, i2] = co
+            cov[i2, i1] = co
+
+        # Modify covariance matrix
+        # to make sure it's positive definite
+        eig, M = np.linalg.eig(cov)
+        eig = np.maximum(eig, eig.max() * 1e-3)
+        cov = M @ np.diag(eig) @ M.T
+
+        # Compute correlation matrix
+        sigs = np.sqrt(np.diag(cov))[:, None]
+        cor = (1. / sigs) * cov * (1. / sigs.T)
+
+        # Compute cholesky decomposition
         L_cor = np.linalg.cholesky(cor)
 
         # latent variables

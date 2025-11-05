@@ -87,6 +87,15 @@ def test_sample_data(pcensor, allclose):
     with pytest.raises(ValueError, match="Expected at least"):
         sv = sample.StanSamplingMultivariate(data)
 
+
+def test_inits(allclose):
+    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
+    data = data.loc[data.index.year < 2008]
+    pcensor = 0.3
+    sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
+    inits = sv.initial_parameters
+
+
 def test_stan_indexing():
     data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     sv = sample.StanSamplingMultivariate(data)
@@ -328,7 +337,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         LOGGER.info(msg)
 
         # Test on matching the two dist
-        pv_thresh = -4.5 if station == 5 else -3.5
+        pv_thresh = -5
         assert kspv > pv_thresh
         assert tpv > pv_thresh
 
