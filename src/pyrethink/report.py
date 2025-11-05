@@ -93,7 +93,7 @@ def ffa_report(params,
     for ivar in range(nvar):
         for isample in range(nsamples):
             if logger is not None and isample % iterlog == 0:
-                msg = f"Variable {ivar + 1:2d} / processing "\
+                msg = f"[ffa_report] variable {ivar + 1:2d} / processing "\
                       + f"param {isample + 1:5d} / {nsamples}."
                 logger.info(msg)
             # .. set parameters

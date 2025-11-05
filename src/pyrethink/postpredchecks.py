@@ -90,6 +90,7 @@ def posterior_predictive_checks(yobs, params,
                                 logger=None,
                                 iterlog=1000):
     yobs = np.array(yobs)
+    nsamples = len(params)
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
@@ -112,7 +113,7 @@ def posterior_predictive_checks(yobs, params,
 
     for isample, param in params.iterrows():
         if logger is not None and isample % iterlog == 0:
-            msg = f"Processing param {isample + 1:5d} / {nsamples}."
+            msg = f"[postpred] processing param {isample + 1:5d} / {nsamples}."
             logger.info(msg)
 
         ysim = generate_samples(param, nval)
