@@ -177,5 +177,5 @@ for key, val in stan_inits.items():
 with fi.open("w") as fo:
     json.dump(stan_inits, fo, indent=4)
 
-LOGGER.info("Process completed")
+LOGGER.completed()
 
