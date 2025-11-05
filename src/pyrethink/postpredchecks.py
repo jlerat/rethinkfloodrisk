@@ -88,7 +88,7 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 def posterior_predictive_checks(yobs, params,
                                 logger=None,
-                                iterlog=1000):
+                                iterlog=500):
     yobs = np.array(yobs)
     nsamples = len(params)
 

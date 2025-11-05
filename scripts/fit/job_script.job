@@ -2,7 +2,6 @@
 
 #SBATCH --account=OD-228777
 #SBATCH --time=00:59:00
-#SBATCH --array=0-11
 #SBATCH --ntasks=1
 #SBATCH --mem=5gb
 #SBATCH --output=logs/%x/%x_TASK%a_JOB%A.out
