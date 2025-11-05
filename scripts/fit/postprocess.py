@@ -22,6 +22,10 @@ from hydrodiy.io import csv, iutils
 from pyrethink import report
 from pyrethink import postpredchecks as ppc
 
+import importlib
+importlib.reload(report)
+importlib.reload(ppc)
+
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
@@ -54,7 +58,6 @@ flog.parent.mkdir(exist_ok=True, parents=True)
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
 LOGGER.log_dict(vars(args), "Command line arguments")
-LOGGER = iutils.get_logger(basename)
 
 if taskid < 0:
     fout = froot / "logs" / "copulafit" / "outputs"
@@ -77,7 +80,8 @@ yobs = np.array(stan_data["y"])
 # ----------------------------------------------------------------------
 LOGGER.info("Computing report")
 stat, df = report.ffa_report(samples,
-                             design_eris=design_eris)
+                             design_eris=design_eris,
+                             logger=LOGGER)
 
 LOGGER.info("Store report")
 fr = fout / f"{basename}_report_TASK{taskid}.csv"
@@ -86,7 +90,8 @@ csv.write_csv(stat, fr, "Stat report",
               compress=False, lineterminator="\n")
 
 LOGGER.info("Computing posterior predictive checks")
-ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples)
+ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples,
+                                                 logger=LOGGER)
 
 LOGGER.info("Store posterior predictive checks")
 fu = fout / f"{basename}_postpredchecks_univ_TASK{taskid}.csv"
@@ -98,7 +103,5 @@ fb = fout / f"{basename}_postpredchecks_biv_TASK{taskid}.csv"
 csv.write_csv(ppb, fb, "Bivariate post pred checks",
               source_file, write_index=True,
               compress=False, lineterminator="\n")
-
-
 
 LOGGER.completed()
