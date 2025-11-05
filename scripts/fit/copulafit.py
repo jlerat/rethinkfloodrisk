@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from hydrodiy.io import csv, iutils
+from hydrodiy.io import csv, iutils, hyruns
 
 from floodstan import marginals
 from floodstan import report
@@ -35,32 +35,49 @@ from pyrethink import mv_censored_sampling
 parser = argparse.ArgumentParser(description="Fit copula model",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
-                    type=int, default=10000)
+                    type=int, default=50000)
 parser.add_argument("-d", "--debug", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-p", "--progress", help="Show progress",
                     action="store_true", default=False)
-parser.add_argument("-c", "--pcensor", help="Censoring threshold",
-                    type=float, default=0.3)
+parser.add_argument("-t", "--taskid", help="JobID",
+                    type=int, default=-1)
 args = parser.parse_args()
 
 debug = args.debug
-pcensor = args.pcensor
+taskid = args.taskid
 
+# Configure stan
 if debug:
     stan_nwarm = 200
     stan_nchains = 3
     stan_nsamples = 200
-    stan_logger = True
 else:
     stan_nwarm = 10000
     stan_nchains = 10
     stan_nsamples = args.nsamples
-    stan_logger = False
 
 stan_progress = args.progress
 
 stan_seed = 5446
+
+# Runner
+opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
+                           stan_nchains=stan_nchains,
+                           stan_nsamples=stan_nsamples)
+
+pcensors = [0., 0.3, 0.5]
+timeperiods = ["ALL", "PRE2022", "PRE2017", "PRE2008"]
+opm.from_cartesian_product(pcensor=pcensors,
+                           timeperiod=timeperiods)
+
+# Load task
+task = opm.get_task(max(0, taskid))
+pcensor = task.pcensor
+timeperiod = task.timeperiod
+
+if debug:
+    timeperiod = "PRE2017"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -69,21 +86,18 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
 basename = source_file.stem
-fout = froot / "outputs" / basename
+fout = froot / "outputs" / f"{basename}_TASK{taskid}"
 fout.mkdir(exist_ok=True, parents=True)
 
 # ----------------------------------------------------------------------
 # @Logging
 # ----------------------------------------------------------------------
-flog = froot / "logs" / basename / f"{basename}.log"
+flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
-if flog.exists():
-    try:
-        flog.unlink()
-    except:
-        pass
-
-LOGGER = get_logger(stan_logger=stan_logger, flog=flog)
+LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
+                           contextual=True)
+LOGGER.log_dict(vars(args), "Command line arguments")
+task.log(LOGGER)
 
 if debug:
     fout = flog.parent / "outputs"
@@ -96,6 +110,11 @@ LOGGER.info("Load data")
 stations = datahub.get_stations()
 
 potpeaks = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
+# Exclude time period
+if re.search("PRE", timeperiod):
+    end = int(re.sub("PRE", "", timeperiod))
+    iok = potpeaks.index.year < end
+    potpeaks = potpeaks.loc[iok]
 
 if debug:
     potpeaks = potpeaks.iloc[:, :4]
@@ -104,9 +123,9 @@ if debug:
 # @Process
 # ----------------------------------------------------------------------
 LOGGER.info("Configure stan sampler")
-LOGGER.info("\tnwarm    = {stan_nwarm}")
-LOGGER.info("\tnchains  = {stan_nchains}")
-LOGGER.info("\tnsamples = {stan_nsamples}")
+LOGGER.info(f"\tnwarm    = {stan_nwarm}")
+LOGGER.info(f"\tnchains  = {stan_nchains}")
+LOGGER.info(f"\tnsamples = {stan_nsamples}")
 
 sv = sample.StanSamplingMultivariate(potpeaks, pcensor=pcensor)
 stan_data = sv.to_dict()
@@ -132,15 +151,31 @@ smp = mv_censored_sampling(**kw)
 
 LOGGER.info("Process samples and save to disk")
 df = smp.draws_pd()
-diag = report.process_stan_diagnostic(smp.diagnose())
 
-fd = fout / f"{basename}_samples.csv"
-csv.write_csv(df, fd, "STAN samples",
+diag = report.process_stan_diagnostic(smp.diagnose())
+diag.update(task.options)
+diag["stan_nchains"] = stan_nchains
+diag["stan_nwarm"] = stan_nwarm
+
+fd = fout / f"{basename}_samples_TASK{taskid}.csv"
+csv.write_csv(df, fd, f"STAN samples for task {taskid}",
               source_file, compress=True)
 
-fd = fout / f"{basename}_diagnostic.json"
+fd = fout / f"{basename}_diagnostic_TASK{taskid}.json"
 with fd.open("w") as fo:
     json.dump(diag, fo, indent=4)
+
+fdd = fout / f"{basename}_data_TASK{taskid}.json"
+for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:
+    stan_data[n] = stan_data[n].tolist()
+with fdd.open("w") as fo:
+    json.dump(stan_data, fo, indent=4)
+
+fi = fout / f"{basename}_inits_TASK{taskid}.json"
+for key, val in stan_inits.items():
+    stan_inits[key] = val.tolist()
+with fi.open("w") as fo:
+    json.dump(stan_inits, fo, indent=4)
 
 LOGGER.info("Process completed")
 
