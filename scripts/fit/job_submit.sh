@@ -7,7 +7,7 @@ set -a
 # Env variables
 if [ -z "$1" ]
 then
-    ARRAYS="none"
+    ARRAYS="0-11"
 else
     ARRAYS=$1
 fi
@@ -46,30 +46,16 @@ for jobname in "${JOBNAMES[@]}"; do
     echo .. created log folder logs/$jobname
 
     # Run job
-    if [ $ARRAYS = "none" ]
+    if [ $jobidprev = -999 ]
     then
-        if [ $jobidprev = -999 ]
-        then
-            echo ... submitting job with no array and no dependency
-            jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
-                --parsable --export=ALL $jobscript)
-        else
-            echo ... submitting job with no array and dependency on $jobidprev
-            sbatch -J $jobname --cpus-per-task=$ncpus \
-                --dependency=afterany:${jobidprev} --export=ALL $jobscript
-        fi    
-    else
-        if [ $jobidprev = -999 ]
-        then
-            echo ... submitting job with array $ARRAYS and no dependency
-            jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
-                --array=$ARRAYS --parsable --export=ALL $jobscript)
-        else    
-            echo ... submitting job with array $ARRAYS and dependency on $jobidprev
-            sbatch -J $jobname --cpus-per-task=$ncpus \
-                --array=$ARRAYS --dependency=afterany:${jobidprev} --export=ALL $jobscript
-        fi    
-    fi
+        echo ... submitting job with array $ARRAYS and no dependency
+        jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
+            --array=$ARRAYS --parsable --export=ALL $jobscript)
+    else    
+        echo ... submitting job with array $ARRAYS and dependency on $jobidprev
+        sbatch -J $jobname --cpus-per-task=$ncpus \
+            --array=$ARRAYS --dependency=afterany:${jobidprev} --export=ALL $jobscript
+    fi    
 
     # Iterate jobid
     jobidprev=$jobid
