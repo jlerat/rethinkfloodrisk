@@ -61,6 +61,8 @@ stan_progress = args.progress
 
 stan_seed = 5446
 
+stan_args = {"adapt_delta": 0.9}
+
 # Runner
 opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
                            stan_nchains=stan_nchains,
@@ -77,7 +79,8 @@ pcensor = task.pcensor
 timeperiod = task.timeperiod
 
 if debug:
-    timeperiod = "PRE2017"
+    pcensor = 0.3
+    timeperiod = "PRE2008"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -110,32 +113,49 @@ LOGGER.info("Load data")
 stations = datahub.get_stations()
 
 potpeaks = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
+
+# Compute censors independently of selected period
+censors = potpeaks.quantile(pcensor)
+
 # Exclude time period
 if re.search("PRE", timeperiod):
     end = int(re.sub("PRE", "", timeperiod))
     iok = potpeaks.index.year < end
     potpeaks = potpeaks.loc[iok]
 
-if debug:
-    potpeaks = potpeaks.iloc[:, :4]
+#if debug:
+#    potpeaks = potpeaks.iloc[:, :4]
+#    censors = censors.iloc[:4]
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
 LOGGER.info("Configure stan sampler")
-LOGGER.info(f"\tnwarm    = {stan_nwarm}")
-LOGGER.info(f"\tnchains  = {stan_nchains}")
-LOGGER.info(f"\tnsamples = {stan_nsamples}")
+LOGGER.info(f"nwarm    = {stan_nwarm}", ntab=1, nret=1)
+LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
+LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 
-sv = sample.StanSamplingMultivariate(potpeaks, pcensor=pcensor)
+sv = sample.StanSamplingMultivariate(potpeaks, censors=censors)
+
 stan_data = sv.to_dict()
+LOGGER.info(f"nobs    = {stan_data['Nobs']}", ntab=1, nret=1)
+LOGGER.info(f"ncens   = {stan_data['Ncens']}", ntab=1)
+LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
+
+pcensors = (potpeaks - censors < 0).sum() / potpeaks.notnull().sum()
+for ipn, (pname, pcensor) in enumerate(pcensors.items()):
+    stationid = re.sub("_PEAK", "", pname)
+    LOGGER.info(f"Prob censor {stationid} = {pcensor:0.2f}", nret=int(ipn==0))
+
 stan_inits = sv.initial_parameters
 
+# Clean stan folder
 fout_stan = fout / "stan"
 fout_stan.mkdir(exist_ok=True)
 for f in fout_stan.glob("*.*"):
     f.unlink()
 
+# Stan arguments
 kw = dict(data=stan_data,
           seed=stan_seed,
           iter_sampling=stan_nsamples // stan_nchains,
@@ -145,17 +165,19 @@ kw = dict(data=stan_data,
           iter_warmup=stan_nwarm,
           show_progress=stan_progress,
           inits=stan_inits)
+kw.update(stan_args)
 
-LOGGER.info("Start sampling")
+LOGGER.info("Start sampling", nret=1)
 smp = mv_censored_sampling(**kw)
 
-LOGGER.info("Process samples and save to disk")
+LOGGER.info("Process samples and save to disk", nret=1)
 df = smp.draws_pd()
 
 diag = report.process_stan_diagnostic(smp.diagnose())
 diag.update(task.options)
 diag["stan_nchains"] = stan_nchains
 diag["stan_nwarm"] = stan_nwarm
+diag["pcensors"] = pcensors.tolist()
 
 fd = fout / f"{basename}_samples_TASK{taskid}.csv"
 csv.write_csv(df, fd, f"STAN samples for task {taskid}",
