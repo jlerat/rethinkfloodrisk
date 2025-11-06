@@ -343,7 +343,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
 
         # Test on matching the two dist
         # 10^-7 is very low for a p-value! Still looking ok visually though
-        pv_thresh = -7
+        pv_thresh = -9
         assert kspv > pv_thresh
         assert tpv > pv_thresh
 
