@@ -51,7 +51,8 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
     data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
+    censors = data.quantile(pcensor).values
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
     assert len(stan_data) == 20
@@ -92,7 +93,8 @@ def test_inits(allclose):
     data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
     data = data.loc[data.index.year < 2008]
     pcensor = 0.3
-    sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
+    censors = data.quantile(pcensor)
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     inits = sv.initial_parameters
 
 
@@ -180,8 +182,9 @@ def test_sampler(config, nvars, allclose):
         data = data.loc[data.notnull().all(axis=1)]
 
     pcensor = 0.3 if config == "censored_missing" else 0.
+    censors = data.quantile(pcensor)
 
-    sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
     if config == "uncensored_nomissing":
@@ -230,14 +233,16 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
     if not missing:
         data = data.loc[pd.notnull(data).all(axis=1)]
 
+    censors = data.quantile(pcensor)
+
     # -- floodstan --
     y, z = data.values.T
-    censor = np.nanpercentile(y, pcensor * 100)
+    censor = censors.iloc[0]
     marginal = marginals.GEV()
     yv = fsample.StanSamplingVariable(marginal, y, censor,
                                       ninits=STAN_NCHAINS_DEFAULT)
 
-    censor = np.nanpercentile(z, pcensor * 100)
+    censor = censors.iloc[1]
     zv = fsample.StanSamplingVariable(marginal, z, censor,
                                       ninits=STAN_NCHAINS_DEFAULT)
 
@@ -274,7 +279,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
-    sv = sample.StanSamplingMultivariate(data, pcensor=pcensor)
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 

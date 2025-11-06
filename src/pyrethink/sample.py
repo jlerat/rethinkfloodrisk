@@ -5,24 +5,21 @@ from scipy.stats import norm
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
-PCENSOR_DEFAULT = 0.3
-
 ETA_PRIOR_DEFAULT = 0.5
 
 MARGINAL = GEV()
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data, pcensor=PCENSOR_DEFAULT):
-        self.pcensor = float(pcensor)
-        self.set_data(data)
+    def __init__(self, data, censors=None):
+        self.set_data(data, censors)
         self.set_initial_parameters()
 
     @property
     def stan_sample_args(self):
         return {}
 
-    def set_data(self, data):
+    def set_data(self, data, censors):
         # Clean data
         if "WATERYEAR" in data:
             data = data.drop("WATERYEAR", axis=1)
@@ -31,21 +28,31 @@ class StanSamplingMultivariate():
         if data.shape[0] == 1:
             data = data.T
 
+        # Eliminates cases where all data are missing
         hasdata = np.any(~np.isnan(data), axis=1)
         data = data[hasdata]
-
         self.data = data
 
-        pcensor = self.pcensor
-        self.censors = np.zeros(data.shape[1])
+        # Check censors
+        nvars = data.shape[1]
+        if censors is None:
+            censors = np.zeros(nvars)
+        else:
+            censors = np.array(censors)
+
+        if censors.shape != (nvars, ):
+            errmsg = f"Expected censors as 1D array of length {nvars},"\
+                     + f"got an array of shape {censors.shape}."
+            raise ValueError(errmsg)
+
+        self.censors = censors
+
         cases = np.zeros_like(data, dtype=int)
         for ivar, vect in enumerate(data.T):
-            censor = np.nanpercentile(vect, pcensor * 100) - 1e-10
-            icases, vect, censor = univariate2cases(vect, censor)
+            icases, vect, censor = univariate2cases(vect, censors[ivar])
             cases[icases.i11, ivar] = 1  # Observed
             cases[icases.i21, ivar] = 2  # Censored
             cases[icases.i31, ivar] = 3  # Missing
-            self.censors[ivar] = censor
 
         # Need to add 1 because stan array indexes
         # start at 1, not 0.
