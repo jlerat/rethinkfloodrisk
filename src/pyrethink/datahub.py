@@ -110,5 +110,3 @@ def linear_interpolation(xx, x, y):
     D = np.abs(xx[:, None] - x[None, 1:-1])
     D = np.column_stack([D, np.ones(len(xx)), xx])
     return (D @ coefs).squeeze()
-
-
