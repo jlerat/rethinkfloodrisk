@@ -99,6 +99,7 @@ flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
+LOGGER.context = f"TASK{taskid}"
 LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
@@ -112,7 +113,10 @@ if debug:
 LOGGER.info("Load data")
 stations = datahub.get_stations()
 
-potpeaks = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
+potpeaks = datahub.get_potpeaks()
+potpeaks_time = potpeaks.filter(regex="WATERYEAR", axis=1).reset_index()
+potpeaks_time = potpeaks_time.astype({"WATERYEAR": int, "DAY": str})
+potpeaks = potpeaks.filter(regex="_PEAK", axis=1)
 
 # Compute censors independently of selected period
 censors = potpeaks.quantile(pcensor)
@@ -122,10 +126,7 @@ if re.search("PRE", timeperiod):
     end = int(re.sub("PRE", "", timeperiod))
     iok = potpeaks.index.year < end
     potpeaks = potpeaks.loc[iok]
-
-#if debug:
-#    potpeaks = potpeaks.iloc[:, :4]
-#    censors = censors.iloc[:4]
+    potpeaks_time = potpeaks_time.loc[iok]
 
 # ----------------------------------------------------------------------
 # @Process
@@ -174,10 +175,14 @@ LOGGER.info("Process samples and save to disk", nret=1)
 df = smp.draws_pd()
 
 diag = report.process_stan_diagnostic(smp.diagnose())
+
+# Report stan diagnostic
+for me in report.STAN_DIAGNOSTIC_VARIABLES:
+    LOGGER.info(f"Stan diagnostic {me}: {diag[me]}")
+
 diag.update(task.options)
 diag["stan_nchains"] = stan_nchains
 diag["stan_nwarm"] = stan_nwarm
-diag["pcensors"] = pcensors.tolist()
 
 fd = fout / f"{basename}_samples_TASK{taskid}.csv"
 csv.write_csv(df, fd, f"STAN samples for task {taskid}",
@@ -186,6 +191,11 @@ csv.write_csv(df, fd, f"STAN samples for task {taskid}",
 fd = fout / f"{basename}_diagnostic_TASK{taskid}.json"
 with fd.open("w") as fo:
     json.dump(diag, fo, indent=4)
+
+# Store data with additional info
+stan_data["pcensors"] = pcensors.to_dict()
+stan_data["potpeaks_time"] = potpeaks_time.to_dict()
+stan_data["stationids"] = potpeaks.columns.str.replace("_PEAK", "").tolist()
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
 for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:
