@@ -28,14 +28,12 @@ import matplotlib.pyplot as plt
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
-from floodstan import marginals, freqplots
+from floodstan import marginals, freqplots, report
 from pyrethink import datahub
 
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
-
-stan_diag_metrics = ["ebfmi", "rhat", "effsamplesz", "divergence"]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -83,7 +81,7 @@ for ftask in fout.glob("*TASK*"):
     LOGGER.info(f"pcens={diag['pcensor']} - period={diag['timeperiod']}",
                 nret=1)
 
-    for imet, me in enumerate(stan_diag_metrics):
+    for imet, me in enumerate(report.STAN_DIAGNOSTIC_VARIABLES):
         txt = diag[me][:100]
         LOGGER.info(f"[diag] {me:12s} : {txt}",
                     nret=imet == 0, ntab=1)
