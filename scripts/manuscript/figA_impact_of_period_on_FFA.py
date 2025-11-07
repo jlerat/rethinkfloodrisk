@@ -9,8 +9,8 @@
 ## ------------------------------
 
 import sys
-import os
 import re
+import argparse
 import json
 from string import ascii_letters as letters
 
@@ -31,6 +31,15 @@ from pyrethink import datahub
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Plot FFA curves",
+                                 formatter_class=
+                                 argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-d", "--debug", help="Debug mode",
+                    action="store_true", default=False)
+args = parser.parse_args()
+
+debug = args.debug
+
 
 awidth = 6
 aheight = 5
@@ -50,6 +59,8 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
+for f in fimg.glob("*.png"):
+    f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -62,19 +73,23 @@ LOGGER = iutils.get_logger(basename)
 LOGGER.info("Load data")
 
 stations = datahub.get_stations()
+if debug:
+    stations = stations.iloc[:1]
 
 ffa = {}
 data = {}
 for ftask in fout.glob("*TASK*"):
     # Setup folders
     taskid = int(re.sub("^.*TASK", "", ftask.stem))
+    if taskid <= 0 :
+        continue
 
     # Get data
     fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    if diag["pcensor"] != 0.3 or diag["timeperiod"] == "PRE2008":
+    if diag["pcensor"] != 0.3 or re.search("2017|2008", diag["timeperiod"]):
         continue
 
     period = diag["timeperiod"]
@@ -87,13 +102,16 @@ for ftask in fout.glob("*TASK*"):
     fd = ftask / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
         d = json.load(fo)
-        data[period] = np.array(d["y"])
+        y = pd.DataFrame(d["y"], columns=d["stationids"])
+        t = pd.DataFrame(d["potpeaks_time"]).reset_index(drop=True)
+        y = pd.concat([y, t], axis=1)
+        data[period] = y
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-for istation, (stationid, sinfo) in enumerate(stations.iterrows()):
-    LOGGER.info(f"Plotting {istation + 1} ({stationid})")
+for stationid, sinfo in stations.iterrows():
+    LOGGER.info(f"Plotting {stationid}")
     plt.close("all")
     mosaic = [[per for per in data.keys()]]
     nrows = len(mosaic)
@@ -102,15 +120,47 @@ for istation, (stationid, sinfo) in enumerate(stations.iterrows()):
                      layout="constrained")
     axs = fig.subplot_mosaic(mosaic, sharey=True)
 
+    # Rating curve analysis
+    rc, _ = datahub.get_rating_curves(stationid, True)
+    rc_h = rc.loc[:, "WATERLEVEL[m]"]
+    rc_q = rc.loc[:, "STREAMFLOW[m3_s-1]"]
+    ipos = (rc_q > 1e-2) & (rc_h > 0)
+    rc_h = rc_h.loc[ipos]
+    rc_q = rc_q.loc[ipos]
+
+    # Plot ffa
     for iax, (aname, ax) in enumerate(axs.items()):
         period = aname
 
         # Plot data
-        peaks = data[period][:, istation]
-        freqplots.plot_data(ax, peaks, ptype)
+        peaks = data[period].loc[:, str(stationid)]
+        time = data[period].loc[:, "DAY"]
+
+        x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
+        same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
+        _, same = np.where(same)
+        time = time.iloc[same]
+
+        ythresh = y[-3]
+        arrowprops = {
+            "edgecolor": "0.4",
+            "arrowstyle": "-"
+            }
+        for t, xx, yy in zip(time, x, y):
+            if yy < ythresh:
+                continue
+            d = pd.to_datetime(t).strftime("%b\n%y")
+            ax.annotate(d, xy=(xx, yy),
+                        xycoords="data",
+                        xytext=(-40, 40),
+                        va="bottom", ha="right",
+                        textcoords="offset points",
+                        arrowprops=arrowprops,
+                        zorder=5)
 
         # Plot FFA
         df = ffa[period]
+        istation = data[period].columns.tolist().index(str(stationid))
         quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
         aris = quantiles.index.to_series().str\
                 .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
@@ -123,13 +173,24 @@ for istation, (stationid, sinfo) in enumerate(stations.iterrows()):
                                           facecolor="tab:blue",
                                           edgecolor="k")
 
-        retp = [5, 10, 100, 500]
-        aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, retp)
+        retp = [100]
+        aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
 
-        title = f"({letters[iax]}) {period}"
+        pertxt = "Before 2022" if period == "PRE2022" else "After 2022"
+        title = f"({letters[iax]}) {pertxt}"
         ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
         ax.set(title=title, ylabel=ylab)
-        ax.grid(axis="y")
+
+        q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
+        txt = "1:100 uncertainty:\n"
+        for st in ["5%", "POSTERIOR_PREDICTIVE", "95%"]:
+            q = q100.loc[st]
+            h = datahub.linear_interpolation(q, rc_q, rc_h)
+            stt = "ppred" if st.startswith("POST") else st
+            txt += f"{stt:>5s} {q:6.0f} $m^3.s^{{{-1}}}$ ({h:4.1f}m)\n"
+
+        ax.text(0.03, 0.97, txt, va="top", ha="left",
+                transform=ax.transAxes)
 
     ftitle = f"{sinfo.NAME} ({stationid})"
     fig.suptitle(ftitle, fontweight="bold")
