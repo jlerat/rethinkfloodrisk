@@ -18,3 +18,5 @@ src/pyrethink/stan/test_functions
 src/pyrethink/stan/test_indexing
 src/pyrethink/stan/test_mv
 
+scripts/check_stan
+
