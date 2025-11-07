@@ -7,7 +7,7 @@ set -a
 # Env variables
 if [ -z "$1" ]
 then
-    ARRAYS="0-11"
+    ARRAYS="0-5"
 else
     ARRAYS=$1
 fi
