@@ -47,6 +47,7 @@ def get_potpeaks():
 def get_potpeaks_thresh():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     _, comments = csv.read_csv(ft, index_col="DAY", parse_dates=True)
+
     qthresh = {re.sub(".*_|\\[.*", "", key): float(val)
                for key, val in comments.items()
                if re.search("^pot", key)}
@@ -54,3 +55,31 @@ def get_potpeaks_thresh():
     qthresh = pd.Series(qthresh)
     qthresh.name = "POT_thresh[m3.s-1]"
     return qthresh
+
+
+def get_rating_curves(stationid, only_last=False):
+    frc = DATA_FOLDER / "rating_curves" / f"{stationid}_rating_tables.csv"
+    fz = frc.parent / f"{frc.stem}.zip"
+    if not fz.exists():
+        errmsg = f"Cannot find rating data for station {stationid}."
+        raise ValueError(errmsg)
+
+    rc, _ = csv.read_csv(frc)
+
+    fm = frc.parent / f"{frc.stem}_metadata.csv"
+    meta, _ = csv.read_csv(fm)
+
+    times = rc.TIME_VALIDITY.unique()
+    if only_last:
+        times = times[[-1]]
+
+    rcs = {}
+    metas = {}
+    for time in times:
+        rcs[time] = rc.loc[rc.TIME_VALIDITY == time]
+        metas[time] = meta.loc[meta.time_validity == time]
+
+    if only_last:
+        return rcs[time], metas[time]
+    else:
+        return rcs, metas
