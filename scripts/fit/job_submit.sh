@@ -48,19 +48,20 @@ for jobname in "${JOBNAMES[@]}"; do
     # Run job
     if [ $jobidprev = -999 ]
     then
-        echo ... submitting job with array $ARRAYS and no dependency
+        echo .. submitting job with array $ARRAYS and no dependency
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
             --array=$ARRAYS --parsable --export=ALL $jobscript)
     else    
-        echo ... submitting job with array $ARRAYS and dependency on $jobidprev
-        sbatch -J $jobname --cpus-per-task=$ncpus \
-            --array=$ARRAYS --dependency=afterany:${jobidprev} --export=ALL $jobscript
+        echo .. submitting job with array $ARRAYS and dependency on $jobidprev
+        jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
+            --array=$ARRAYS --dependency=afterany:${jobidprev} --export=ALL $jobscript)
     fi    
 
     # Iterate jobid
     jobidprev=$jobid
 
-    echo ... All done. Moving to next job.
+    echo .. All done. Submitted job $jobid and moving to next job.
+    echo
 done    
 
 
