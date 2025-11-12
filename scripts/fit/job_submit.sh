@@ -31,7 +31,7 @@ JOBCONFIGS["0,3"]="1"          # use user supplied array if any
 JOBCONFIGS["0,4"]="X"          # job dependency
 JOBCONFIGS["0,5"]="X"          # job id
 
-# General postprocessing job
+# General postprocessing job (depends on copula fitting)
 JOBCONFIGS["1,0"]="postprocess"  # Job name
 JOBCONFIGS["1,1"]="1"            # number of cpus
 JOBCONFIGS["1,2"]="0-5"          # arrays
@@ -39,13 +39,22 @@ JOBCONFIGS["1,3"]="1"            # use user supplied array if any
 JOBCONFIGS["1,4"]="0"            # parent job number
 JOBCONFIGS["1,5"]="X"            # job id
 
-# MVN postprocessing job
+# MVN postprocessing job (depends on copula fitting)
 JOBCONFIGS["2,0"]="mvnprocess"   # Job name
 JOBCONFIGS["2,1"]="1"            # number of cpus
-JOBCONFIGS["2,2"]="0-799"        # arrays
+JOBCONFIGS["2,2"]="0-99"         # arrays
 JOBCONFIGS["2,3"]="0"            # use user supplied array if any
 JOBCONFIGS["2,4"]="0"            # parent job number
 JOBCONFIGS["2,5"]="X"            # job id
+
+# MVN postprocessing concat job (depends on MVN postprocessing)
+JOBCONFIGS["2,0"]="mvnconcat"    # Job name
+JOBCONFIGS["2,1"]="1"            # number of cpus
+JOBCONFIGS["2,2"]="0"            # arrays
+JOBCONFIGS["2,3"]="0"            # use user supplied array if any
+JOBCONFIGS["2,4"]="2"            # parent job number
+JOBCONFIGS["2,5"]="X"            # job id
+
 
 LENGTH=${#JOBCONFIGS[@]}
 NJOBS=$(($LENGTH / 6))    

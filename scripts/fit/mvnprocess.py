@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser(description="Process mvn samples",
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=-1)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
-                    type=int, default=800)
+                    type=int, default=100)
 args = parser.parse_args()
 taskid = args.taskid
 nbatch = args.nbatch
@@ -88,7 +88,7 @@ fwrite.mkdir(exist_ok=True, parents=True)
 # @Logging
 # ----------------------------------------------------------------------
 basename = source_file.stem
-flog = froot / "logs" / basename / f"{basename}_TASK{fit_taskid}.log"
+flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
@@ -139,17 +139,16 @@ cols_mu = [f"mvn_cond{sidc}_{sid}_mu" for sid in stationids[icond_2]]
 cols_sig = [f"mvn_cond{sidc}_{sid}_sig" for sid in stationids[icond_2]]
 cols_smp = [f"mvn_cond{sidc}_{sid}_smp_cdf" for sid in stationids[icond_2]]
 
-stats = ["log10_pall", "log10_pall_num",
-         "log10_pany", "log10_pany_num"]
+stats = ["log10_pall", "log10_pany"]
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
     + cols_mu + cols_sig + cols_smp
 
 res = pd.DataFrame(np.nan, index=samples.index,
                    columns=cols)
 
-for i, smp in samples.iterrows():
+for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
-        LOGGER.info(f"Processing sample {i + 1} / {nsamples}")
+        LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
     L_cor = smp.filter(regex="L_cor").values.reshape((nvar, nvar)).T
     cor_all = L_cor @ L_cor.T
@@ -179,10 +178,6 @@ for i, smp in samples.iterrows():
         # MVN CDF
         cor = cor_all[idx][:, idx]
 
-        #LOGGER.info("Sampling normals", ntab=1)
-        z = np.random.multivariate_normal(mean=mean, cov=cor, size=10000000)
-        nz = len(z)
-
         #LOGGER.info("Computing probs", ntab=1)
         rv = mvn(mean=mean, cov=cor)
 
@@ -192,9 +187,11 @@ for i, smp in samples.iterrows():
         lpall = math.log10(pall) if pall > 0 else np.nan
         res.loc[i, f"{gname}_log10_pall"] = lpall
 
-        pall_num = np.all(z - zcdf > 0, axis=1).sum() / nz
-        lpall = math.log10(pall_num) if pall > 0 else np.nan
-        res.loc[i, f"{gname}_log10_pall_num"] = lpall
+        #z = mvn.rvs(size=10000000)
+        #nz = len(z)
+        #pall_num = np.all(z - zcdf > 0, axis=1).sum() / nz
+        #lpall = math.log10(pall_num) if pall_num > 0 else np.nan
+        #res.loc[i, f"{gname}_log10_pall_num"] = lpall
 
         # Any above threshold
         x = zcdf * np.ones(nstations)
@@ -202,9 +199,9 @@ for i, smp in samples.iterrows():
         lpany = math.log10(pany) if pany > 0 else np.nan
         res.loc[i, f"{gname}_log10_pany"] = lpany
 
-        pany_num = np.any(z - zcdf > 0, axis=1).sum() / nz
-        lpany = math.log10(pany_num) if pany_num > 0 else np.nan
-        res.loc[i, f"{gname}_log10_pany_num"] = lpany
+        #pany_num = np.any(z - zcdf > 0, axis=1).sum() / nz
+        #lpany = math.log10(pany_num) if pany_num > 0 else np.nan
+        #res.loc[i, f"{gname}_log10_pany_num"] = lpany
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
