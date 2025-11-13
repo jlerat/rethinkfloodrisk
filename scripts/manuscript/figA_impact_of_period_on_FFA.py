@@ -48,6 +48,7 @@ fdpi = 300
 ptype = "gumbel"
 
 pcensor = 0.3
+excludes = None
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -83,7 +84,6 @@ fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 taskids = opm.search(pcensor=pcensor)
 
-
 ffa = {}
 data = {}
 for taskid in taskids:
@@ -93,6 +93,9 @@ for taskid in taskids:
         diag = json.load(fo)
 
     exclude = diag["exclude"]
+    if excludes is not None:
+        if not exclude in excludes:
+            continue
 
     LOGGER.info(f"Load report TASK {taskid} exclude={exclude}")
     fr = ftask / f"postprocess_report_TASK{taskid}.csv"
