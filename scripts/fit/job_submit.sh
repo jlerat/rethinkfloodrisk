@@ -48,12 +48,12 @@ JOBCONFIGS["2,4"]="0"            # parent job number
 JOBCONFIGS["2,5"]="X"            # job id
 
 # MVN postprocessing concat job (depends on MVN postprocessing)
-JOBCONFIGS["2,0"]="mvnconcat"    # Job name
-JOBCONFIGS["2,1"]="1"            # number of cpus
-JOBCONFIGS["2,2"]="0"            # arrays
-JOBCONFIGS["2,3"]="0"            # use user supplied array if any
-JOBCONFIGS["2,4"]="2"            # parent job number
-JOBCONFIGS["2,5"]="X"            # job id
+JOBCONFIGS["3,0"]="mvnconcat"    # Job name
+JOBCONFIGS["3,1"]="1"            # number of cpus
+JOBCONFIGS["3,2"]="0"            # arrays
+JOBCONFIGS["3,3"]="0"            # use user supplied array if any
+JOBCONFIGS["3,4"]="2"            # parent job number
+JOBCONFIGS["3,5"]="X"            # job id
 
 
 LENGTH=${#JOBCONFIGS[@]}
@@ -96,7 +96,7 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     echo JOB \#$ijob
     echo NAME      : $jobname
     echo NCPUS     : $ncpus
-    echo OVERWRITE : $overwrite_array
+    echo OVERWRITE : $overwrite_arrays
     echo ARRAYS    : $arrays
     echo PJOBID    : $parent_jobid
 
@@ -114,7 +114,8 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     else    
         echo .. submitting job with array $arrays and dependency on $parent_jobid
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
-            --array=$arrays --dependency=afterany:${parent_jobid} --export=ALL $JOBSCRIPT)
+            --array=$arrays --parsable --dependency=afterany:${parent_jobid} \
+            --export=ALL $JOBSCRIPT)
     fi    
 
     # Iterate jobid
