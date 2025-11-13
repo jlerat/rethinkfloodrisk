@@ -69,18 +69,23 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
                            stan_nsamples=stan_nsamples)
 
 pcensors = [0., 0.3, 0.5]
-timeperiods = ["ALL", "PRE2022"]
+
+excludes = ["NONE",
+            "2022-02-27",
+            "2008-01-04",
+            "2017-03-31"]
+
 opm.from_cartesian_product(pcensor=pcensors,
-                           timeperiod=timeperiods)
+                           exclude=excludes)
 
 # Load task
 task = opm.get_task(max(0, taskid))
 pcensor = task.pcensor
-timeperiod = task.timeperiod
+exclude = task.exclude
 
 if debug:
     pcensor = 0.3
-    timeperiod = "PRE2008"
+    exclude = "2008-01"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -91,6 +96,9 @@ froot = source_file.parent.parent.parent
 basename = source_file.stem
 fout = froot / "outputs" / f"{basename}_TASK{taskid}"
 fout.mkdir(exist_ok=True, parents=True)
+
+fopm = fout.parent / f"{basename}_options.json"
+opm.save(fopm)
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -122,9 +130,9 @@ potpeaks = potpeaks.filter(regex="_PEAK", axis=1)
 censors = potpeaks.quantile(pcensor)
 
 # Exclude time period
-if re.search("PRE", timeperiod):
-    end = int(re.sub("PRE", "", timeperiod))
-    iok = potpeaks.index.year < end
+if exclude != "ALL":
+    iexclude = potpeaks.loc[exclude].index
+    iok = ~potpeaks.index.isin(iexclude)
     potpeaks = potpeaks.loc[iok]
     potpeaks_time = potpeaks_time.loc[iok]
 

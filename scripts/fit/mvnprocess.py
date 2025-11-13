@@ -22,6 +22,8 @@ from scipy.stats import multivariate_normal as mvn
 
 from hydrodiy.io import csv, iutils, hyruns
 
+from floodstan.marginals import GEV
+
 from pyrethink import datahub
 
 np.random.seed(5446)
@@ -50,15 +52,24 @@ zcond = np.atleast_1d(norm.ppf(eep_target))
 zcdf = norm.ppf(eep_target)
 
 groups_mvn_cdf = {
-    "all": datahub.get_stations().index.astype(str).tolist(),
-    "around-repentance": ["203002", "203014", "203010"]
+    "GALL": datahub.get_stations().index.astype(str).tolist(),
+    "G02-14-10": ["203002", "203014", "203010"],
+    "G02-14": ["203002", "203014"]
     }
 
-
 # Select fit task with
-# pcens = 0.3
-# period = 'ALL'
-fit_taskid = 2
+pcensor = 0.3
+exclude = "NONE"
+
+source_file = Path(__file__).resolve()
+froot = source_file.parent.parent.parent
+fopm = froot / "outputs" / "copulafit_options.json"
+opm_fit = hyruns.OptionManager.from_file(fopm)
+fit_taskid = opm_fit.search(pcensor=pcensor,
+                            exclude=exclude)[0]
+
+# Obs events
+obs = [event for event in opm_fit.options["exclude"] if event != "NONE"]
 
 # Runner
 opm = hyruns.OptionManager(fit_taskid=fit_taskid,
@@ -77,8 +88,6 @@ iterlog = 5
 # ----------------------------------------------------------------------
 # @Folders
 # ----------------------------------------------------------------------
-source_file = Path(__file__).resolve()
-froot = source_file.parent.parent.parent
 
 ftask = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
 fwrite = ftask / "mvnprocess"
@@ -102,12 +111,12 @@ if debug:
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+potpeaks = datahub.get_potpeaks().filter(regex="_PEAK$", axis=1)
+potpeaks.columns = potpeaks.columns.str.replace("_PEAK", "")
+
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
     diag = json.load(fo)
-
-period = diag["timeperiod"]
-pcensor = diag["pcensor"]
 
 fd = ftask / f"copulafit_data_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -115,10 +124,14 @@ with fd.open("r") as fo:
 
 nvar = data["P"]
 stationids = np.array(data["stationids"])
+
+def get_station_index(sid):
+    return np.where(sid == stationids)[0][0]
+
 icond_1 = np.where(stationids == stationid_cond)[0]
 icond_2 = np.where(stationids != stationid_cond)[0]
 
-LOGGER.info(f"Load report TASK {fit_taskid} period={period}")
+LOGGER.info(f"Load report TASK {fit_taskid} exclude={exclude}")
 fs = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
 samples = pd.read_csv(fs, skiprows=15)
 
@@ -133,15 +146,22 @@ if debug:
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
+gev = GEV()
+
 nsamples = len(samples)
 sidc = stationid_cond
 cols_mu = [f"mvn_cond{sidc}_{sid}_mu" for sid in stationids[icond_2]]
 cols_sig = [f"mvn_cond{sidc}_{sid}_sig" for sid in stationids[icond_2]]
 cols_smp = [f"mvn_cond{sidc}_{sid}_smp_cdf" for sid in stationids[icond_2]]
 
-stats = ["log10_pall", "log10_pany"]
+gsta = [f"G{sid}" for sid in stationids]
+cols_obs = [f"{g}_obs_eep_{event}" for event in obs
+            for g in list(groups_mvn_cdf.keys()) + gsta]
+
+stats = ["log10_pall_eeptarget", "log10_pany_eeptarget"]
+
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
-    + cols_mu + cols_sig + cols_smp
+    + cols_mu + cols_sig + cols_smp + cols_obs
 
 res = pd.DataFrame(np.nan, index=samples.index,
                    columns=cols)
@@ -170,10 +190,10 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     res.loc[i, cols_smp] = norm.cdf(z)
 
     # Loop on groups
-    for gname, stationids in groups_mvn_cdf.items():
-        idx = [data["stationids"].index(sid) for sid in stationids]
-        nstations = len(stationids)
-        mean = np.zeros(nstations)
+    for gname, grp_stationids in groups_mvn_cdf.items():
+        idx = [get_station_index(sid) for sid in grp_stationids]
+        ngstations = len(grp_stationids)
+        mean = np.zeros(ngstations)
 
         # MVN CDF
         cor = cor_all[idx][:, idx]
@@ -182,33 +202,51 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         rv = mvn(mean=mean, cov=cor)
 
         # All above threshold
-        x = -zcdf * np.ones(nstations)
+        x = -zcdf * np.ones(ngstations)
         pall = rv.cdf(x)
         lpall = math.log10(pall) if pall > 0 else np.nan
         res.loc[i, f"{gname}_log10_pall"] = lpall
 
-        #z = mvn.rvs(size=10000000)
-        #nz = len(z)
-        #pall_num = np.all(z - zcdf > 0, axis=1).sum() / nz
-        #lpall = math.log10(pall_num) if pall_num > 0 else np.nan
-        #res.loc[i, f"{gname}_log10_pall_num"] = lpall
-
         # Any above threshold
-        x = zcdf * np.ones(nstations)
+        x = zcdf * np.ones(ngstations)
         pany = 1 - rv.cdf(x)
         lpany = math.log10(pany) if pany > 0 else np.nan
         res.loc[i, f"{gname}_log10_pany"] = lpany
 
-        #pany_num = np.any(z - zcdf > 0, axis=1).sum() / nz
-        #lpany = math.log10(pany_num) if pany_num > 0 else np.nan
-        #res.loc[i, f"{gname}_log10_pany_num"] = lpany
+        # Obs eep
+        for event in obs:
+            # Get peak flow data
+            pp = potpeaks.loc[event].squeeze()
+            zstd = np.nan * np.zeros(ngstations)
+
+            # Compute cdf for each station
+            # Careful here, don't mix up the station
+            # index sid within the stan data list
+            # and the number k used to order them within zstd
+            for k, sid in enumerate(grp_stationids):
+                isid = get_station_index(sid) + 1
+                ylocn = smp.loc[f"ylocn[{isid}]"]
+                ylogscale = smp.loc[f"ylogscale[{isid}]"]
+                yshape1 = smp.loc[f"yshape1[{isid}]"]
+                gev.params = [ylocn, ylogscale, yshape1]
+                qo = pp[sid]
+                if ~np.isnan(qo):
+                    # Store individual estimate of event
+                    if gname == "GALL":
+                        cdf = gev.cdf(qo)
+                        res.loc[i, f"G{sid}_obs_eep_{event}"] = 1 - cdf
+
+                    zstd[k] = norm.ppf(cdf)
+
+            p_eep = rv.cdf(-zstd)
+            res.loc[i, f"{gname}_obs_eep_{event}"] = p_eep
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
 
 comments = {
     "comment": "MVN process results",
-    "period": period,
+    "exclude": exclude,
     "pcensor": pcensor,
     "fit_taskid": fit_taskid,
     "stationid_cond": stationid_cond,
