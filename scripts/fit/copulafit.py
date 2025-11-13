@@ -130,7 +130,7 @@ potpeaks = potpeaks.filter(regex="_PEAK", axis=1)
 censors = potpeaks.quantile(pcensor)
 
 # Exclude time period
-if exclude != "ALL":
+if exclude != "NONE":
     iexclude = potpeaks.loc[exclude].index
     iok = ~potpeaks.index.isin(iexclude)
     potpeaks = potpeaks.loc[iok]
