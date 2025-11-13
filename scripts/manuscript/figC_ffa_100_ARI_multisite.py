@@ -26,8 +26,11 @@ import pandas as pd
 from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvn
 from scipy.interpolate import griddata
+
 import matplotlib.pyplot as plt
 from matplotlib import ticker
+from mpl_toolkits.mplot3d.proj3d import proj_transform
+from matplotlib.text import Annotation
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils, violinplot
@@ -78,6 +81,29 @@ for f in fimg.glob("*.png"):
 # @Logging
 # ----------------------------------------------------------------------
 LOGGER = iutils.get_logger(basename)
+
+# ----------------------------------------------------------------------
+# @Utils
+# ----------------------------------------------------------------------
+# Copied from
+# https://stackoverflow.com/questions/10374930/annotating-a-3d-scatter-plot
+class Annotation3D(Annotation):
+    '''Annotate the point xyz with text s'''
+
+    def __init__(self, s, xyz, *args, **kwargs):
+        Annotation.__init__(self,s, xy=(0,0), *args, **kwargs)
+        self._verts3d = xyz
+
+    def draw(self, renderer):
+        xs3d, ys3d, zs3d = self._verts3d
+        xs, ys, zs = proj_transform(xs3d, ys3d, zs3d, renderer.M)
+        self.xy=(xs,ys)
+        Annotation.draw(self, renderer)
+
+def annotate3D(ax, s, *args, **kwargs):
+    '''add anotation text s to to Axes3d ax'''
+    tag = Annotation3D(s, *args, **kwargs)
+    ax.add_artist(tag)
 
 # ----------------------------------------------------------------------
 # @Get data
@@ -208,6 +234,20 @@ for iax, (aname, ax) in enumerate(axs.items()):
         ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
         ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
 
+        txt = r"$Pr(X>x_0 \vee Y>y_0)$" if re.search("all", aname)\
+            else r"$Pr(X>x_0 \wedge Y>y_0)$"
+        xa = XX1[ii].mean()
+        ya = XX2[ii].mean()
+        diff = np.abs(XX1 - xa) + np.abs(XX2 - ya)
+        iclose = np.where(diff == diff.min())
+        za = PP[iclose][0]
+        z0, z1 = ax.get_zlim()
+        zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [0.72, 0.8]]
+        ax.text(xa, ya, zt1, txt, ha="right",
+                fontsize=12, fontweight="bold")
+        ax.plot([xa, xa], [ya, ya], [zt0, za], "k-", lw=1)
+        ax.plot(xa, ya, za, "o", mfc="k", mec="k")
+
         xlab = f"Peak flow {sta1} [m3.s-1]"
         ylab = f"Peak flow {sta2} [m3.s-1]"
         zlab = "Pr(X,Y) [-]"
@@ -217,16 +257,22 @@ for iax, (aname, ax) in enumerate(axs.items()):
     else:
         stat = aname
 
-        x0, x1 = (-8, -2.7) if stat == "pall" else (-1.7, -1.2)
+        x0, x1 = (-8.5, -2.6) if stat == "pall" else (-1.7, -1.2)
         bins = np.logspace(x0, x1, 50)
+        ax.set_xlim((10**x0, 10**x1))
+        ax.set_xscale("log")
 
         for ig, gname in enumerate(groups):
             sel = df.loc[:, f"{gname}_log10_{stat}"]
             se = 10**sel
-            lab = f"{gname} (mean={se.mean():0.2e})"
             ax.hist(se, bins=bins, edgecolor="0.5",
                     facecolor=cols[ig],
-                    alpha=0.6, label=lab)
+                    alpha=0.6)
+
+            m = se.mean()
+            ml = math.log10(m)
+            if (ml - x0) * (x1 - ml) > 0:
+                putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
 
         xlab = "Event Exceedance Probability [-]"
         ylab = "Sample count [-]"
@@ -235,7 +281,6 @@ for iax, (aname, ax) in enumerate(axs.items()):
         ax.legend(fontsize="small", loc=1)
         ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
         ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
-        ax.set_xscale("log")
 
         title = f"({letters[iax]}) Statistic {stat}"
 

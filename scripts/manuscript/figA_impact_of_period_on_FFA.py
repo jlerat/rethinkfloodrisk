@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from hydrodiy.io import csv, iutils
+from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
 from floodstan import freqplots
 from pyrethink import datahub
@@ -46,6 +46,8 @@ aheight = 5
 fdpi = 300
 
 ptype = "gumbel"
+
+pcensor = 0.3
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -76,28 +78,26 @@ stations = datahub.get_stations()
 if debug:
     stations = stations.iloc[:1]
 
+
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskids = opm.search(pcensor=pcensor)
+
+
 ffa = {}
 data = {}
-for ftask in fout.glob("*TASK*"):
-    # Setup folders
-    taskid = int(re.sub("^.*TASK", "", ftask.stem))
-    if taskid <= 0 :
-        continue
-
-    # Get data
+for taskid in taskids:
+    ftask = fout / f"copulafit_TASK{taskid}"
     fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    if diag["pcensor"] != 0.3 or re.search("2017|2008", diag["timeperiod"]):
-        continue
+    exclude = diag["exclude"]
 
-    period = diag["timeperiod"]
-
-    LOGGER.info(f"Load report TASK {taskid} period={period}")
+    LOGGER.info(f"Load report TASK {taskid} exclude={exclude}")
     fr = ftask / f"postprocess_report_TASK{taskid}.csv"
     df, _ = csv.read_csv(fr, index_col=0)
-    ffa[period] = df
+    ffa[exclude] = df
 
     fd = ftask / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
@@ -105,7 +105,7 @@ for ftask in fout.glob("*TASK*"):
         y = pd.DataFrame(d["y"], columns=d["stationids"])
         t = pd.DataFrame(d["potpeaks_time"]).reset_index(drop=True)
         y = pd.concat([y, t], axis=1)
-        data[period] = y
+        data[exclude] = y
 
 # ----------------------------------------------------------------------
 # @Process
@@ -130,11 +130,11 @@ for stationid, sinfo in stations.iterrows():
 
     # Plot ffa
     for iax, (aname, ax) in enumerate(axs.items()):
-        period = aname
+        exclude = aname
 
         # Plot data
-        peaks = data[period].loc[:, str(stationid)]
-        time = data[period].loc[:, "DAY"]
+        peaks = data[exclude].loc[:, str(stationid)]
+        time = data[exclude].loc[:, "DAY"]
 
         x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
         same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
@@ -159,8 +159,8 @@ for stationid, sinfo in stations.iterrows():
                         zorder=5)
 
         # Plot FFA
-        df = ffa[period]
-        istation = data[period].columns.tolist().index(str(stationid))
+        df = ffa[exclude]
+        istation = data[exclude].columns.tolist().index(str(stationid))
         quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
         aris = quantiles.index.to_series().str\
                 .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
@@ -176,8 +176,13 @@ for stationid, sinfo in stations.iterrows():
         retp = [100]
         aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
 
-        pertxt = "Before 2022" if period == "PRE2022" else "After 2022"
-        title = f"({letters[iax]}) {pertxt}"
+        if exclude == "NONE":
+            exctxt = "All data"
+        else:
+            ev = re.sub("-.*", "", exclude)
+            exctxt = f"Without {ev} flood"
+
+        title = f"({letters[iax]}) {exctxt}"
         ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
         ax.set(title=title, ylabel=ylab)
 
