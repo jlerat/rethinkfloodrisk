@@ -47,9 +47,6 @@ fdpi = 300
 stationid_target = "203002"
 eep_target = 1 - 1e-2
 
-# Task pcensor=0.3, period=ALL
-taskid = 2
-
 # ----------------------------------------------------------------------
 # @Folders
 # ----------------------------------------------------------------------
@@ -74,6 +71,14 @@ LOGGER = iutils.get_logger(basename)
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+
+# Select fit task with
+for fold in fout.glob("copulafit_TASK*"):
+    lf = [f for f in fold.glob("*.zip")
+          if re.search("mvnprocess", f.stem)]
+    if len(lf) > 0:
+        taskid = int(re.sub(".*TASK", "", fold.stem))
+        break
 
 stations = datahub.get_stations()
 

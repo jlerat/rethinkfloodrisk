@@ -48,7 +48,7 @@ fdpi = 300
 ptype = "gumbel"
 
 pcensor = 0.3
-excludes = None
+excludes = ["NONE", "2022-02-27"]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -186,8 +186,9 @@ for stationid, sinfo in stations.iterrows():
             exctxt = f"Without {ev} flood"
 
         title = f"({letters[iax]}) {exctxt}"
+        xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
         ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
-        ax.set(title=title, ylabel=ylab)
+        ax.set(title=title, ylabel=ylab, xlabel=xlab)
 
         q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
         txt = "1:100 uncertainty:\n"

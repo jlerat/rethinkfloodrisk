@@ -56,9 +56,6 @@ ngrid = 40
 
 eep_target_plot = 0.95
 
-# Pcensor = 0.3 period=ALL
-taskid = 2
-
 sta1 = "203002"
 sta2 = "203014"
 
@@ -109,6 +106,15 @@ def annotate3D(ax, s, *args, **kwargs):
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+
+# Select fit task with
+for fold in fout.glob("copulafit_TASK*"):
+    lf = [f for f in fold.glob("*.zip")
+          if re.search("mvnprocess", f.stem)]
+    if len(lf) > 0:
+        taskid = int(re.sub(".*TASK", "", fold.stem))
+        break
+
 stations = datahub.get_stations()
 
 LOGGER.info(f"Load data TASK {taskid}")
@@ -155,8 +161,8 @@ LOGGER.info(f"Load mvnprocess TASK {taskid}")
 fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
 df, comment = csv.read_csv(fs)
 
-groups = set([cn for cn in df.columns.str.replace("_.*", "", regex=True)
-              if cn not in ["", "mvn"]])
+groups = df.columns.str.replace("_.*", "", regex=True).unique()
+groups = [g for g in groups if re.search("ALL|02-14$", g)]
 
 #eep_target = float(comment["eep_target"])
 
@@ -178,7 +184,7 @@ axs = {
     "pany": fig.add_subplot(2, 2, 2),
     }
 
-cols = ["tab:blue", "tab:orange"]
+cols = ["tab:blue", "tab:orange", "tab:green"]
 
 for iax, (aname, ax) in enumerate(axs.items()):
     LOGGER.info(f"Plot {aname}")
@@ -257,7 +263,7 @@ for iax, (aname, ax) in enumerate(axs.items()):
     else:
         stat = aname
 
-        x0, x1 = (-8.5, -2.6) if stat == "pall" else (-1.7, -1.2)
+        x0, x1 = (-8.5, -2.2) if stat == "pall" else (-1.9, -1.2)
         bins = np.logspace(x0, x1, 50)
         ax.set_xlim((10**x0, 10**x1))
         ax.set_xscale("log")
