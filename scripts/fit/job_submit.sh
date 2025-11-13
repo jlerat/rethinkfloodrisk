@@ -26,7 +26,7 @@ declare -A JOBCONFIGS
 # Copula fitting job
 JOBCONFIGS["0,0"]="copulafit"  # Job name
 JOBCONFIGS["0,1"]="10"         # number of cpus
-JOBCONFIGS["0,2"]="0-11"        # arrays
+JOBCONFIGS["0,2"]="0-17"        # arrays
 JOBCONFIGS["0,3"]="1"          # use user supplied array if any
 JOBCONFIGS["0,4"]="X"          # job dependency
 JOBCONFIGS["0,5"]="X"          # job id
@@ -34,7 +34,7 @@ JOBCONFIGS["0,5"]="X"          # job id
 # General postprocessing job (depends on copula fitting)
 JOBCONFIGS["1,0"]="postprocess"  # Job name
 JOBCONFIGS["1,1"]="1"            # number of cpus
-JOBCONFIGS["1,2"]="0-11"          # arrays
+JOBCONFIGS["1,2"]="0-17"          # arrays
 JOBCONFIGS["1,3"]="1"            # use user supplied array if any
 JOBCONFIGS["1,4"]="0"            # parent job number
 JOBCONFIGS["1,5"]="X"            # job id

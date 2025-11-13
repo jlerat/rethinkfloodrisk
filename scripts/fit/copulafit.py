@@ -73,6 +73,8 @@ pcensors = [0., 0.3, 0.5]
 excludes = ["NONE",
             "2022-02-27",
             "2008-01-04",
+            "2005-06-29",
+            "2016-06-04",
             "2017-03-31"]
 
 opm.from_cartesian_product(pcensor=pcensors,
@@ -85,7 +87,7 @@ exclude = task.exclude
 
 if debug:
     pcensor = 0.3
-    exclude = "2008-01"
+    exclude = "2008-01-04"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -131,8 +133,7 @@ censors = potpeaks.quantile(pcensor)
 
 # Exclude time period
 if exclude != "NONE":
-    iexclude = potpeaks.loc[exclude].index
-    iok = ~potpeaks.index.isin(iexclude)
+    iok = potpeaks.index != exclude
     potpeaks = potpeaks.loc[iok]
     potpeaks_time = potpeaks_time.loc[iok]
 
