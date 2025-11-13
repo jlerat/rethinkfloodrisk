@@ -47,8 +47,8 @@ args = parser.parse_args()
 debug = args.debug
 
 awidth = 6
-aheight = 3
-fdpi = 300
+aheight = 5
+fdpi = 100 # 300
 ngrid = 40
 
 eep_target_plot = 0.95
@@ -144,17 +144,19 @@ mosaic = [["diagram", stat] for stat in ["pall", "pany"]]
 nrows = len(mosaic)
 ncols = len(mosaic[0])
 fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
-                 layout="constrained")
-
-kw = dict(wspace=0.4, hspace=0.1, left=0.3, bottom=0.3)
-axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
-axs["diagram"].remove()
-axs["diagram"] = fig.add_subplot(1, 2, 1, projection="3d")
+                 layout="tight")
+axs = {
+    "diagram_pall": fig.add_subplot(2, 2, 1, projection="3d"),
+    "diagram_pany": fig.add_subplot(2, 2, 3, projection="3d"),
+    "pall": fig.add_subplot(2, 2, 4),
+    "pany": fig.add_subplot(2, 2, 2),
+    }
 
 cols = ["tab:blue", "tab:orange"]
 
 for iax, (aname, ax) in enumerate(axs.items()):
-    if aname == "diagram":
+    LOGGER.info(f"Plot {aname}")
+    if aname.startswith("diagram"):
         pa, pb = 0.0, 0.995
 
         xx, zz, marg = {}, {}, {}
@@ -186,66 +188,61 @@ for iax, (aname, ax) in enumerate(axs.items()):
                       alpha=0.4)
         surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
 
-        # Pall integral
+        # integral
         xt1 = xthresh[ista1]
         xt2 = xthresh[ista2]
-        ii = (XX1 >= xt1) & (XX2 >= xt2)
+        if re.search("any", aname):
+            ii = (XX1 >= xt1) & (XX2 >= xt2)
+        else:
+            ii = (XX1 >= xt1) | (XX2 >= xt2)
         PP[~ii] = np.nan
-        kwargs["alpha"] = 1.
+        kwargs["alpha"] = 0.8
         surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
 
-        # Marginals
-        y0, y1 = ax.get_ylim()
-        x0, x1 = ax.get_xlim()
-
-        z = marg[ista1]
-        z *= ppmax / z.max()
-        d = z * 0 + y1
-        ax.plot(xx[ista1], d, z, "k-", lw=1, zorder=2)
-
-        z = marg[ista2]
-        z *= ppmax / z.max()
-        d = z * 0 + x1
-        ax.plot(d, xx[ista2], z, "k-", lw=1, zorder=2)
-
-        ax.set_xlim((x0, x1))
-        ax.set_ylim((y0, y1))
-
-        elev = 50
-        azim = -140
+        elev = 45
+        azim = -110
         roll = 0.
         ax.view_init(elev, azim, roll)
         ax.set_proj_type("ortho")
-        ax.zaxis.set_major_locator(ticker.MaxNLocator(4))
+        ax.xaxis.set_major_locator(ticker.MaxNLocator(3))
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
+        ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
 
         xlab = f"Peak flow {sta1} [m3.s-1]"
         ylab = f"Peak flow {sta2} [m3.s-1]"
-        zlab = "Pr [-]"
+        zlab = "Pr(X,Y) [-]"
         ax.set(xlabel=xlab, ylabel=ylab, zlabel=zlab)
-        continue
 
-    stat = aname
+        title = f"({letters[iax]})"
+    else:
+        stat = aname
 
-    x0, x1 = (-8, -2.7) if stat == "pall" else (-1.7, -1.2)
-    bins = np.logspace(x0, x1, 50)
+        x0, x1 = (-8, -2.7) if stat == "pall" else (-1.7, -1.2)
+        bins = np.logspace(x0, x1, 50)
 
-    for ig, gname in enumerate(groups):
-        sel = df.loc[:, f"{gname}_log10_{stat}"]
-        se = 10**sel
-        lab = f"Site group {gname}\n(mean={se.mean():0.2e})"
-        ax.hist(se, bins=bins, edgecolor="0.5",
-                facecolor=cols[ig],
-                alpha=0.6, label=lab)
+        for ig, gname in enumerate(groups):
+            sel = df.loc[:, f"{gname}_log10_{stat}"]
+            se = 10**sel
+            lab = f"{gname} (mean={se.mean():0.2e})"
+            ax.hist(se, bins=bins, edgecolor="0.5",
+                    facecolor=cols[ig],
+                    alpha=0.6, label=lab)
 
-    title = f"({letters[iax]}) Statistic {stat}"
-    xlab = "Event Exceedance Probability [-]"
-    ylab = "Sample count [-]"
-    ax.set(title=title, xlabel=xlab, xscale="log",
-           ylabel=ylab)
-    ax.legend(fontsize="small")
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
-    ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+        xlab = "Event Exceedance Probability [-]"
+        ylab = "Sample count [-]"
+        ax.set(xlabel=xlab, ylabel=ylab)
 
+        ax.legend(fontsize="small", loc=1)
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
+        ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+        ax.set_xscale("log")
+
+        title = f"({letters[iax]}) Statistic {stat}"
+
+    ax.set_title(title, x=0.02, y=0.98, va="top", ha="left",
+                 transform=ax.transAxes, fontweight="bold")
+
+LOGGER.info("Saving to disk")
 fp = fimg / f"{basename}.png"
 fig.savefig(fp)
 
