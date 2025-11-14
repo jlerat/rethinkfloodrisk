@@ -57,39 +57,44 @@ groups_mvn_cdf = {
     "G02-14": ["203002", "203014"]
     }
 
-# Select fit task with
-pcensor = 0.3
-exclude = "NONE"
-
-source_file = Path(__file__).resolve()
-froot = source_file.parent.parent.parent
-fopm = froot / "outputs" / "copulafit_options.json"
-opm_fit = hyruns.OptionManager.from_file(fopm)
-fit_taskid = opm_fit.search(pcensor=pcensor,
-                            exclude=exclude)[0]
-
-# Obs events
-obs = [event for event in opm_fit.options["exclude"] if event != "NONE"]
-
 # Runner
-opm = hyruns.OptionManager(fit_taskid=fit_taskid,
-                           stationid_cond=stationid_cond,
+opm = hyruns.OptionManager(stationid_cond=stationid_cond,
                            eep_target=eep_target,
                            zcdf=zcdf)
-opm.from_cartesian_product(batch=np.arange(nbatch))
+# Select fit task with
+pcensors = [0.3, 0.5]
+excludes = ["NONE"]
+
+opm.from_cartesian_product(batch=np.arange(nbatch),
+                           pcensor=pcensors,
+                           exclude=excludes)
 
 # Load task
 task = opm.get_task(max(0, taskid))
 batch = task.batch
+pcensor = task.pcensor
+exclude = task.exclude
 
 # Frequency of log report
 iterlog = 5
 
+if debug:
+    batch = 0
+    pcensor = 0.5
+    exclude = "NONE"
+
 # ----------------------------------------------------------------------
 # @Folders
 # ----------------------------------------------------------------------
+source_file = Path(__file__).resolve()
+froot = source_file.parent.parent.parent
 
+fopm = froot / "outputs" / "copulafit_options.json"
+opm_fit = hyruns.OptionManager.from_file(fopm)
+fit_taskid = opm_fit.search(pcensor=pcensor,
+                            exclude=exclude)[0]
 ftask = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
+
 fwrite = ftask / "mvnprocess"
 fwrite.mkdir(exist_ok=True, parents=True)
 
@@ -102,6 +107,7 @@ flog.parent.mkdir(exist_ok=True, parents=True)
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
 LOGGER.log_dict(vars(args), "Command line arguments")
+task.log(LOGGER)
 
 if debug:
     fwrite = froot / "logs" / basename / "mvnprocess"
@@ -111,6 +117,11 @@ if debug:
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+
+# Obs events
+obs = [event for event in opm_fit.options["exclude"] if event != "NONE"]
+
+# Peaks
 potpeaks = datahub.get_potpeaks().filter(regex="_PEAK$", axis=1)
 potpeaks.columns = potpeaks.columns.str.replace("_PEAK", "")
 
@@ -131,7 +142,7 @@ def get_station_index(sid):
 icond_1 = np.where(stationids == stationid_cond)[0]
 icond_2 = np.where(stationids != stationid_cond)[0]
 
-LOGGER.info(f"Load report TASK {fit_taskid} exclude={exclude}")
+LOGGER.info(f"Load samples TASK {fit_taskid}")
 fs = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
 samples = pd.read_csv(fs, skiprows=15)
 
@@ -146,6 +157,7 @@ if debug:
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
+
 gev = GEV()
 
 nsamples = len(samples)
@@ -200,6 +212,9 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
         #LOGGER.info("Computing probs", ntab=1)
         rv = mvn(mean=mean, cov=cor)
+
+        sys.exit()
+
 
         # All above threshold
         x = -zcdf * np.ones(ngstations)
