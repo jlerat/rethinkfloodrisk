@@ -243,9 +243,10 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 gev.params = [ylocn, ylogscale, yshape1]
                 qo = pp[sid]
                 if ~np.isnan(qo):
+                    cdf = gev.cdf(qo)
                     # Store individual estimate of event
                     if gname == "GALL":
-                        lc = math.log10(1 - gev.cdf(qo))
+                        lc = math.log10(1 - cdf)
                         res.loc[i, f"G{sid}_obs_log10eep_{event}"] = lc
 
                     zstd[k] = norm.ppf(cdf)
