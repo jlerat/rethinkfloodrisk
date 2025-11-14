@@ -57,6 +57,10 @@ groups_mvn_cdf = {
     "G02-14": ["203002", "203014"]
     }
 
+if debug:
+    groups_mvn_cdf = {k: v for k, v in groups_mvn_cdf.items()
+                      if k == "GALL"}
+
 # Runner
 opm = hyruns.OptionManager(stationid_cond=stationid_cond,
                            eep_target=eep_target,
@@ -120,6 +124,8 @@ LOGGER.info("Load data")
 
 # Obs events
 obs = [event for event in opm_fit.options["exclude"] if event != "NONE"]
+if debug:
+    obs = ["2022-02-27"]
 
 # Peaks
 potpeaks = datahub.get_potpeaks().filter(regex="_PEAK$", axis=1)
@@ -170,7 +176,7 @@ gsta = [f"G{sid}" for sid in stationids]
 cols_obs = [f"{g}_obs_log10eep_{event}" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
-stats = ["log10_pall_eeptarget", "log10_pany_eeptarget"]
+stats = ["log10pall_eeptarget", "log10pany_eeptarget"]
 
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
     + cols_mu + cols_sig + cols_smp + cols_obs
@@ -184,8 +190,9 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
     L_cor = smp.filter(regex="L_cor").values.reshape((nvar, nvar)).T
     cor_all = L_cor @ L_cor.T
-    k = np.arange(nvar)
-    cor_all[k, k] = 1.
+
+    si = 1. / np.sqrt(np.diag(cor_all))[:, None]
+    cor_all = si * cor_all * si.T
 
     # MVN conditional
     S11 = cor_all[icond_1][:, icond_1]
@@ -217,13 +224,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         x = -zcdf * np.ones(ngstations)
         pall = rv.cdf(x)
         lpall = math.log10(pall) if pall > 0 else np.nan
-        res.loc[i, f"{gname}_log10_pall"] = lpall
+        res.loc[i, f"{gname}_log10pall"] = lpall
 
         # Any above threshold
         x = zcdf * np.ones(ngstations)
         pany = 1 - rv.cdf(x)
         lpany = math.log10(pany) if pany > 0 else np.nan
-        res.loc[i, f"{gname}_log10_pany"] = lpany
+        res.loc[i, f"{gname}_log10pany"] = lpany
 
         # Obs eep
         for event in obs:
@@ -253,6 +260,8 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
             lc = math.log10(rv.cdf(-zstd))
             res.loc[i, f"{gname}_obs_log10eep_{event}"] = lc
+            sys.exit()
+
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

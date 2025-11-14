@@ -35,6 +35,31 @@ from pyrethink import datahub
 # @Config
 # ----------------------------------------------------------------------
 
+import matplotlib.pyplot as plt
+
+nv = 8
+
+nx = nv * (nv + 1) // 2
+nsmp = 1000
+Z = np.zeros((nsmp, nv, nv))
+for i in range(nsmp):
+    x = np.random.normal(scale=0.9, size=nx)
+    X = np.zeros((nv, nv))
+    X[np.tril_indices(nv)] = x
+    Y = np.exp(X)
+    Y[np.triu_indices(nv, 1)] = 0
+    Ys = np.sqrt((Y**2).sum(axis=1))[:, None]
+    Y = Y / Ys
+    Z[i] = Y @ Y.T
+
+plt.close("all")
+bins = np.linspace(0, 1, 30)
+plt.hist(Z[:, 0, 1], bins=bins, facecolor="0.8", edgecolor="0.2")
+plt.show()
+
+sys.exit()
+
+
 # ----------------------------------------------------------------------
 # @Folders
 # ----------------------------------------------------------------------
@@ -78,7 +103,7 @@ for ftask in fout.glob("*TASK*"):
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    LOGGER.info(f"pcens={diag['pcensor']} - period={diag['timeperiod']}",
+    LOGGER.info(f"pcens={diag['pcensor']} - period={diag['exclude']}",
                 nret=1)
 
     for imet, me in enumerate(report.STAN_DIAGNOSTIC_VARIABLES):
