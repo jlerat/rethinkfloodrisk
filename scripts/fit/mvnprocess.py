@@ -213,9 +213,6 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         #LOGGER.info("Computing probs", ntab=1)
         rv = mvn(mean=mean, cov=cor)
 
-        sys.exit()
-
-
         # All above threshold
         x = -zcdf * np.ones(ngstations)
         pall = rv.cdf(x)
