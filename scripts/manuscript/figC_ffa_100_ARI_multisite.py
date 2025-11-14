@@ -33,10 +33,13 @@ from mpl_toolkits.mplot3d.proj3d import proj_transform
 from matplotlib.text import Annotation
 import matplotlib.patheffects as pe
 
-from hydrodiy.io import csv, iutils
-from hydrodiy.plot import putils, violinplot
+from hydrodiy.io import csv, iutils, hyruns
+from hydrodiy.plot import putils
+
 from pyrethink import datahub
+
 from floodstan import marginals
+from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 
 # ----------------------------------------------------------------------
 # @Config
@@ -59,6 +62,9 @@ eep_target_plot = 0.95
 
 sta1 = "203002"
 sta2 = "203014"
+
+pcensor = 0.5
+exclude = "NONE"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -108,20 +114,28 @@ def annotate3D(ax, s, *args, **kwargs):
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
+
 # Select fit task with
-for fold in fout.glob("copulafit_TASK*"):
-    lf = [f for f in fold.glob("*.zip")
-          if re.search("mvnprocess", f.stem)]
-    if len(lf) > 0:
-        taskid = int(re.sub(".*TASK", "", fold.stem))
-        break
+fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+with fd.open("r") as fo:
+    diag = json.load(fo)
+
+LOGGER.info(f"Load report TASK {taskid} exclude={exclude} pcensor={pcensor}")
+for vn in SDV:
+    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+
+fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+df, comment = csv.read_csv(fs)
 
 stations = datahub.get_stations()
 
-LOGGER.info(f"Load data TASK {taskid}")
 fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
 with fd.open("r") as fo:
     data = json.load(fo)
+
 stationids = data["stationids"]
 nstations = len(stationids)
 ista1 = stationids.index(sta1)
@@ -158,7 +172,6 @@ cor = L_cor @ L_cor.T
 k = np.arange(nstations)
 cor[k, k] = 1.
 
-LOGGER.info(f"Load mvnprocess TASK {taskid}")
 fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
 df, comment = csv.read_csv(fs)
 

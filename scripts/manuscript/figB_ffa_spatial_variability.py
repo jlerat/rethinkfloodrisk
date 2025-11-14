@@ -24,8 +24,11 @@ import pandas as pd
 from scipy.stats import norm
 import matplotlib.pyplot as plt
 
-from hydrodiy.io import csv, iutils
+from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils, violinplot
+
+from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
+
 from pyrethink import datahub
 
 # ----------------------------------------------------------------------
@@ -46,6 +49,9 @@ fdpi = 300
 
 stationid_target = "203002"
 eep_target = 1 - 1e-2
+
+pcensor = 0.5
+exclude = "NONE"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -72,17 +78,21 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-# Select fit task with
-for fold in fout.glob("copulafit_TASK*"):
-    lf = [f for f in fold.glob("*.zip")
-          if re.search("mvnprocess", f.stem)]
-    if len(lf) > 0:
-        taskid = int(re.sub(".*TASK", "", fold.stem))
-        break
-
 stations = datahub.get_stations()
 
-LOGGER.info(f"Load report TASK {taskid}")
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
+
+# Select fit task with
+fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+with fd.open("r") as fo:
+    diag = json.load(fo)
+
+LOGGER.info(f"Load report TASK {taskid} exclude={exclude} pcensor={pcensor}")
+for vn in SDV:
+    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+
 fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
 df, comment = csv.read_csv(fs)
 

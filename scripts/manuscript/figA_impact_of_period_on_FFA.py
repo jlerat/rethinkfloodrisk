@@ -25,7 +25,9 @@ import matplotlib.pyplot as plt
 
 from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
+
 from floodstan import freqplots
+from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 from pyrethink import datahub
 
 # ----------------------------------------------------------------------
@@ -98,6 +100,9 @@ for taskid in taskids:
             continue
 
     LOGGER.info(f"Load report TASK {taskid} exclude={exclude}")
+    for vn in SDV:
+        LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+
     fr = ftask / f"postprocess_report_TASK{taskid}.csv"
     df, _ = csv.read_csv(fr, index_col=0)
     ffa[exclude] = df

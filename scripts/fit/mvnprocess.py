@@ -167,7 +167,7 @@ cols_sig = [f"mvn_cond{sidc}_{sid}_sig" for sid in stationids[icond_2]]
 cols_smp = [f"mvn_cond{sidc}_{sid}_smp_cdf" for sid in stationids[icond_2]]
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_eep_{event}" for event in obs
+cols_obs = [f"{g}_obs_log10eep_{event}" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
 stats = ["log10_pall_eeptarget", "log10_pany_eeptarget"]
@@ -248,13 +248,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 if ~np.isnan(qo):
                     # Store individual estimate of event
                     if gname == "GALL":
-                        cdf = gev.cdf(qo)
-                        res.loc[i, f"G{sid}_obs_eep_{event}"] = 1 - cdf
+                        lc = math.log10(1 - gev.cdf(qo))
+                        res.loc[i, f"G{sid}_obs_log10eep_{event}"] = lc
 
                     zstd[k] = norm.ppf(cdf)
 
-            p_eep = rv.cdf(-zstd)
-            res.loc[i, f"{gname}_obs_eep_{event}"] = p_eep
+            lc = math.log10(rv.cdf(-zstd))
+            res.loc[i, f"{gname}_obs_log10eep_{event}"] = lc
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
