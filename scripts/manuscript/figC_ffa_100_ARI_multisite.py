@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 from mpl_toolkits.mplot3d.proj3d import proj_transform
 from matplotlib.text import Annotation
+import matplotlib.patheffects as pe
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils, violinplot
@@ -180,14 +181,19 @@ fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
 axs = {
     "diagram_pall": fig.add_subplot(2, 2, 1, projection="3d"),
     "diagram_pany": fig.add_subplot(2, 2, 3, projection="3d"),
-    "pall": fig.add_subplot(2, 2, 4),
-    "pany": fig.add_subplot(2, 2, 2),
+    "pall": fig.add_subplot(2, 2, 2),
+    "pany": fig.add_subplot(2, 2, 4),
     }
 
 cols = ["tab:blue", "tab:orange", "tab:green"]
 
+paef = pe.withStroke(linewidth=4,
+                     foreground="w")
+
 for iax, (aname, ax) in enumerate(axs.items()):
     LOGGER.info(f"Plot {aname}")
+    evtype = "or" if re.search("any", aname) else "and"
+
     if aname.startswith("diagram"):
         pa, pb = 0.0, 0.995
 
@@ -223,7 +229,7 @@ for iax, (aname, ax) in enumerate(axs.items()):
         # integral
         xt1 = xthresh[ista1]
         xt2 = xthresh[ista2]
-        if re.search("any", aname):
+        if evtype == "and":
             ii = (XX1 >= xt1) & (XX2 >= xt2)
         else:
             ii = (XX1 >= xt1) | (XX2 >= xt2)
@@ -240,15 +246,16 @@ for iax, (aname, ax) in enumerate(axs.items()):
         ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
         ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
 
-        txt = r"$Pr(X>x_0 \vee Y>y_0)$" if re.search("all", aname)\
-            else r"$Pr(X>x_0 \wedge Y>y_0)$"
+        txt = r"$Pr(X_1>x_1^* \cap X_2>x_2^*)$" if evtype == "and"\
+            else r"$Pr(X_1>x_1^* \cup X_2>x_2^*)$"
         xa = XX1[ii].mean()
         ya = XX2[ii].mean()
         diff = np.abs(XX1 - xa) + np.abs(XX2 - ya)
         iclose = np.where(diff == diff.min())
         za = PP[iclose][0]
         z0, z1 = ax.get_zlim()
-        zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [0.72, 0.8]]
+        wref = 0.5 if evtype == "and" else 0.85
+        zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [wref - 0.08, wref]]
         ax.text(xa, ya, zt1, txt, ha="right",
                 fontsize=12, fontweight="bold")
         ax.plot([xa, xa], [ya, ya], [zt0, za], "k-", lw=1)
@@ -259,7 +266,8 @@ for iax, (aname, ax) in enumerate(axs.items()):
         zlab = "Pr(X,Y) [-]"
         ax.set(xlabel=xlab, ylabel=ylab, zlabel=zlab)
 
-        title = f"({letters[iax]})"
+        title = f"({letters[iax]}) Bivariate distribution and"\
+                + f"\n'{evtype}' event"
     else:
         stat = aname
 
@@ -271,27 +279,51 @@ for iax, (aname, ax) in enumerate(axs.items()):
         for ig, gname in enumerate(groups):
             sel = df.loc[:, f"{gname}_log10_{stat}"]
             se = 10**sel
+            gg = "/".join([f"2030{s}" for s in gname[1:].split("-")])
+            lab = "All sites" if gname == "GALL" else f"Bivariate\n{gg}"
             ax.hist(se, bins=bins, edgecolor="0.5",
                     facecolor=cols[ig],
-                    alpha=0.6)
+                    alpha=0.6,
+                    label=lab)
 
+        # Got to do it outside of previous loop to maintain y0/y1
+        y0, y1 = ax.get_ylim()
+        for ig, gname in enumerate(groups):
+            sel = df.loc[:, f"{gname}_log10_{stat}"]
+            se = 10**sel
             m = se.mean()
             ml = math.log10(m)
             if (ml - x0) * (x1 - ml) > 0:
-                putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
+                #putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
+                ax.plot([m, m], [y0, y1], "-", lw=3, color=cols[ig])
+                ax.set_ylim((y0, y1))
+                w = 0.4
+                xy = (m, y1 * w + y0 * (1-w))
+                xytext = (0, 5)
+                txt = f"Mean\n{m:0.1e}"
+                ax.annotate(txt, xy, xytext,
+                            xycoords="data",
+                            va="bottom", ha="center",
+                            fontweight="bold",
+                            textcoords="offset points",
+                            path_effects=[paef])
 
         xlab = "Event Exceedance Probability [-]"
-        ylab = "Sample count [-]"
+        ylab = "MCMC Sample count [-]"
         ax.set(xlabel=xlab, ylabel=ylab)
 
-        ax.legend(fontsize="small", loc=1)
+        loc = 6 if evtype == "and" else 8
+        ax.legend(framealpha=0, loc=loc)
         ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
         ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
 
-        title = f"({letters[iax]}) Statistic {stat}"
+        title = r"$\bigcap_i\ X_i > x_i^*$" if evtype == "and"\
+            else r"$\bigcup_i\ X_i > x_i^*$"
+        title = f"({letters[iax]}) Probability of '{evtype}' event {title}"
 
     ax.set_title(title, x=0.02, y=0.98, va="top", ha="left",
-                 transform=ax.transAxes, fontweight="bold")
+                 transform=ax.transAxes, fontweight="bold",
+                 path_effects=[paef])
 
 LOGGER.info("Saving to disk")
 fp = fimg / f"{basename}.png"

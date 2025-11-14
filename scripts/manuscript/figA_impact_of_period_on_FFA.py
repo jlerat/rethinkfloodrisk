@@ -47,7 +47,7 @@ fdpi = 300
 
 ptype = "gumbel"
 
-pcensor = 0.3
+pcensor = 0.5
 excludes = ["NONE", "2022-02-27"]
 
 # ----------------------------------------------------------------------
@@ -168,6 +168,9 @@ for stationid, sinfo in stations.iterrows():
         aris = quantiles.index.to_series().str\
                 .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
 
+        inocens = 1 - 1./aris >= pcensor
+        quantiles = quantiles.loc[inocens]
+        aris = aris[inocens]
         freqplots.plot_marginal_quantiles(ax, aris, quantiles, ptype,
                                           center_column="POSTERIOR_PREDICTIVE",
                                           q0_column="5%",
