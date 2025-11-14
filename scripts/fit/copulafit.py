@@ -61,7 +61,7 @@ stan_progress = args.progress
 
 stan_seed = 5446
 
-stan_args = {"adapt_delta": 0.9}
+stan_args = {"adapt_delta": 0.99}
 
 # Runner
 opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
