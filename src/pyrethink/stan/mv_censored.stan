@@ -42,7 +42,8 @@ data {
   real shape1_lower;
   real<lower=shape1_lower> shape1_upper;
 
-  real<lower=1e-2, upper=2> eta_prior;
+  real<lower=-1, upper=1> rho_min;
+  real<lower=rho_min, upper=1> rho_max;
   
   vector[P] censors;
 }
@@ -52,6 +53,11 @@ transformed data {
   int<lower=0, upper=0> Ncheck = N * P - Nobs - Ncens - Nmiss;
 
   row_vector[P] zero_mean = zeros_row_vector(P);
+
+  // Required for correlation matrix transformation
+  real lam = (rho_max - rho_min) / 2;
+  matrix[P, P] Id = identity_matrix(P);
+  matrix[P, P] cor0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
 }
 
 parameters {
@@ -61,7 +67,7 @@ parameters {
   vector<lower=shape1_lower, upper=shape1_upper>[P] yshape1;
 
   // Correlation
-  cholesky_factor_corr[P] L_cor;
+  cholesky_factor_corr[P] L_IW;
   
   // Latent variables for missing data
   vector<lower=0, upper=1>[Nmiss] wlat_miss;
@@ -89,6 +95,12 @@ transformed parameters {
     int ivar = idx_cens[i][2]; 
     ulat_cens[i] = wlat_cens[i] * ucensors[ivar];
   }
+
+  // Standard deviations of covariance matrix
+  matrix[P, P] Si = diag_matrix(1. / sqrt(rows_dot_self(L_IW)));
+
+  // Computation of shifted correlation matrix 
+  matrix[P, P] cor_IW = cor0 + lam * quad_form(multiply_lower_tri_self_transpose(L_IW), Si);
 }
 
 model {
@@ -98,7 +110,7 @@ model {
   yshape1 ~ normal(yshape1_prior[1], yshape1_prior[2]) T[shape1_lower, shape1_upper];
 
   // Prior for cholesky factor of the correlation matrix
-  L_cor ~ lkj_corr_cholesky(eta_prior);
+  L_IW ~ inv_wishart_cholesky(P + 1., Id);
 
   // -- Latent variable matrix ---
   array[N] vector[P] z;
@@ -145,11 +157,11 @@ model {
   }
 
   // --- Likelihood ---
-  z ~ multi_normal_cholesky(zero_mean, L_cor);
+  z ~ multi_normal(zero_mean, cor_IW);
 }
 
 generated quantities {
-    vector[P] zrnd = multi_normal_cholesky_rng(zero_mean, L_cor);
+    vector[P] zrnd = multi_normal_rng(zero_mean, cor_IW);
     
     vector[P] yrnd;
     for(ivar in 1:P) {

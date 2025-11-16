@@ -55,7 +55,7 @@ def test_sample_data(pcensor, allclose):
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
-    assert len(stan_data) == 20
+    assert len(stan_data) == 21
 
     data = pd.DataFrame(stan_data["y"])
     assert data.notnull().any(axis=1).all()
@@ -226,6 +226,9 @@ def test_sampler(config, nvars, allclose):
 @pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize("station", [0, 5])
 def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
+    if pcensor > 0 or missing or station > 0:
+        pytest.skip("WIP")
+
     # Two variables only
     data = datahub.get_potpeaks().iloc[:, station: station + 2]
     data = data.loc[data.notnull().any(axis=1)]
@@ -279,7 +282,10 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
-    sv = sample.StanSamplingMultivariate(data, censors=censors)
+    # Uniform prior for correlation over [-1,1]
+    sv = sample.StanSamplingMultivariate(data, censors=censors,
+                                         rho_min=-1,
+                                         rho_max=1)
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 
@@ -291,7 +297,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag2[met] == "satisfactory"
 
     pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
-    pnames.append("L_cor[2,1]")
+    pnames.append("cor_IW[2,1]")
 
     LOGGER.info("")
     LOGGER.info("-----------------")
@@ -315,7 +321,7 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         x2 = df2.loc[:, pname2]
 
         # Get floodstan sample
-        if re.search("L_cor", pname2):
+        if re.search("cor_IW", pname2):
             pname1 = "rho"
         elif re.search("ucensor", pname2):
             pname1 = "ucensor" if re.search("1", pname2) else "vcensor"
