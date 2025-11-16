@@ -1,7 +1,4 @@
-from itertools import combinations_with_replacement as combsr
-import math
 import numpy as np
-from scipy.stats import norm
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
