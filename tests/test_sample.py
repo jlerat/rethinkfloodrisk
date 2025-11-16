@@ -6,6 +6,7 @@ import pytest
 import math
 import numpy as np
 import pandas as pd
+from scipy.linalg import toeplitz
 from scipy.stats import norm
 from scipy.stats import ttest_ind, ks_2samp
 import matplotlib.pyplot as plt
@@ -152,23 +153,24 @@ def test_stan_functions(kappa, allclose):
 
 
 def test_stan_cor(allclose):
-    data = datahub.get_potpeaks().iloc[:, :3]
-    sv = sample.StanSamplingMultivariate(data)
-    stan_inits = sv.initial_parameters
-    L_cor = stan_inits["L_cor"]
+    P = 5
+    Q = 10000
+
+    rho = 0.9
+    cor = toeplitz(rho ** np.arange(P))
+    L_cor = np.linalg.cholesky(cor)
+
     stan_data = {
-        "P": len(L_cor),
-        "Q": 2000,
+        "P": P,
+        "Q": Q,
         "L_cor": L_cor
         }
 
     df = stan_test_cor(data=stan_data)
-    P = stan_data["P"]
-    Q = stan_data["Q"]
+
     z = df.filter(regex="^zrnd").values.reshape((P, Q)).T
-    cor = np.corrcoef(z.T)
-    expected = L_cor @ L_cor.T
-    assert allclose(cor, expected, atol=3e-2)
+    zcor = np.corrcoef(z.T)
+    assert allclose(zcor, cor, atol=5e-3)
 
 
 @pytest.mark.parametrize("config", ["uncensored_nomissing",
