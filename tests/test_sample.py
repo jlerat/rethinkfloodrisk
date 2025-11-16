@@ -228,9 +228,6 @@ def test_sampler(config, nvars, allclose):
 @pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize("station", [0, 5])
 def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
-    if pcensor > 0 or missing or station > 0:
-        pytest.skip("WIP")
-
     # Two variables only
     data = datahub.get_potpeaks().iloc[:, station: station + 2]
     data = data.loc[data.notnull().any(axis=1)]
