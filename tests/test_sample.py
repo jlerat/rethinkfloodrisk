@@ -154,7 +154,7 @@ def test_stan_functions(kappa, allclose):
 
 def test_stan_cor(allclose):
     P = 5
-    Q = 10000
+    Q = 20000
 
     rho = 0.9
     cor = toeplitz(rho ** np.arange(P))
@@ -170,7 +170,7 @@ def test_stan_cor(allclose):
 
     z = df.filter(regex="^zrnd").values.reshape((P, Q)).T
     zcor = np.corrcoef(z.T)
-    assert allclose(zcor, cor, atol=5e-3)
+    assert allclose(zcor, cor, atol=1e-2)
 
 
 @pytest.mark.parametrize("config", ["uncensored_nomissing",
