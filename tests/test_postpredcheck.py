@@ -58,8 +58,7 @@ def test_generate_samples(allclose):
         z[:, ivar] = norm.ppf(uu)
 
     cor = np.corrcoef(z.T)
-    L_cor = params.filter(regex="L_cor").values.reshape((P, P)).T
-    expected = L_cor @ L_cor.T
+    expected = params.filter(regex="cor_IW").values.reshape((P, P)).T
     assert allclose(cor, expected, atol=2e-2)
 
 

@@ -30,6 +30,9 @@ SEED = 5446
 
 DEBUG = False
 
+# Used to write test data for postpred checks
+WRITE_SAMPLE_DATA = False
+
 PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
 
@@ -223,6 +226,14 @@ def test_sampler(config, nvars, allclose):
     kw["data"]["Nmiss"] += 1
     with pytest.raises(RuntimeError):
         mv_censored_sampling(**kw)
+
+    if config == "censored_missing" and WRITE_SAMPLE_DATA:
+        fd = FTESTS / "censored_missing_data.zip"
+        comp = dict(method="zip", compresslevel=9)
+        data.to_csv(fd, compression=comp)
+
+        fs = FTESTS / "censored_missing_samples.zip"
+        df.to_csv(fs, compression=comp)
 
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("missing", [False, True])
