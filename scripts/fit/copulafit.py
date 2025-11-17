@@ -61,7 +61,7 @@ stan_progress = args.progress
 
 stan_seed = 5446
 
-stan_args = {"adapt_delta": 0.99}
+stan_args = {} #"adapt_delta": 0.9}
 
 # Runner
 opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
@@ -109,10 +109,12 @@ opm.save(fopm)
 # ----------------------------------------------------------------------
 flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
+
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
 LOGGER.context = f"TASK{taskid}"
 LOGGER.log_dict(vars(args), "Command line arguments")
+
 task.log(LOGGER)
 
 if debug:
