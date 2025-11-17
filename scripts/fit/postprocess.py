@@ -36,6 +36,7 @@ parser.add_argument("-t", "--taskid", help="JobID",
 args = parser.parse_args()
 taskid = args.taskid
 debug = taskid < 0
+taskid = max(0, taskid)
 
 design_eris = [1.1, 1.2, 1.4, 1.6, 1.8,
                2, 5, 10, 20, 50, 70, 100, 150,
@@ -64,6 +65,10 @@ task = opm.get_task(taskid)
 fit_taskid = task.fit_taskid
 jobid = task.jobid
 
+if debug:
+    fit_taskid = 0
+    jobid = 1
+
 fout = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
 
 # ----------------------------------------------------------------------
@@ -76,9 +81,6 @@ LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
 LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
-
-if taskid < 0:
-    fout = froot / "logs" / "copulafit" / "outputs"
 
 # ----------------------------------------------------------------------
 # @Get data
