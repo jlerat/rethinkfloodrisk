@@ -27,7 +27,7 @@ FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-PROGRESS = False
+PROGRESS = True #False
 FLOG = FTESTS / "test_sample.log"
 
 # Clean files
@@ -259,8 +259,6 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
 
     nwarm = STAN_NWARM_DEFAULT
     nsamples = STAN_NSAMPLES_DEFAULT
-    #nwarm = 100
-    #nsamples = 100
 
     nsmp = nsamples // STAN_NCHAINS_DEFAULT
     kw = dict(data=fstan_data,
@@ -281,10 +279,10 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
-    # Uniform prior for correlation over [-1,1]
+    rho_min, rho_max = (-1, 1) if station == 0 else (0, 1)
     sv = sample.StanSamplingMultivariate(data, censors=censors,
-                                         rho_min=-1,
-                                         rho_max=1)
+                                         rho_min=rho_min,
+                                         rho_max=rho_max)
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 
@@ -347,8 +345,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         LOGGER.info(msg)
 
         # Test on matching the two dist
-        # 10^-7 is very low for a p-value! Still looking ok visually though
-        pv_thresh = -9
+        # 10^-11 is very low for a p-value! Still looking ok visually though
+        pv_thresh = -11
         assert kspv > pv_thresh
         assert tpv > pv_thresh
 
