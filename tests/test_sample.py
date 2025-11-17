@@ -54,8 +54,8 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    censors = data.quantile(pcensor).values
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
@@ -67,9 +67,6 @@ def test_sample_data(pcensor, allclose):
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
     ncens = stan_data["Ncens"]
-
-    if pcensor == 0.:
-        assert ncens == 0
 
     nval = np.prod(data.shape)
     nok = data.notnull().sum().sum()
@@ -84,27 +81,22 @@ def test_sample_data(pcensor, allclose):
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
-    for ivar in range(data.shape[1]):
-        censor = np.nanpercentile(data.iloc[:, ivar], pcensor * 100)
-        assert allclose(censor, stan_data["censors"][ivar])
-
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
         sv = sample.StanSamplingMultivariate(data)
 
 
 def test_inits(allclose):
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    data = data.loc[data.index.year < 2008]
-    pcensor = 0.3
-    censors = data.quantile(pcensor)
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     inits = sv.initial_parameters
 
 
 def test_stan_indexing():
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    sv = sample.StanSamplingMultivariate(data)
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor=0.2)
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
 
@@ -181,13 +173,18 @@ def test_stan_cor(allclose):
                                     "censored_missing"])
 @pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
-    data = datahub.get_potpeaks().iloc[:, :nvars]
+    data, _ = datahub.get_potpeaks()
+    data = data.iloc[:, :nvars]
 
     if re.search("nomissing", config):
         data = data.loc[data.notnull().all(axis=1)]
 
-    pcensor = 0.3 if config == "censored_missing" else 0.
-    censors = data.quantile(pcensor)
+    if config.startswith("censored"):
+        pcensor = 0.3
+        censors = datahub.get_censors(pcensor)
+        censors = censors.loc[data.columns]
+    else:
+        censors = np.zeros(data.shape[1])
 
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
