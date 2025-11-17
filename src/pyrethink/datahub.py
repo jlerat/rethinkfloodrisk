@@ -29,8 +29,10 @@ DATA_VERSION = CONFIG["data_version"]
 
 def get_stations():
     fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
-    df, _ = csv.read_csv(fs, index_col="STATIONID")
-    return df
+    df, _ = csv.read_csv(fs, index_col="STATIONID",
+                         dtype={"STATIONID": str})
+    potpeaks, _ = get_potpeaks()
+    return df.loc[potpeaks.columns, :]
 
 
 def get_potpeaks():
@@ -41,7 +43,11 @@ def get_potpeaks():
     values = df._get_numeric_data()
     values[values < 0] = np.nan
 
-    return df
+    wy = df.WATERYEAR.astype(int)
+    df = df.filter(regex="_PEAK", axis=1)
+    df.columns = df.columns.str.replace("_PEAK", "")
+
+    return df, wy
 
 
 def get_potpeaks_thresh():
@@ -55,6 +61,34 @@ def get_potpeaks_thresh():
     qthresh = pd.Series(qthresh)
     qthresh.name = "POT_thresh[m3.s-1]"
     return qthresh
+
+
+def get_ams(stationid):
+    fa = f"AMS_streamflow_{stationid}_v{DATA_VERSION}.csv"
+    fa = DATA_FOLDER / "ams" / fa
+
+    if not fa.exists():
+        errmsg = f"Cannot find ams data for station {stationid}."
+        raise ValueError(errmsg)
+
+    ams, _ = csv.read_csv(fa, parse_dates=True)
+    return ams
+
+
+def get_censors(pcensor):
+    if pcensor < 0 or pcensor > 1:
+        errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
+        raise ValueError(errmsg)
+
+    potpeaks, _ = get_potpeaks()
+    censors = pd.Series(np.nan, index=potpeaks.columns)
+
+    for stationid in potpeaks.columns:
+        ams = get_ams(stationid)
+        qmax = ams.loc[:, f"{stationid}_PEAK"]
+        censors.loc[stationid] = qmax.quantile(pcensor)
+
+    return censors
 
 
 def get_rating_curves(stationid, only_last=False):

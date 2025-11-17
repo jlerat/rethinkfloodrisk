@@ -68,25 +68,27 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
                            stan_nchains=stan_nchains,
                            stan_nsamples=stan_nsamples)
 
-pcensors = [0., 0.3, 0.5]
+pcensors = [0.1, 0.3, 0.5]
 
 excludes = ["NONE",
             "2022-02-27",
-            "2008-01-04",
-            "2005-06-29",
-            "2016-06-04",
-            "2017-03-31"]
+            "2008-01-04"]
+
+rho_mins = [-1., 0.]
 
 opm.from_cartesian_product(pcensor=pcensors,
-                           exclude=excludes)
+                           exclude=excludes,
+                           rho_min=rho_mins)
 
 # Load task
 task = opm.get_task(max(0, taskid))
 pcensor = task.pcensor
 exclude = task.exclude
+rho_min = task.rho_min
 
 if debug:
     pcensor = 0.3
+    rho_min = 0.
     exclude = "2008-01-04"
 
 # ----------------------------------------------------------------------
@@ -121,21 +123,15 @@ if debug:
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+
 stations = datahub.get_stations()
-
-potpeaks = datahub.get_potpeaks()
-potpeaks_time = potpeaks.filter(regex="WATERYEAR", axis=1).reset_index()
-potpeaks_time = potpeaks_time.astype({"WATERYEAR": int, "DAY": str})
-potpeaks = potpeaks.filter(regex="_PEAK", axis=1)
-
-# Compute censors independently of selected period
-censors = potpeaks.quantile(pcensor)
+potpeaks, _ = datahub.get_potpeaks()
+censors = datahub.get_censors(pcensor)
 
 # Exclude time period
 if exclude != "NONE":
     iok = potpeaks.index != exclude
     potpeaks = potpeaks.loc[iok]
-    potpeaks_time = potpeaks_time.loc[iok]
 
 # ----------------------------------------------------------------------
 # @Process
@@ -203,8 +199,8 @@ with fd.open("w") as fo:
 
 # Store data with additional info
 stan_data["pcensors"] = pcensors.to_dict()
-stan_data["potpeaks_time"] = potpeaks_time.to_dict()
-stan_data["stationids"] = potpeaks.columns.str.replace("_PEAK", "").tolist()
+stan_data["potpeaks_time"] = potpeaks.index.tolist()
+stan_data["stationids"] = potpeaks.columns.tolist()
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
 for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:

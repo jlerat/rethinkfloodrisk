@@ -19,8 +19,8 @@ def test_get_stations():
     df = datahub.get_stations()
 
 def test_potpeaks():
-    df = datahub.get_potpeaks()
-    df = df.filter(regex="_PEAK", axis=1)
+    df, wy = datahub.get_potpeaks()
+    assert df.shape == (86, 8)
     assert (df.min() > 0).all()
 
 def test_potpeaks_thresh():
@@ -40,6 +40,23 @@ def test_rating_curves(stationid):
     rc, meta = datahub.get_rating_curves(stationid, True)
     assert isinstance(rc, pd.DataFrame)
     assert isinstance(meta, pd.DataFrame)
+
+
+@pytest.mark.parametrize("stationid",
+                         datahub.get_stations().index.tolist())
+def test_ams(stationid):
+    with pytest.raises(ValueError, match="Cannot find ams data"):
+        ams = datahub.get_ams("bidule")
+
+    ams = datahub.get_ams(stationid)
+
+
+@pytest.mark.parametrize("pcensor", [0, 0.5, 1])
+def test_censors(pcensor):
+    with pytest.raises(ValueError, match="Expected pcensor in"):
+        _ = datahub.get_censors(2)
+
+    censors = datahub.get_censors(pcensor)
 
 
 def test_linear_interpolation(allclose):
