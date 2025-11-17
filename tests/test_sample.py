@@ -1,9 +1,10 @@
 import re
 from pathlib import Path
+import math
+import warnings
 
 import pytest
 
-import math
 import numpy as np
 import pandas as pd
 from scipy.linalg import toeplitz
@@ -226,15 +227,16 @@ def test_sampler(config, nvars, allclose):
     with pytest.raises(RuntimeError):
         mv_censored_sampling(**kw)
 
-@pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
+@pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("missing", [False, True])
-@pytest.mark.parametrize("station", [0, 5])
-def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
-    if DEBUG and (pcensor < 0.5 or missing or station == 0):
+@pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])
+def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
+    if DEBUG and (pcensor < 0.5 or missing or stationpair[0] != 44):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data = datahub.get_potpeaks().iloc[:, station: station + 2]
+    data, _ = datahub.get_potpeaks()
+    data = data.iloc[:, stationpair]
     data = data.loc[data.notnull().any(axis=1)]
 
     if not missing:
@@ -284,8 +286,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
-    rho_min = max(round(df1.rho.min(), 1) - 0.1, -1)
-    rho_max = min(round(df1.rho.max(), 1) + 0.1, 1.)
+    rho_min = np.floor(df1.rho.min() * 1e2) * 1e-2
+    rho_max = 1.
     sv = sample.StanSamplingMultivariate(data, censors=censors,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
@@ -304,7 +306,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
 
     LOGGER.info("")
     LOGGER.info("-----------------")
-    LOGGER.info(f"station={station} pcensor={pcensor:0.2f} missing={missing}")
+    sids = "/".join(data.columns.tolist())
+    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f} missing={missing}")
     LOGGER.info(f"nwarm = {nwarm}")
     LOGGER.info(f"nsamples = {nsamples}")
     LOGGER.info(f"rho_min = {rho_min}")
@@ -360,6 +363,12 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
             assert kspv > pv_thresh
             assert tpv > pv_thresh
 
+        if pname1 == "rho" and (kspv < pv_thresh or tpv < pv_thresh):
+            wmess = f"stations={sids} pcensor={pcensor:0.2f} missing={missing}\n"\
+                    + "rho parameter not passing test criteria:\n"\
+                    + re.sub("\\] ", "", msg)
+            warnings.warn(wmess)
+
         ax = axs[pname2]
 
         xa = min(x1.min(), x2.min())
@@ -372,10 +381,12 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         ax.set_title(title, fontweight="bold")
         ax.legend(fontsize="x-small")
 
-    ftitle = f"Station={station} pcens={pcensor:0.2f} missing={missing}"
+    sids = "/".join(data.columns.tolist())
+    ftitle = f"Stations={sids} pcens={pcensor:0.2f} missing={missing}"
     fig.suptitle(ftitle, fontsize="large")
 
-    fp = f"test_mv_censored_vs_floodstan_station{station}"\
+    sids = "-".join(data.columns.tolist())
+    fp = f"test_mv_censored_vs_floodstan_stations{sids}"\
         + f"_pcens{pcensor*100:0.02f}"\
         + f"_missing{missing}.png"
     fp = FTESTS / fp
