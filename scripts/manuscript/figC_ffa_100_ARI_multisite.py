@@ -149,12 +149,12 @@ if not fe.exists():
     ylocs = samples.filter(regex="ylocn", axis=1).mean()
     ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
     yshape1 = samples.filter(regex="yshape1", axis=1).mean()
-    L_cor = samples.filter(regex="L_cor", axis=1).mean()
+    cor = samples.filter(regex="cor_IW", axis=1).mean()
     expected = {
         "ylocs": ylocs.to_dict(),
         "ylogscales": ylogscales.to_dict(),
         "yshape1": yshape1.to_dict(),
-        "L_cor": L_cor.to_dict()
+        "cor_IW": cor.to_dict()
         }
     with fe.open("w") as fo:
         json.dump(expected, fo, indent=4)
@@ -165,12 +165,9 @@ else:
     ylocs = pd.Series(expected["ylocs"])
     ylogscales = pd.Series(expected["ylogscales"])
     yshape1 = pd.Series(expected["yshape1"])
-    L_cor = pd.Series(expected["L_cor"])
+    cor = pd.Series(expected["cor_IW"])
 
-L_cor = L_cor.values.reshape((nstations, nstations)).T
-cor = L_cor @ L_cor.T
-k = np.arange(nstations)
-cor[k, k] = 1.
+cor = cor.values.reshape((nstations, nstations)).T
 
 fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
 df, comment = csv.read_csv(fs)

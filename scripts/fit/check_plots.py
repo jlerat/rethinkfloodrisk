@@ -147,11 +147,11 @@ for ftask in fout.glob("*TASK*"):
     fig.savefig(fp)
 
     LOGGER.info("MCMC param distribution", ntab=1)
-    pini = df.columns.to_series().filter(regex="^y(locn|shape|logsc)|L_cor").values
+    pini = df.columns.to_series().filter(regex="^y(locn|shape|logsc)|cor_IW").values
     def select_parameters(pini):
         pnames = []
         for pn in pini:
-            if re.search("L_cor", pn):
+            if re.search("cor_IW", pn):
                 i1, i2 = [int(i) for i in re.sub(".*\\[|\\]", "", pn).split(",")]
                 if i2 < i1:
                     pnames.append(pn)

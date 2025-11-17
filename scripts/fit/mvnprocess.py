@@ -187,11 +187,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
         LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
-    L_cor = smp.filter(regex="L_cor").values.reshape((nvar, nvar)).T
-    cor_all = L_cor @ L_cor.T
-
-    si = 1. / np.sqrt(np.diag(cor_all))[:, None]
-    cor_all = si * cor_all * si.T
+    cor_all = smp.filter(regex="cor_IW").values.reshape((nvar, nvar)).T
 
     # MVN conditional
     S11 = cor_all[icond_1][:, icond_1]
@@ -259,8 +255,6 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
             lc = math.log10(rv.cdf(-zstd))
             res.loc[i, f"{gname}_obs_log10eep_{event}"] = lc
-            sys.exit()
-
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
