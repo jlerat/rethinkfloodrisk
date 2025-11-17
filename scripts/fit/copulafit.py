@@ -204,7 +204,7 @@ with fd.open("w") as fo:
 
 # Store data with additional info
 stan_data["pcensors"] = pcensors.to_dict()
-stan_data["potpeaks_time"] = potpeaks.index.tolist()
+stan_data["potpeaks_time"] = potpeaks.index.astype(str).tolist()
 stan_data["stationids"] = potpeaks.columns.tolist()
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
