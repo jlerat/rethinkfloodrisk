@@ -52,6 +52,7 @@ eep_target = 1 - 1e-2
 
 pcensor = 0.5
 exclude = "NONE"
+rho_min = 0
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -82,7 +83,9 @@ stations = datahub.get_stations()
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
-taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
+taskid = opm.search(pcensor=pcensor,
+                    exclude=exclude,
+                    rho_min=rho_min)[0]
 
 # Select fit task with
 fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"

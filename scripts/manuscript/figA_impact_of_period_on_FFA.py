@@ -50,6 +50,7 @@ fdpi = 300
 ptype = "gumbel"
 
 pcensor = 0.5
+rho_min = 0.
 excludes = ["NONE", "2022-02-27"]
 
 # ----------------------------------------------------------------------
@@ -81,10 +82,12 @@ stations = datahub.get_stations()
 if debug:
     stations = stations.iloc[:1]
 
-
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
-taskids = opm.search(pcensor=pcensor)
+taskids = opm.find(pcensor=pcensor,
+                   exclude="|".join(excludes),
+                   rho_min=rho_min)
+assert len(taskids) == len(excludes)
 
 ffa = {}
 data = {}
@@ -95,10 +98,6 @@ for taskid in taskids:
         diag = json.load(fo)
 
     exclude = diag["exclude"]
-    if excludes is not None:
-        if not exclude in excludes:
-            continue
-
     LOGGER.info(f"Load report TASK {taskid} exclude={exclude}")
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
@@ -111,8 +110,7 @@ for taskid in taskids:
     with fd.open("r") as fo:
         d = json.load(fo)
         y = pd.DataFrame(d["y"], columns=d["stationids"])
-        t = pd.DataFrame(d["potpeaks_time"]).reset_index(drop=True)
-        y = pd.concat([y, t], axis=1)
+        y.loc[:, "DAY"] = d["potpeaks_time"]
         data[exclude] = y
 
 # ----------------------------------------------------------------------

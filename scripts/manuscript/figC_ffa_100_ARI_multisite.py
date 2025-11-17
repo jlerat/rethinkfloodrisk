@@ -65,6 +65,7 @@ sta2 = "203014"
 
 pcensor = 0.5
 exclude = "NONE"
+rho_min = 0.
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -116,7 +117,9 @@ LOGGER.info("Load data")
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
-taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
+taskid = opm.search(pcensor=pcensor,
+                    rho_min=rho_min,
+                    exclude=exclude)[0]
 
 # Select fit task with
 fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
@@ -177,8 +180,6 @@ df, comment = csv.read_csv(fs)
 
 groups = df.columns.str.replace("_.*", "", regex=True).unique()
 groups = [g for g in groups if re.search("ALL|02-14$", g)]
-
-#eep_target = float(comment["eep_target"])
 
 # ----------------------------------------------------------------------
 # @Process
