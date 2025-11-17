@@ -27,7 +27,8 @@ FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-DEBUG = True
+DEBUG = False
+
 PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
 
