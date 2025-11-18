@@ -36,7 +36,7 @@ parser = argparse.ArgumentParser(description="Process mvn samples",
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=-1)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
-                    type=int, default=100)
+                    type=int, default=50)
 args = parser.parse_args()
 taskid = args.taskid
 nbatch = args.nbatch
@@ -67,10 +67,12 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
                            zcdf=zcdf)
 # Select fit task with
 pcensors = [0.3, 0.5]
+rho_mins = [-1, 0]
 excludes = ["NONE"]
 
 opm.from_cartesian_product(batch=np.arange(nbatch),
                            pcensor=pcensors,
+                           rho_min=rho_mins,
                            exclude=excludes)
 
 # Load task
@@ -78,6 +80,7 @@ task = opm.get_task(max(0, taskid))
 batch = task.batch
 pcensor = task.pcensor
 exclude = task.exclude
+rho_min = task.rho_min
 
 # Frequency of log report
 iterlog = 5
@@ -96,7 +99,9 @@ froot = source_file.parent.parent.parent
 fopm = froot / "outputs" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=pcensor,
+                            rho_min=rho_min,
                             exclude=exclude)[0]
+
 ftask = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
 
 fwrite = ftask / "mvnprocess"
@@ -187,11 +192,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
         LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
-    L_cor = smp.filter(regex="L_cor").values.reshape((nvar, nvar)).T
-    cor_all = L_cor @ L_cor.T
-
-    si = 1. / np.sqrt(np.diag(cor_all))[:, None]
-    cor_all = si * cor_all * si.T
+    cor_all = smp.filter(regex="cor_IW").values.reshape((nvar, nvar)).T
 
     # MVN conditional
     S11 = cor_all[icond_1][:, icond_1]
@@ -259,8 +260,6 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
             lc = math.log10(rv.cdf(-zstd))
             res.loc[i, f"{gname}_obs_log10eep_{event}"] = lc
-            sys.exit()
-
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

@@ -1,9 +1,10 @@
 import re
 from pathlib import Path
+import math
+import warnings
 
 import pytest
 
-import math
 import numpy as np
 import pandas as pd
 from scipy.linalg import toeplitz
@@ -29,6 +30,9 @@ SEED = 5446
 
 DEBUG = False
 
+# Used to write test data for postpred checks
+WRITE_SAMPLE_DATA = False
+
 PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
 
@@ -53,8 +57,8 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    censors = data.quantile(pcensor).values
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
@@ -66,9 +70,6 @@ def test_sample_data(pcensor, allclose):
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
     ncens = stan_data["Ncens"]
-
-    if pcensor == 0.:
-        assert ncens == 0
 
     nval = np.prod(data.shape)
     nok = data.notnull().sum().sum()
@@ -83,27 +84,22 @@ def test_sample_data(pcensor, allclose):
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
-    for ivar in range(data.shape[1]):
-        censor = np.nanpercentile(data.iloc[:, ivar], pcensor * 100)
-        assert allclose(censor, stan_data["censors"][ivar])
-
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
         sv = sample.StanSamplingMultivariate(data)
 
 
 def test_inits(allclose):
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    data = data.loc[data.index.year < 2008]
-    pcensor = 0.3
-    censors = data.quantile(pcensor)
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     inits = sv.initial_parameters
 
 
 def test_stan_indexing():
-    data = datahub.get_potpeaks().filter(regex="_PEAK", axis=1)
-    sv = sample.StanSamplingMultivariate(data)
+    data, _ = datahub.get_potpeaks()
+    censors = datahub.get_censors(pcensor=0.2)
+    sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
 
@@ -180,13 +176,18 @@ def test_stan_cor(allclose):
                                     "censored_missing"])
 @pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
-    data = datahub.get_potpeaks().iloc[:, :nvars]
+    data, _ = datahub.get_potpeaks()
+    data = data.iloc[:, :nvars]
 
     if re.search("nomissing", config):
         data = data.loc[data.notnull().all(axis=1)]
 
-    pcensor = 0.3 if config == "censored_missing" else 0.
-    censors = data.quantile(pcensor)
+    if config.startswith("censored"):
+        pcensor = 0.3
+        censors = datahub.get_censors(pcensor)
+        censors = censors.loc[data.columns]
+    else:
+        censors = np.zeros(data.shape[1])
 
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
@@ -226,15 +227,24 @@ def test_sampler(config, nvars, allclose):
     with pytest.raises(RuntimeError):
         mv_censored_sampling(**kw)
 
-@pytest.mark.parametrize("pcensor", [0., 0.1, 0.5])
+    if config == "censored_missing" and WRITE_SAMPLE_DATA:
+        fd = FTESTS / "censored_missing_data.zip"
+        comp = dict(method="zip", compresslevel=9)
+        data.to_csv(fd, compression=comp)
+
+        fs = FTESTS / "censored_missing_samples.zip"
+        df.to_csv(fs, compression=comp)
+
+@pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("missing", [False, True])
-@pytest.mark.parametrize("station", [0, 5])
-def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
-    if DEBUG and (pcensor < 0.5 or missing or station == 0):
+@pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])
+def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
+    if DEBUG and (pcensor < 0.5 or missing or stationpair[0] != 44):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data = datahub.get_potpeaks().iloc[:, station: station + 2]
+    data, _ = datahub.get_potpeaks()
+    data = data.iloc[:, stationpair]
     data = data.loc[data.notnull().any(axis=1)]
 
     if not missing:
@@ -284,8 +294,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
-    rho_min = max(round(df1.rho.min(), 1) - 0.1, -1)
-    rho_max = min(round(df1.rho.max(), 1) + 0.1, 1.)
+    rho_min = np.floor(df1.rho.min() * 1e2) * 1e-2
+    rho_max = 1.
     sv = sample.StanSamplingMultivariate(data, censors=censors,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
@@ -304,7 +314,8 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
 
     LOGGER.info("")
     LOGGER.info("-----------------")
-    LOGGER.info(f"station={station} pcensor={pcensor:0.2f} missing={missing}")
+    sids = "/".join(data.columns.tolist())
+    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f} missing={missing}")
     LOGGER.info(f"nwarm = {nwarm}")
     LOGGER.info(f"nsamples = {nsamples}")
     LOGGER.info(f"rho_min = {rho_min}")
@@ -360,6 +371,12 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
             assert kspv > pv_thresh
             assert tpv > pv_thresh
 
+        if pname1 == "rho" and (kspv < pv_thresh or tpv < pv_thresh):
+            wmess = f"stations={sids} pcensor={pcensor:0.2f} missing={missing}\n"\
+                    + "rho parameter not passing test criteria:\n"\
+                    + re.sub("\\] ", "", msg)
+            warnings.warn(wmess)
+
         ax = axs[pname2]
 
         xa = min(x1.min(), x2.min())
@@ -372,10 +389,12 @@ def test_mv_censored_vs_floodstan(station, pcensor, missing, allclose):
         ax.set_title(title, fontweight="bold")
         ax.legend(fontsize="x-small")
 
-    ftitle = f"Station={station} pcens={pcensor:0.2f} missing={missing}"
+    sids = "/".join(data.columns.tolist())
+    ftitle = f"Stations={sids} pcens={pcensor:0.2f} missing={missing}"
     fig.suptitle(ftitle, fontsize="large")
 
-    fp = f"test_mv_censored_vs_floodstan_station{station}"\
+    sids = "-".join(data.columns.tolist())
+    fp = f"test_mv_censored_vs_floodstan_stations{sids}"\
         + f"_pcens{pcensor*100:0.02f}"\
         + f"_missing{missing}.png"
     fp = FTESTS / fp

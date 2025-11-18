@@ -88,7 +88,6 @@ rho_min = task.rho_min
 
 if debug:
     pcensor = 0.3
-    rho_min = 0.
     exclude = "2008-01-04"
 
 # ----------------------------------------------------------------------
@@ -143,12 +142,16 @@ LOGGER.info(f"nwarm    = {stan_nwarm}", ntab=1, nret=1)
 LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
 LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 
-sv = sample.StanSamplingMultivariate(potpeaks, censors=censors)
-
+sv = sample.StanSamplingMultivariate(potpeaks,
+                                     censors=censors,
+                                     rho_min=rho_min,
+                                     rho_max=1.)
 stan_data = sv.to_dict()
 LOGGER.info(f"nobs    = {stan_data['Nobs']}", ntab=1, nret=1)
 LOGGER.info(f"ncens   = {stan_data['Ncens']}", ntab=1)
 LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
+LOGGER.info(f"rho_min = {stan_data['rho_min']}", ntab=1)
+LOGGER.info(f"rho_max = {stan_data['rho_max']}", ntab=1)
 
 pcensors = (potpeaks - censors < 0).sum() / potpeaks.notnull().sum()
 for ipn, (pname, pcensor) in enumerate(pcensors.items()):
@@ -201,7 +204,7 @@ with fd.open("w") as fo:
 
 # Store data with additional info
 stan_data["pcensors"] = pcensors.to_dict()
-stan_data["potpeaks_time"] = potpeaks.index.tolist()
+stan_data["potpeaks_time"] = potpeaks.index.astype(str).tolist()
 stan_data["stationids"] = potpeaks.columns.tolist()
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"

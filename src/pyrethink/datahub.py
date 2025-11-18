@@ -60,6 +60,7 @@ def get_potpeaks_thresh():
 
     qthresh = pd.Series(qthresh)
     qthresh.name = "POT_thresh[m3.s-1]"
+
     return qthresh
 
 
@@ -72,6 +73,7 @@ def get_ams(stationid):
         raise ValueError(errmsg)
 
     ams, _ = csv.read_csv(fa, parse_dates=True)
+
     return ams
 
 
