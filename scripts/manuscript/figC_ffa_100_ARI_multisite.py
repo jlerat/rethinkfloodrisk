@@ -58,6 +58,8 @@ aheight = 5
 fdpi = 100 # 300
 ngrid = 40
 
+eep_target = 0.99
+# eep used for the right-hand side plot (0.99 is too extreme, can't see it)
 eep_target_plot = 0.95
 
 sta1 = "203002"
@@ -114,232 +116,265 @@ def annotate3D(ax, s, *args, **kwargs):
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-fopm = fout / "copulafit_options.json"
-opm = hyruns.OptionManager.from_file(fopm)
-taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
-
-# Select fit task with
-fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
-with fd.open("r") as fo:
-    diag = json.load(fo)
-
-LOGGER.info(f"Load report TASK {taskid} exclude={exclude} pcensor={pcensor}")
-for vn in SDV:
-    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
-
-fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-df, comment = csv.read_csv(fs)
-
 stations = datahub.get_stations()
 
-fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
-with fd.open("r") as fo:
-    data = json.load(fo)
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskids = opm.search(pcensor=f"{pcensor:0.1f}",
+                     exclude=exclude)
 
-stationids = data["stationids"]
-nstations = len(stationids)
-ista1 = stationids.index(sta1)
-ista2 = stationids.index(sta2)
+data = {}
+for taskid in taskids:
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        diag = json.load(fo)
 
-fe = fimg / "expected_parameters.json"
-if not fe.exists():
-    LOGGER.info(f"Load samples TASK {taskid}")
-    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_samples_TASK{taskid}.zip"
-    samples = pd.read_csv(fs, skiprows=15)
-    ylocs = samples.filter(regex="ylocn", axis=1).mean()
-    ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
-    yshape1 = samples.filter(regex="yshape1", axis=1).mean()
-    L_cor = samples.filter(regex="L_cor", axis=1).mean()
-    expected = {
-        "ylocs": ylocs.to_dict(),
-        "ylogscales": ylogscales.to_dict(),
-        "yshape1": yshape1.to_dict(),
-        "L_cor": L_cor.to_dict()
+    pc = diag["pcensor"]
+    ex = diag["exclude"]
+    rm = diag["rho_min"]
+    rho_min = rm
+    mess = f"Load data TASK {taskid} exclude={ex} pcensor={pc} rho_min={rm}"
+    LOGGER.info(mess)
+    for vn in SDV:
+        LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+
+    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+    df, comment = csv.read_csv(fs)
+
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        stan_data = json.load(fo)
+
+    stationids = stan_data["stationids"]
+    nstations = len(stationids)
+    ista1 = stationids.index(sta1)
+    ista2 = stationids.index(sta2)
+
+    fe = fimg / f"expected_parameters_rho_min{rho_min:0.02f}.json"
+    if not fe.exists():
+        LOGGER.info(f"load samples", ntab=1)
+        fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_samples_TASK{taskid}.zip"
+        samples = pd.read_csv(fs, skiprows=15)
+        ylocs = samples.filter(regex="ylocn", axis=1).mean()
+        ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
+        yshape1 = samples.filter(regex="yshape1", axis=1).mean()
+        cor = samples.filter(regex="cor_IW", axis=1).mean()
+        expected = {
+            "ylocs": ylocs.to_dict(),
+            "ylogscales": ylogscales.to_dict(),
+            "yshape1": yshape1.to_dict(),
+            "cor_IW": cor.to_dict()
+            }
+        with fe.open("w") as fo:
+            json.dump(expected, fo, indent=4)
+
+    else:
+        LOGGER.info(f"read expected params from img folder", ntab=1)
+        with fe.open("r") as fo:
+            expected = json.load(fo)
+        ylocs = pd.Series(expected["ylocs"])
+        ylogscales = pd.Series(expected["ylogscales"])
+        yshape1 = pd.Series(expected["yshape1"])
+        cor = pd.Series(expected["cor_IW"])
+
+    cor = cor.values.reshape((nstations, nstations)).T
+
+    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+    df, comment = csv.read_csv(fs)
+
+    groups = df.columns.str.replace("_.*", "", regex=True).unique()
+    groups = [g for g in groups if re.search("ALL|02-14$", g)]
+
+    data[rho_min] = {
+        "ylocs": ylocs,
+        "ylogscales": ylogscales,
+        "yshape1": yshape1,
+        "cor": cor,
+        "groups": groups,
+        "df": df
         }
-    with fe.open("w") as fo:
-        json.dump(expected, fo, indent=4)
-
-else:
-    with fe.open("r") as fo:
-        expected = json.load(fo)
-    ylocs = pd.Series(expected["ylocs"])
-    ylogscales = pd.Series(expected["ylogscales"])
-    yshape1 = pd.Series(expected["yshape1"])
-    L_cor = pd.Series(expected["L_cor"])
-
-L_cor = L_cor.values.reshape((nstations, nstations)).T
-cor = L_cor @ L_cor.T
-k = np.arange(nstations)
-cor[k, k] = 1.
-
-fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-df, comment = csv.read_csv(fs)
-
-groups = df.columns.str.replace("_.*", "", regex=True).unique()
-groups = [g for g in groups if re.search("ALL|02-14$", g)]
-
-#eep_target = float(comment["eep_target"])
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
 gev = marginals.GEV()
 
-plt.close("all")
-mosaic = [["diagram", stat] for stat in ["pall", "pany"]]
-nrows = len(mosaic)
-ncols = len(mosaic[0])
-fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
-                 layout="tight")
-axs = {
-    "diagram_pall": fig.add_subplot(2, 2, 1, projection="3d"),
-    "diagram_pany": fig.add_subplot(2, 2, 3, projection="3d"),
-    "pall": fig.add_subplot(2, 2, 2),
-    "pany": fig.add_subplot(2, 2, 4),
-    }
+for rho_min, dd in data.items():
+    LOGGER.info(f"Plotting rho_min = {rho_min}", nret=1)
 
-cols = ["tab:blue", "tab:orange", "tab:green"]
+    # Get data
+    ylocs = dd["ylocs"]
+    ylogscales = dd["ylogscales"]
+    yshape1 = dd["yshape1"]
+    cor = dd["cor"]
+    groups = dd["groups"]
+    df = dd["df"]
 
-paef = pe.withStroke(linewidth=4,
-                     foreground="w")
+    plt.close("all")
+    mosaic = [["diagram", stat] for stat in ["pall", "pany"]]
+    nrows = len(mosaic)
+    ncols = len(mosaic[0])
+    fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+                     layout="tight")
+    axs = {
+        "diagram_pall": fig.add_subplot(2, 2, 1, projection="3d"),
+        "diagram_pany": fig.add_subplot(2, 2, 3, projection="3d"),
+        "pall": fig.add_subplot(2, 2, 2),
+        "pany": fig.add_subplot(2, 2, 4),
+        }
 
-for iax, (aname, ax) in enumerate(axs.items()):
-    LOGGER.info(f"Plot {aname}")
-    evtype = "or" if re.search("any", aname) else "and"
+    cols = ["tab:blue", "tab:orange", "tab:green"]
 
-    if aname.startswith("diagram"):
-        pa, pb = 0.0, 0.995
+    paef = pe.withStroke(linewidth=4,
+                         foreground="w")
 
-        xx, zz, marg = {}, {}, {}
-        xthresh, xlims = {}, {}
-        for ista in [ista1, ista2]:
-            gev.params = [ylocs.iloc[ista], ylogscales.iloc[ista],
-                          yshape1.iloc[ista]]
-            xa, xb = gev.ppf([pa, pb])
-            xa = max(xa, 0.)
-            xlims[ista] = (xa, xb)
-            xx[ista] = np.linspace(xa, xb, ngrid)
-            zz[ista] = norm.ppf(gev.cdf(xx[ista]))
-            marg[ista] = gev.pdf(xx[ista])
-            xthresh[ista] = gev.ppf(eep_target_plot)
+    for iax, (aname, ax) in enumerate(axs.items()):
+        LOGGER.info(f"Plot {aname}")
+        evtype = "or" if re.search("any", aname) else "and"
 
-        XX1, XX2 = np.meshgrid(xx[ista1], xx[ista2])
-        ZZ1, ZZ2 = np.meshgrid(zz[ista1], zz[ista2])
-        ZZ = np.dstack((ZZ1, ZZ2))
+        if aname.startswith("diagram"):
+            pa, pb = 0.0, 0.995
 
-        ii = [ista1, ista2]
-        rv = mvn(cov=cor[ii][:, ii])
-        PP = rv.pdf(ZZ)
-        ppmax = np.nanmax(PP)
+            xx, zz, marg = {}, {}, {}
+            xthresh, xlims = {}, {}
+            for ista in [ista1, ista2]:
+                gev.params = [ylocs.iloc[ista], ylogscales.iloc[ista],
+                              yshape1.iloc[ista]]
+                xa, xb = gev.ppf([pa, pb])
+                xa = max(xa, 0.)
+                xlims[ista] = (xa, xb)
+                xx[ista] = np.linspace(xa, xb, ngrid)
+                zz[ista] = norm.ppf(gev.cdf(xx[ista]))
+                marg[ista] = gev.pdf(xx[ista])
+                xthresh[ista] = gev.ppf(eep_target_plot)
 
-        # Bivariate pdf
-        kwargs = dict(cmap="viridis",
-                      linewidth=0.0,
-                      antialiased=False,
-                      alpha=0.4)
-        surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
+            XX1, XX2 = np.meshgrid(xx[ista1], xx[ista2])
+            ZZ1, ZZ2 = np.meshgrid(zz[ista1], zz[ista2])
+            ZZ = np.dstack((ZZ1, ZZ2))
 
-        # integral
-        xt1 = xthresh[ista1]
-        xt2 = xthresh[ista2]
-        if evtype == "and":
-            ii = (XX1 >= xt1) & (XX2 >= xt2)
+            ii = [ista1, ista2]
+            rv = mvn(cov=cor[ii][:, ii])
+            PP = rv.pdf(ZZ)
+            ppmax = np.nanmax(PP)
+
+            # Bivariate pdf
+            kwargs = dict(cmap="viridis",
+                          linewidth=0.0,
+                          antialiased=False,
+                          alpha=0.4)
+            surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
+
+            # integral
+            xt1 = xthresh[ista1]
+            xt2 = xthresh[ista2]
+            if evtype == "and":
+                ii = (XX1 >= xt1) & (XX2 >= xt2)
+            else:
+                ii = (XX1 >= xt1) | (XX2 >= xt2)
+            PP[~ii] = np.nan
+            kwargs["alpha"] = 0.8
+            surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
+
+            elev = 45
+            azim = -110
+            roll = 0.
+            ax.view_init(elev, azim, roll)
+            ax.set_proj_type("ortho")
+            ax.xaxis.set_major_locator(ticker.MaxNLocator(3))
+            ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
+            ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
+
+            txt = r"$Pr(X_1>x_1^* \cap X_2>x_2^*)$" if evtype == "and"\
+                else r"$Pr(X_1>x_1^* \cup X_2>x_2^*)$"
+            xa = XX1[ii].mean()
+            ya = XX2[ii].mean()
+            diff = np.abs(XX1 - xa) + np.abs(XX2 - ya)
+            iclose = np.where(diff == diff.min())
+            za = PP[iclose][0]
+            z0, z1 = ax.get_zlim()
+            wref = 0.5 if evtype == "and" else 0.85
+            zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [wref - 0.08, wref]]
+            ax.text(xa, ya, zt1, txt, ha="right",
+                    fontsize=12, fontweight="bold")
+            ax.plot([xa, xa], [ya, ya], [zt0, za], "k-", lw=1)
+            ax.plot(xa, ya, za, "o", mfc="k", mec="k")
+
+            xlab = f"Peak flow {sta1} [m3.s-1]"
+            ylab = f"Peak flow {sta2} [m3.s-1]"
+            zlab = "Pr(X,Y) [-]"
+            ax.set(xlabel=xlab, ylabel=ylab, zlabel=zlab)
+
+            title = f"({letters[iax]}) Bivariate distribution and"\
+                    + f"\n'{evtype}' event"
         else:
-            ii = (XX1 >= xt1) | (XX2 >= xt2)
-        PP[~ii] = np.nan
-        kwargs["alpha"] = 0.8
-        surf = ax.plot_surface(XX1, XX2, PP, **kwargs)
+            stat = aname
 
-        elev = 45
-        azim = -110
-        roll = 0.
-        ax.view_init(elev, azim, roll)
-        ax.set_proj_type("ortho")
-        ax.xaxis.set_major_locator(ticker.MaxNLocator(3))
-        ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
-        ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
+            # Adjust bounds
+            if stat == "pall":
+                x0, x1 = (-8.5, -2.) if rho_min == -1 else (-5., -2.)
+            else:
+                x0, x1 = -1.9, -1.2
 
-        txt = r"$Pr(X_1>x_1^* \cap X_2>x_2^*)$" if evtype == "and"\
-            else r"$Pr(X_1>x_1^* \cup X_2>x_2^*)$"
-        xa = XX1[ii].mean()
-        ya = XX2[ii].mean()
-        diff = np.abs(XX1 - xa) + np.abs(XX2 - ya)
-        iclose = np.where(diff == diff.min())
-        za = PP[iclose][0]
-        z0, z1 = ax.get_zlim()
-        wref = 0.5 if evtype == "and" else 0.85
-        zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [wref - 0.08, wref]]
-        ax.text(xa, ya, zt1, txt, ha="right",
-                fontsize=12, fontweight="bold")
-        ax.plot([xa, xa], [ya, ya], [zt0, za], "k-", lw=1)
-        ax.plot(xa, ya, za, "o", mfc="k", mec="k")
+            bins = np.logspace(x0, x1, 50)
+            ax.set_xlim((10**x0, 10**x1))
+            ax.set_xscale("log")
 
-        xlab = f"Peak flow {sta1} [m3.s-1]"
-        ylab = f"Peak flow {sta2} [m3.s-1]"
-        zlab = "Pr(X,Y) [-]"
-        ax.set(xlabel=xlab, ylabel=ylab, zlabel=zlab)
+            for ig, gname in enumerate(groups):
+                etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
+                cn = f"{gname}_log10{stat}_eeptarget_p{etxt}"
+                sel = df.loc[:, cn]
+                se = 10**sel
+                gg = "/".join([f"2030{s}" for s in gname[1:].split("-")])
+                lab = "All sites" if gname == "GALL" else f"Bivariate\n{gg}"
+                ax.hist(se, bins=bins, edgecolor="0.5",
+                        facecolor=cols[ig],
+                        alpha=0.6,
+                        label=lab)
 
-        title = f"({letters[iax]}) Bivariate distribution and"\
-                + f"\n'{evtype}' event"
-    else:
-        stat = aname
+            # Got to do it outside of previous loop to maintain y0/y1
+            y0, y1 = ax.get_ylim()
+            for ig, gname in enumerate(groups):
+                etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
+                cn = f"{gname}_log10{stat}_eeptarget_p{etxt}"
+                sel = df.loc[:, cn]
+                se = 10**sel
+                m = se.mean()
+                ml = math.log10(m)
+                if (ml - x0) * (x1 - ml) > 0:
+                    #putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
+                    ax.plot([m, m], [y0, y1], "-", lw=3, color=cols[ig])
+                    ax.set_ylim((y0, y1))
+                    w = 0.4
+                    xy = (m, y1 * w + y0 * (1-w))
+                    xytext = (0, 5)
+                    txt = f"Mean\n{m:0.1e}"
+                    ax.annotate(txt, xy, xytext,
+                                xycoords="data",
+                                va="bottom", ha="center",
+                                fontweight="bold",
+                                textcoords="offset points",
+                                path_effects=[paef])
 
-        x0, x1 = (-8.5, -2.2) if stat == "pall" else (-1.9, -1.2)
-        bins = np.logspace(x0, x1, 50)
-        ax.set_xlim((10**x0, 10**x1))
-        ax.set_xscale("log")
+            xlab = "Event Exceedance Probability [-]"
+            ylab = "MCMC Sample count [-]"
+            ax.set(xlabel=xlab, ylabel=ylab)
 
-        for ig, gname in enumerate(groups):
-            sel = df.loc[:, f"{gname}_log10_{stat}"]
-            se = 10**sel
-            gg = "/".join([f"2030{s}" for s in gname[1:].split("-")])
-            lab = "All sites" if gname == "GALL" else f"Bivariate\n{gg}"
-            ax.hist(se, bins=bins, edgecolor="0.5",
-                    facecolor=cols[ig],
-                    alpha=0.6,
-                    label=lab)
+            loc = 8
+            ax.legend(framealpha=0, loc=loc)
 
-        # Got to do it outside of previous loop to maintain y0/y1
-        y0, y1 = ax.get_ylim()
-        for ig, gname in enumerate(groups):
-            sel = df.loc[:, f"{gname}_log10_{stat}"]
-            se = 10**sel
-            m = se.mean()
-            ml = math.log10(m)
-            if (ml - x0) * (x1 - ml) > 0:
-                #putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
-                ax.plot([m, m], [y0, y1], "-", lw=3, color=cols[ig])
-                ax.set_ylim((y0, y1))
-                w = 0.4
-                xy = (m, y1 * w + y0 * (1-w))
-                xytext = (0, 5)
-                txt = f"Mean\n{m:0.1e}"
-                ax.annotate(txt, xy, xytext,
-                            xycoords="data",
-                            va="bottom", ha="center",
-                            fontweight="bold",
-                            textcoords="offset points",
-                            path_effects=[paef])
+            ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
+            ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
 
-        xlab = "Event Exceedance Probability [-]"
-        ylab = "MCMC Sample count [-]"
-        ax.set(xlabel=xlab, ylabel=ylab)
+            title = r"$\bigcap_i\ X_i > x_i^*$" if evtype == "and"\
+                else r"$\bigcup_i\ X_i > x_i^*$"
+            title = f"({letters[iax]}) Probability of '{evtype}' event {title}"
 
-        loc = 6 if evtype == "and" else 8
-        ax.legend(framealpha=0, loc=loc)
-        ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
-        ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+        ax.set_title(title, x=0.02, y=0.98, va="top", ha="left",
+                     transform=ax.transAxes, fontweight="bold",
+                     path_effects=[paef])
 
-        title = r"$\bigcap_i\ X_i > x_i^*$" if evtype == "and"\
-            else r"$\bigcup_i\ X_i > x_i^*$"
-        title = f"({letters[iax]}) Probability of '{evtype}' event {title}"
-
-    ax.set_title(title, x=0.02, y=0.98, va="top", ha="left",
-                 transform=ax.transAxes, fontweight="bold",
-                 path_effects=[paef])
-
-LOGGER.info("Saving to disk")
-fp = fimg / f"{basename}.png"
-fig.savefig(fp)
+    LOGGER.info("Saving to disk")
+    fp = fimg / f"{basename}_rho_min{rho_min:0.02f}.png"
+    fig.savefig(fp)
 
 LOGGER.completed()

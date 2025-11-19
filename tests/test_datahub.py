@@ -19,9 +19,10 @@ def test_get_stations():
     df = datahub.get_stations()
 
 def test_potpeaks():
-    df, wy = datahub.get_potpeaks()
+    df, wy, nu = datahub.get_potpeaks()
     assert df.shape == (86, 8)
     assert (df.min() > 0).all()
+    assert abs(nu - 1.82978) < 1e-2
 
 def test_potpeaks_thresh():
     thresh = datahub.get_potpeaks_thresh()
@@ -118,4 +119,18 @@ def test_linear_interpolation_plot(allclose):
 
     fp = FIMG / "linear_interpolation.png"
     fig.savefig(fp)
+
+
+def test_eep2aep(allclose):
+    nu = 2
+    x = np.logspace(-4, -1, 200)
+    y = datahub.eep2aep(nu, x)
+    fig, ax = plt.subplots()
+    ax.plot(x, y, "-")
+    x0, x1 = x[0], x[-1]
+    ax.plot([x0, x1], [x0, x1], "k--", lw=0.9)
+    ax.set(xscale="log", yscale="log")
+    fp = FIMG / "eep2aep.png"
+    fig.savefig(fp)
+
 

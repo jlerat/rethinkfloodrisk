@@ -1,17 +1,30 @@
-from itertools import combinations_with_replacement as combsr
 import numpy as np
-from scipy.stats import norm
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
-ETA_PRIOR_DEFAULT = 0.5
+RHO_MIN_DEFAULT = 0.
+RHO_MAX_DEFAULT = 1.
 
 MARGINAL = GEV()
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data, censors=None):
+    def __init__(self, data, censors=None,
+                 rho_min=RHO_MIN_DEFAULT,
+                 rho_max=RHO_MAX_DEFAULT):
+
+        if rho_min < -1 or rho_min > 1:
+            errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
+            raise ValueError(errmsg)
+
+        if rho_max <= rho_min or rho_max > 1:
+            errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
+            raise ValueError(errmsg)
+
+        self.rho_min = rho_min
+        self.rho_max = rho_max
+
         self.set_data(data, censors)
         self.set_initial_parameters()
 
@@ -64,9 +77,7 @@ class StanSamplingMultivariate():
         # GEV parameters and priors
         P = self.data.shape[1]
 
-        z = np.nan * np.zeros_like(self.data)
         gparams = np.zeros((P, 3))
-
         for ivar in range(P):
             vect = self.data[:, ivar]
             iok = ~np.isnan(vect)
@@ -75,29 +86,10 @@ class StanSamplingMultivariate():
             locn, logscale, shape1 = MARGINAL.params
             shape1 = -1e-2  # To avoid boundary problems with GEV
             gparams[ivar] = [locn, logscale, shape1]
-            z[iok, ivar] = norm.ppf(MARGINAL.cdf(vect))
 
-        # Compute pairwise covariance matrix
-        cov = np.eye(P)
-        for i1, i2 in combsr(range(P), 2):
-            z12 = z[:, [i1, i2]]
-            iok = np.all(~np.isnan(z12), axis=1)
-            co = np.cov(z12[iok].T)[0, 1]
-            cov[i1, i2] = co
-            cov[i2, i1] = co
-
-        # Modify covariance matrix
-        # to make sure it's positive definite
-        eig, M = np.linalg.eig(cov)
-        eig = np.maximum(eig, eig.max() * 1e-3)
-        cov = M @ np.diag(eig) @ M.T
-
-        # Compute correlation matrix
-        sigs = np.sqrt(np.diag(cov))[:, None]
-        cor = (1. / sigs) * cov * (1. / sigs.T)
-
-        # Compute cholesky decomposition
-        L_cor = np.linalg.cholesky(cor)
+        # Inverse Wishart cholesky -> initialised in the middle
+        # of rho_min and rho_max
+        L_IW = np.eye(P)
 
         # latent variables
         nmiss = len(self.idx_miss)
@@ -110,7 +102,7 @@ class StanSamplingMultivariate():
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "yshape1": gparams[:, 2],
-            "L_cor": L_cor,
+            "L_IW": L_IW,
             "wlat_cens": wlat_cens,
             "wlat_miss": wlat_miss
         }
@@ -136,6 +128,7 @@ class StanSamplingMultivariate():
             "shape1_lower": float(MARGINAL.shape1_prior.lower),
             "shape1_upper": float(MARGINAL.shape1_prior.upper),
             "censors": self.censors,
-            "eta_prior": ETA_PRIOR_DEFAULT
+            "rho_min": self.rho_min,
+            "rho_max": self.rho_max
         }
         return dd

@@ -48,8 +48,7 @@ def generate_samples(params, nval):
     yshape1 = params.filter(regex="yshape1").values
 
     P = len(ylocn)
-    L_cor = params.filter(regex="L_cor").values.reshape((P, P)).T
-    cor = L_cor @ L_cor.T
+    cor = params.filter(regex="cor_IW").values.reshape((P, P)).T
 
     z = np.random.multivariate_normal(mean=np.zeros(P), cov=cor,
                                       size=nval)

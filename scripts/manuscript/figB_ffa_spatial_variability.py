@@ -43,15 +43,15 @@ args = parser.parse_args()
 
 debug = args.debug
 
-awidth = 6
+awidth = 7
 aheight = 5
 fdpi = 300
 
 stationid_target = "203002"
-eep_target = 1 - 1e-2
 
 pcensor = 0.5
 exclude = "NONE"
+rho_mins = [-1, 0]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -80,40 +80,58 @@ LOGGER.info("Load data")
 
 stations = datahub.get_stations()
 
+data = {}
+
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
-taskid = opm.search(pcensor=pcensor, exclude=exclude)[0]
 
-# Select fit task with
-fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
-with fd.open("r") as fo:
-    diag = json.load(fo)
+for rho_min in rho_mins:
+    taskid = opm.search(pcensor=f"{pcensor:0.1f}",
+                        exclude=exclude,
+                        rho_min=f"{rho_min:0.1f}")[0]
+    mess = f"Load report TASK {taskid} exclude={exclude}"\
+           + f" pcensor={pcensor} rho_min={rho_min}"
+    LOGGER.info(mess)
 
-LOGGER.info(f"Load report TASK {taskid} exclude={exclude} pcensor={pcensor}")
-for vn in SDV:
-    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+    # Select fit task with
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        diag = json.load(fo)
 
-fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-df, comment = csv.read_csv(fs)
+    for vn in SDV:
+        LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+
+    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+    df, comment = csv.read_csv(fs)
+    data[rho_min] = df
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-LOGGER.info("Plot violin")
-plt.close("all")
-fig, ax = plt.subplots(figsize=(awidth, aheight),
-                       layout="constrained")
+eep_targets = df.columns.to_series()\
+        .filter(regex="GALL_log10pall_eeptarget")\
+        .str.replace(".*get_p", "", regex=True)\
+        .str.replace("_", ".").astype(float).values
 
-ee = (1 - df.filter(regex="smp", axis=1)) * 100
-cols = ee.columns.to_series().str.replace(".*_cond[0-9]{6}_|_smp_cdf", "", regex=True)
-ee.columns = cols
+for rho_min, df in data.items():
+    for eep_target in eep_targets:
+        LOGGER.info(f"Plot violin rho_min={rho_min} p={eep_target}")
 
-vm = violinplot.Violin(ee, number_format="0.1f")
-vm.draw()
+        plt.close("all")
+        fig, ax = plt.subplots(figsize=(awidth, aheight),
+                               layout="constrained")
 
-ax.set(xlabel="Station", ylabel="Event Exceedance Probability [%]")
+        etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
+        ee = (1 - df.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
+        cols = ee.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
+        ee.columns = cols
 
-fp = fimg / f"{basename}.png"
-fig.savefig(fp)
+        vm = violinplot.Violin(ee, number_format="0.1f")
+        vm.draw()
+
+        ax.set(xlabel="Station", ylabel="Event Exceedance Probability [%]")
+
+        fp = fimg / f"{basename}_rho_min{rho_min}_p{eep_target:0.02f}.png"
+        fig.savefig(fp)
 
 LOGGER.completed()

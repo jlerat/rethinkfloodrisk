@@ -50,6 +50,7 @@ fdpi = 300
 ptype = "gumbel"
 
 pcensor = 0.5
+rho_min = 0.
 excludes = ["NONE", "2022-02-27"]
 
 # ----------------------------------------------------------------------
@@ -81,10 +82,12 @@ stations = datahub.get_stations()
 if debug:
     stations = stations.iloc[:1]
 
-
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
-taskids = opm.search(pcensor=pcensor)
+taskids = opm.find(pcensor=f"{pcensor:0.1f}",
+                   exclude="|".join(excludes),
+                   rho_min=f"{rho_min:0.1f}")
+assert len(taskids) == len(excludes)
 
 ffa = {}
 data = {}
@@ -94,26 +97,28 @@ for taskid in taskids:
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    exclude = diag["exclude"]
-    if excludes is not None:
-        if not exclude in excludes:
-            continue
+    ex = diag["exclude"]
+    pc = diag["pcensor"]
+    rm = diag["rho_min"]
+    mess = f"Load report TASK {taskid} exclude={ex} pcensor={pc} rho_min={rm}"
+    LOGGER.info(mess)
+    if rm != rho_min or pc != pcensor:
+        errmsg = "Expected pcensor={pcensor} rho_min={rho_min}"
+        raise ValueError(errmsg)
 
-    LOGGER.info(f"Load report TASK {taskid} exclude={exclude}")
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
 
     fr = ftask / f"postprocess_report_TASK{taskid}.csv"
     df, _ = csv.read_csv(fr, index_col=0)
-    ffa[exclude] = df
+    ffa[ex] = df
 
     fd = ftask / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
         d = json.load(fo)
         y = pd.DataFrame(d["y"], columns=d["stationids"])
-        t = pd.DataFrame(d["potpeaks_time"]).reset_index(drop=True)
-        y = pd.concat([y, t], axis=1)
-        data[exclude] = y
+        y.loc[:, "DAY"] = d["potpeaks_time"]
+        data[ex] = y
 
 # ----------------------------------------------------------------------
 # @Process
@@ -142,12 +147,12 @@ for stationid, sinfo in stations.iterrows():
 
         # Plot data
         peaks = data[exclude].loc[:, str(stationid)]
-        time = data[exclude].loc[:, "DAY"]
 
         x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
         same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
         _, same = np.where(same)
-        time = time.iloc[same]
+
+        time = data[exclude].DAY.iloc[same]
 
         ythresh = y[-3]
         arrowprops = {
@@ -199,12 +204,12 @@ for stationid, sinfo in stations.iterrows():
         ax.set(title=title, ylabel=ylab, xlabel=xlab)
 
         q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
-        txt = "1:100 uncertainty:\n"
+        txt = "Uncertainty in 1:100 event\n\n"
         for st in ["5%", "POSTERIOR_PREDICTIVE", "95%"]:
             q = q100.loc[st]
             h = datahub.linear_interpolation(q, rc_q, rc_h)
-            stt = "ppred" if st.startswith("POST") else st
-            txt += f"{stt:>5s} {q:6.0f} $m^3.s^{{{-1}}}$ ({h:4.1f}m)\n"
+            stt = "post pred" if st.startswith("POST") else st
+            txt += f"{stt:<12s} {q:<5.0f} $m^3.s^{{{-1}}}$ ({h:3.1f}m)\n"
 
         ax.text(0.03, 0.97, txt, va="top", ha="left",
                 transform=ax.transAxes)
