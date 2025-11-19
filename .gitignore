@@ -10,6 +10,7 @@ __pycache__/
 *.exe
 *.hpp
 *.log
+*.db
 tests/*.stat
 *.png
 tests/sampling/*
