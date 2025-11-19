@@ -53,7 +53,9 @@ eep_targets = [1 - 1e-1, 1 - 1e-2]
 groups_mvn_cdf = {
     "GALL": datahub.get_stations().index.astype(str).tolist(),
     "G02-14-10": ["203002", "203014", "203010"],
+    "G14-10": ["203014", "203010"],
     "G02-14": ["203002", "203014"]
+    "G02-04": ["203002", "203004"]
     }
 
 if debug:

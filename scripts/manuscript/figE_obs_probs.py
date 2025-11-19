@@ -56,6 +56,8 @@ fdpi = 100 # 300
 pcensor = 0.5
 exclude = "NONE"
 
+#events = ["2022-02-27"]
+
 # ----------------------------------------------------------------------
 # @Folders
 # ----------------------------------------------------------------------
@@ -80,6 +82,7 @@ LOGGER = iutils.get_logger(basename)
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
+_, _, nu = datahub.get_potpeaks()
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
@@ -164,20 +167,19 @@ for key, dd in data.items():
 
             cn = f"{grp}_obs_log10eep_{event}"
             eep = 10**df.loc[:, cn]
-            aep = datahub.eep2aep(eep)
-            sys.exit()
+            aep = datahub.eep2aep(nu, eep) * 100
+            prob = eep * 100
 
-
-            x0 = round(math.log10(max(1e-6, se.quantile(0.001))), 2)
-            x1 = round(math.log10(se.max()), 2)
+            x0 = round(math.log10(max(1e-9, prob.quantile(0.001))), 2)
+            x1 = round(math.log10(prob.max()), 2)
             bins = np.logspace(x0, x1, 50)
 
-            ax.hist(se, bins=bins, facecolor="0.8", edgecolor="0.2")
+            ax.hist(prob, bins=bins, facecolor="0.8", edgecolor="0.2")
 
-            m = se.mean()
+            m = prob.mean()
             y0, y1 = ax.get_ylim()
             xy = (m, (y0 + y1) / 2)
-            ax.annotate(f"Mean\n{m:0.1e}", xy, (0, 5),
+            ax.annotate(f"Mean\n{m:0.1e}%", xy, (0, 5),
                         xycoords="data", textcoords="offset points",
                         fontweight="bold", va="bottom", ha="center",
                         fontsize=15,
@@ -185,7 +187,7 @@ for key, dd in data.items():
             ax.plot([m, m], [y0, y1], "k-", lw=2)
 
             title = f"{grp[1:]}"
-            xlab = "Probability [-]"
+            xlab = "EEP [%]"
             ax.set(xscale="log", title=title,
                    xlabel=xlab, ylim=(y0, y1))
 
