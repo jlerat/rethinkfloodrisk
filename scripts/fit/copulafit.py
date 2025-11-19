@@ -126,7 +126,7 @@ if debug:
 LOGGER.info("Load data")
 
 stations = datahub.get_stations()
-potpeaks, _ = datahub.get_potpeaks()
+potpeaks, _, _ = datahub.get_potpeaks()
 censors = datahub.get_censors(pcensor)
 
 # Exclude time period

@@ -138,7 +138,7 @@ if debug:
     obs = ["2022-02-27"]
 
 # Peaks
-potpeaks, _ = datahub.get_potpeaks()
+potpeaks, _, _ = datahub.get_potpeaks()
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:

@@ -41,8 +41,6 @@ parser.add_argument("-d", "--debug", help="Debug mode",
 args = parser.parse_args()
 
 debug = args.debug
-excludes = ["NONE", "2022-02-27"]
-pcens = [0.1, 0.3, 0.5]
 
 awidth = 6
 aheight = 5
@@ -92,16 +90,17 @@ for fold in fout.glob("copulafit_TASK*"):
         diag = json.load(fo)
 
     exclude = diag["exclude"]
-    if exclude not in excludes:
+    if exclude != "NONE":
         continue
 
     pcensor = diag["pcensor"]
-    if pcensor not in pcens:
-        continue
+    rho_min = diag["rho_min"]
 
     LOGGER.info(f"Load data from TASK {taskid}", nret=1)
     LOGGER.info(f"pcensor = {pcensor}", ntab=1)
     LOGGER.info(f"exclude = {exclude}", ntab=1)
+    LOGGER.info(f"rho_min = {rho_min}", ntab=1)
+
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:20]}", ntab=1)
 
@@ -111,13 +110,18 @@ for fold in fout.glob("copulafit_TASK*"):
 
     stationids = data["stationids"]
 
-    postpred[(exclude, pcensor)] = {}
+    pp = {}
     for ppt in ["univ", "biv"]:
         fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
         fp = fold / fp
+        if not fp.exists():
+            continue
         df = pd.read_csv(fp, skiprows=15)
         df.columns = ["VARIABLE"] + df.columns[1:].tolist()
-        postpred[(exclude, pcensor)][ppt] = df
+        pp[ppt] = df
+
+    if len(pp) == 2:
+        postpred[(exclude, pcensor, rho_min)] = pp
 
 # ----------------------------------------------------------------------
 # @Process
@@ -129,9 +133,9 @@ nrows = nv // ncols + int(nv % ncols > 0)
 mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
           for ic in range(ncols)] for ir in range(nrows)]
 
-for (exclude, pcensor), pp in postpred.items():
-    LOGGER.info(f"Plot ppchecks pcensor={pcensor} exclude={exclude}",
-                nret=1)
+for (exclude, pcensor, rho_min), pp in postpred.items():
+    mess = f"Plot ppchecks pcensor={pcensor} exclude={exclude} rho_min={rho_min}"
+    LOGGER.info(mess, nret=1)
 
     plt.close("all")
     fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
@@ -147,9 +151,11 @@ for (exclude, pcensor), pp in postpred.items():
             df.columns = stationids
             df.squeeze().plot(ax=ax, kind="barh")
         else:
-            bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
-            df.squeeze().plot(ax=ax, kind="hist", bins=bins,
-                              edgecolor="0.2", facecolor="0.8")
+            #bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
+            #df.squeeze().plot(ax=ax, kind="hist", bins=bins,
+            #                  edgecolor="0.2", facecolor="0.8")
+            putils.ecdfplot(ax, df.T)
+
 
         for x in [0.05, 0.95]:
             putils.line(ax, 0, 1, x, 0, "r--")
@@ -158,8 +164,10 @@ for (exclude, pcensor), pp in postpred.items():
         xlab = "check pvalue [-]"
         ax.set(title=title, xlabel=xlab, xlim=(0, 1))
 
-    ftitle = f"Pcensor={pcensor}  Exclude={exclude}"
-    fp = fimg / f"{basename}_pcens{pcensor}_exclude{exclude}.png"
+    ftitle = f"Pcensor={pcensor}  Exclude={exclude} rho_min={rho_min}"
+    fig.suptitle(ftitle, fontweight="bold")
+
+    fp = fimg / f"{basename}_pcens{pcensor}_exclude{exclude}_rho_min{rho_min}.png"
     fig.savefig(fp)
 
 LOGGER.completed()

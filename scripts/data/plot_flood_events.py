@@ -71,7 +71,7 @@ LOGGER = iutils.get_logger(basename)
 # @Get data
 # ----------------------------------------------------------------------
 stations = datahub.get_stations()
-potpeaks = datahub.get_potpeaks()
+potpeaks, _, _ = datahub.get_potpeaks()
 qthresh = datahub.get_potpeaks_thresh()
 
 if debug:
@@ -91,8 +91,7 @@ daily = pd.DataFrame(daily)
 # ----------------------------------------------------------------------
 ncols = 3
 nrows = 3
-stationids = potpeaks.columns.to_series()\
-    .filter(regex="_PEAK").str.replace("_PEAK", "").astype(int).tolist()
+stationids = potpeaks.columns.tolist()
 stationids = stationids + ["."] * (ncols * nrows - len(stationids))
 mosaic = [[stationids[ncols * irow + icol] for icol in range(ncols)]
           for irow in range(nrows)]
