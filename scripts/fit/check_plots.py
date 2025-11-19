@@ -55,10 +55,6 @@ LOGGER = iutils.get_logger(basename, contextual=True)
 # ----------------------------------------------------------------------
 # @Get data
 # ----------------------------------------------------------------------
-LOGGER.info("Load data")
-stations = datahub.get_stations()
-potpeaks, _, _ = datahub.get_potpeaks()
-nstations = potpeaks.shape[1]
 
 # ----------------------------------------------------------------------
 # @Process

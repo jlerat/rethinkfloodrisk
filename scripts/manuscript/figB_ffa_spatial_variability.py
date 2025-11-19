@@ -108,20 +108,20 @@ for rho_min in rho_mins:
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-eep_targets = df.columns.to_series()\
-        .filter(regex="GALL_log10pall_eeptarget")\
+aep_targets = df.columns.to_series()\
+        .filter(regex="GALL_log10pall_aeptarget")\
         .str.replace(".*get_p", "", regex=True)\
         .str.replace("_", ".").astype(float).values
 
 for rho_min, df in data.items():
-    for eep_target in eep_targets:
-        LOGGER.info(f"Plot violin rho_min={rho_min} p={eep_target}")
+    for aep_target in aep_targets:
+        LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
 
         plt.close("all")
         fig, ax = plt.subplots(figsize=(awidth, aheight),
                                layout="constrained")
 
-        etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
+        etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
         ee = (1 - df.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
         cols = ee.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
         ee.columns = cols
@@ -131,7 +131,7 @@ for rho_min, df in data.items():
 
         ax.set(xlabel="Station", ylabel="Event Exceedance Probability [%]")
 
-        fp = fimg / f"{basename}_rho_min{rho_min}_p{eep_target:0.02f}.png"
+        fp = fimg / f"{basename}_rho_min{rho_min}_p{aep_target:0.02f}.png"
         fig.savefig(fp)
 
 LOGGER.completed()

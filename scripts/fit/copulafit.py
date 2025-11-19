@@ -71,8 +71,9 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
 pcensors = [0.1, 0.3, 0.5]
 
 excludes = ["NONE",
-            "2022-02-27",
-            "2008-01-04"]
+            "2021",
+            "2007",
+            "2016"]
 
 rho_mins = [-1., 0.]
 
@@ -88,7 +89,7 @@ rho_min = task.rho_min
 
 if debug:
     pcensor = 0.3
-    exclude = "2008-01-04"
+    exclude = "2007"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -126,13 +127,13 @@ if debug:
 LOGGER.info("Load data")
 
 stations = datahub.get_stations()
-potpeaks, _, _ = datahub.get_potpeaks()
+ams, _ = datahub.get_ams_concat()
 censors = datahub.get_censors(pcensor)
 
 # Exclude time period
 if exclude != "NONE":
-    iok = potpeaks.index != exclude
-    potpeaks = potpeaks.loc[iok]
+    iok = ams.index != int(exclude)
+    ams = ams.loc[iok]
 
 # ----------------------------------------------------------------------
 # @Process
@@ -142,7 +143,7 @@ LOGGER.info(f"nwarm    = {stan_nwarm}", ntab=1, nret=1)
 LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
 LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 
-sv = sample.StanSamplingMultivariate(potpeaks,
+sv = sample.StanSamplingMultivariate(ams,
                                      censors=censors,
                                      rho_min=rho_min,
                                      rho_max=1.)
@@ -153,7 +154,7 @@ LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
 LOGGER.info(f"rho_min = {stan_data['rho_min']}", ntab=1)
 LOGGER.info(f"rho_max = {stan_data['rho_max']}", ntab=1)
 
-pcensors = (potpeaks - censors < 0).sum() / potpeaks.notnull().sum()
+pcensors = (ams - censors < 0).sum() / ams.notnull().sum()
 for ipn, (pname, pcensor) in enumerate(pcensors.items()):
     stationid = re.sub("_PEAK", "", pname)
     LOGGER.info(f"Prob censor {stationid} = {pcensor:0.2f}", nret=int(ipn==0))
@@ -204,8 +205,8 @@ with fd.open("w") as fo:
 
 # Store data with additional info
 stan_data["pcensors"] = pcensors.to_dict()
-stan_data["potpeaks_time"] = potpeaks.index.astype(str).tolist()
-stan_data["stationids"] = potpeaks.columns.tolist()
+stan_data["ams_time"] = ams.index.tolist()
+stan_data["stationids"] = ams.columns.tolist()
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
 for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:

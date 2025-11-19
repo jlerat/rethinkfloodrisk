@@ -46,7 +46,7 @@ debug = taskid < 0
 
 # Configure mvn conditional
 stationid_cond = "203002"
-eep_targets = [1 - 1e-1, 1 - 1e-2]
+aep_targets = [1 - 1e-1, 1 - 1e-2]
 
 # Configure mvn cdf
 
@@ -64,7 +64,7 @@ if debug:
 
 # Runner
 opm = hyruns.OptionManager(stationid_cond=stationid_cond,
-                           eep_targets=eep_targets)
+                           aep_targets=aep_targets)
 
 # Select certain fit tasks
 pcensors = [0.1, 0.3, 0.5]
@@ -135,14 +135,11 @@ if debug:
 LOGGER.info("Load data")
 
 # Obs events
-potpeaks, _, _ = datahub.get_potpeaks()
-rk = potpeaks.rank(ascending=True)
-obs = rk.index[(rk == 1).any(axis=1)].tolist()
+ams, _ = datahub.get_ams_concat()
+rk = ams.rank(ascending=True)
+obs = rk.index[(rk >= 3).any(axis=1)].tolist()
 if debug:
-    obs = ["2022-02-27"]
-
-# Peaks
-potpeaks, _, _ = datahub.get_potpeaks()
+    obs = [2021]
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -185,19 +182,19 @@ stationids_conditional = stationids[icond_2]
 
 cols_cond = {}
 cols_cond_all = []
-for st, p in prod(["mu", "sig", "smp_cdf"], eep_targets):
+for st, p in prod(["mu", "sig", "smp_cdf"], aep_targets):
     cc = [f"mvn_cond{sidc}_p{p:0.02f}_{sid}_{st}"
           for sid in stationids_conditional]
     cols_cond[(st, p)] = cc
     cols_cond_all.extend(cc)
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_log10eep_{event}" for event in obs
+cols_obs = [f"{g}_obs_log10aep_{event}" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
 stats = [f"{st}_p{p:0.02f}"
-         for st in ["log10pall_eeptarget", "log10pany_eeptarget"]
-         for p in eep_targets]
+         for st in ["log10pall_aeptarget", "log10pany_aeptarget"]
+         for p in aep_targets]
 
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
     + cols_cond_all
@@ -217,14 +214,14 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     S22 = cor_all[icond_2][:, icond_2]
     S21 = cor_all[icond_2][:, icond_1]
 
-    for eep_target in eep_targets:
-        zcond = norm.ppf([eep_target])
+    for aep_target in aep_targets:
+        zcond = norm.ppf([aep_target])
         muc = S21 @ S11i @ zcond
         Sc = S22 - S21 @ S11i @ S21.T
         z = np.random.multivariate_normal(mean=muc, cov=Sc)
 
         for st in ["mu", "sig", "smp_cdf"]:
-            cc = [f"mvn_cond{stationid_cond}_p{eep_target:0.02f}_{sid}_{st}"
+            cc = [f"mvn_cond{stationid_cond}_p{aep_target:0.02f}_{sid}_{st}"
                   for sid in stationids_conditional]
             if st == "mu":
                 values = muc
@@ -247,25 +244,25 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         #LOGGER.info("Computing probs", ntab=1)
         rv = mvn(mean=mean, cov=cor)
 
-        for eep_target in eep_targets:
-            zcdf = norm.ppf(eep_target)
+        for aep_target in aep_targets:
+            zcdf = norm.ppf(aep_target)
 
             # All above threshold
             x = -zcdf * np.ones(ngstations)
             pall = rv.cdf(x)
             lpall = math.log10(pall) if pall > 0 else np.nan
-            res.loc[i, f"{gname}_log10pall_eeptarget_p{eep_target:0.02f}"] = lpall
+            res.loc[i, f"{gname}_log10pall_aeptarget_p{aep_target:0.02f}"] = lpall
 
             # Any above threshold
             x = zcdf * np.ones(ngstations)
             pany = 1 - rv.cdf(x)
             lpany = math.log10(pany) if pany > 0 else np.nan
-            res.loc[i, f"{gname}_log10pany_eeptarget_p{eep_target:0.02f}"] = lpany
+            res.loc[i, f"{gname}_log10pany_aeptarget_p{aep_target:0.02f}"] = lpany
 
-        # Obs eep
+        # Obs aep
         for event in obs:
             # Get peak flow data
-            pp = potpeaks.loc[event].squeeze()
+            aa = ams.loc[event].squeeze()
             zstd = np.nan * np.zeros(ngstations)
 
             # Compute cdf for each station
@@ -278,18 +275,18 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 ylogscale = smp.loc[f"ylogscale[{isid}]"]
                 yshape1 = smp.loc[f"yshape1[{isid}]"]
                 gev.params = [ylocn, ylogscale, yshape1]
-                qo = pp[sid]
+                qo = aa[sid]
                 if ~np.isnan(qo):
                     cdf = gev.cdf(qo)
                     # Store individual estimate of event
                     if gname == "GALL":
                         lc = math.log10(1 - cdf)
-                        res.loc[i, f"G{sid}_obs_log10eep_{event}"] = lc
+                        res.loc[i, f"G{sid}_obs_log10aep_{event}"] = lc
 
                     zstd[k] = norm.ppf(cdf)
 
             lc = math.log10(rv.cdf(-zstd))
-            res.loc[i, f"{gname}_obs_log10eep_{event}"] = lc
+            res.loc[i, f"{gname}_obs_log10aep_{event}"] = lc
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
@@ -301,7 +298,7 @@ comments = {
     "rho_min": rho_min,
     "fit_taskid": fit_taskid,
     "stationid_cond": stationid_cond,
-    "eep_targets": eep_targets
+    "aep_targets": aep_targets
 
     }
 csv.write_csv(res, fr, comments,

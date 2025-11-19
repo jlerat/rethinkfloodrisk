@@ -70,7 +70,7 @@ for ftask in fout.glob("*TASK*"):
         concat.append(df)
 
     cc = ["comment", "period", "pcensor", "fit_taskid",
-          "stationid_cond", "eep_target", "zcdf"]
+          "stationid_cond", "aep_target", "zcdf"]
     comments = {k: v for k, v in comments.items() if k in cc}
 
     concat = pd.concat(concat)

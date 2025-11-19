@@ -58,9 +58,9 @@ aheight = 5
 fdpi = 100 # 300
 ngrid = 40
 
-eep_target = 0.99
-# eep used for the right-hand side plot (0.99 is too extreme, can't see it)
-eep_target_plot = 0.95
+aep_target = 0.99
+# aep used for the right-hand side plot (0.99 is too extreme, can't see it)
+aep_target_plot = 0.95
 
 sta1 = "203002"
 sta2 = "203014"
@@ -246,7 +246,7 @@ for rho_min, dd in data.items():
                 xx[ista] = np.linspace(xa, xb, ngrid)
                 zz[ista] = norm.ppf(gev.cdf(xx[ista]))
                 marg[ista] = gev.pdf(xx[ista])
-                xthresh[ista] = gev.ppf(eep_target_plot)
+                xthresh[ista] = gev.ppf(aep_target_plot)
 
             XX1, XX2 = np.meshgrid(xx[ista1], xx[ista2])
             ZZ1, ZZ2 = np.meshgrid(zz[ista1], zz[ista2])
@@ -320,8 +320,8 @@ for rho_min, dd in data.items():
             ax.set_xscale("log")
 
             for ig, gname in enumerate(groups):
-                etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
-                cn = f"{gname}_log10{stat}_eeptarget_p{etxt}"
+                etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
+                cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
                 sel = df.loc[:, cn]
                 se = 10**sel
                 gg = "/".join([f"2030{s}" for s in gname[1:].split("-")])
@@ -334,8 +334,8 @@ for rho_min, dd in data.items():
             # Got to do it outside of previous loop to maintain y0/y1
             y0, y1 = ax.get_ylim()
             for ig, gname in enumerate(groups):
-                etxt = re.sub("\\.", "_", f"{eep_target:0.02f}")
-                cn = f"{gname}_log10{stat}_eeptarget_p{etxt}"
+                etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
+                cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
                 sel = df.loc[:, cn]
                 se = 10**sel
                 m = se.mean()
@@ -355,7 +355,7 @@ for rho_min, dd in data.items():
                                 textcoords="offset points",
                                 path_effects=[paef])
 
-            xlab = "Event Exceedance Probability [-]"
+            xlab = "Annual Exceedance Probability [-]"
             ylab = "MCMC Sample count [-]"
             ax.set(xlabel=xlab, ylabel=ylab)
 

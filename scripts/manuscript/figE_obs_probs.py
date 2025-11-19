@@ -82,7 +82,6 @@ LOGGER = iutils.get_logger(basename)
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
-_, _, nu = datahub.get_potpeaks()
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
@@ -120,7 +119,7 @@ for taskid in taskids:
 
     events = df.columns.to_series()\
         .filter(regex="obs_log10")\
-        .str.replace(".*eep_", "", regex=True)\
+        .str.replace(".*aep_", "", regex=True)\
         .unique()
 
     data[(ex, pc, rm)] = {
@@ -165,10 +164,10 @@ for key, dd in data.items():
             grp = aname
             LOGGER.info(f"Group {grp}", ntab=2)
 
-            cn = f"{grp}_obs_log10eep_{event}"
-            eep = 10**df.loc[:, cn]
-            aep = datahub.eep2aep(nu, eep) * 100
-            prob = eep * 100
+            cn = f"{grp}_obs_log10aep_{event}"
+            aep = 10**df.loc[:, cn]
+            aep = datahub.aep2aep(nu, aep) * 100
+            prob = aep * 100
 
             x0 = round(math.log10(max(1e-9, prob.quantile(0.001))), 2)
             x1 = round(math.log10(prob.max()), 2)
@@ -187,7 +186,7 @@ for key, dd in data.items():
             ax.plot([m, m], [y0, y1], "k-", lw=2)
 
             title = f"{grp[1:]}"
-            xlab = "EEP [%]"
+            xlab = "AEP [%]"
             ax.set(xscale="log", title=title,
                    xlabel=xlab, ylim=(y0, y1))
 
