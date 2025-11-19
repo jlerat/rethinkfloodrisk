@@ -13,6 +13,7 @@ import re
 import argparse
 import json
 import math
+from itertools import product as prod
 from pathlib import Path
 
 import numpy as np
@@ -45,11 +46,9 @@ debug = taskid < 0
 
 # Configure mvn conditional
 stationid_cond = "203002"
-eep_target = 1 - 1e-2
-zcond = np.atleast_1d(norm.ppf(eep_target))
+eep_targets = [1 - 1e-1, 1 - 1e-2]
 
 # Configure mvn cdf
-zcdf = norm.ppf(eep_target)
 
 groups_mvn_cdf = {
     "GALL": datahub.get_stations().index.astype(str).tolist(),
@@ -63,10 +62,10 @@ if debug:
 
 # Runner
 opm = hyruns.OptionManager(stationid_cond=stationid_cond,
-                           eep_target=eep_target,
-                           zcdf=zcdf)
-# Select fit task with
-pcensors = [0.3, 0.5]
+                           eep_targets=eep_targets)
+
+# Select certain fit tasks
+pcensors = [0.1, 0.3, 0.5]
 rho_mins = [-1, 0]
 excludes = ["NONE"]
 
@@ -89,6 +88,7 @@ if debug:
     batch = 0
     pcensor = 0.5
     exclude = "NONE"
+    rho_min = 0
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -98,9 +98,14 @@ froot = source_file.parent.parent.parent
 
 fopm = froot / "outputs" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
-fit_taskid = opm_fit.search(pcensor=pcensor,
-                            rho_min=rho_min,
-                            exclude=exclude)[0]
+fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
+                            rho_min=f"{rho_min:0.1f}",
+                            exclude=exclude)
+if len(fit_taskid) != 1:
+    errmsg = "opm_fit does not return one task"
+    raise ValueError(errmsg)
+
+fit_taskid = fit_taskid[0]
 
 ftask = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
 
@@ -172,18 +177,26 @@ gev = GEV()
 
 nsamples = len(samples)
 sidc = stationid_cond
-cols_mu = [f"mvn_cond{sidc}_{sid}_mu" for sid in stationids[icond_2]]
-cols_sig = [f"mvn_cond{sidc}_{sid}_sig" for sid in stationids[icond_2]]
-cols_smp = [f"mvn_cond{sidc}_{sid}_smp_cdf" for sid in stationids[icond_2]]
+stationids_conditional = stationids[icond_2]
+
+cols_cond = {}
+cols_cond_all = []
+for st, p in prod(["mu", "sig", "smp_cdf"], eep_targets):
+    cc = [f"mvn_cond{sidc}_p{p:0.02f}_{sid}_{st}"
+          for sid in stationids_conditional]
+    cols_cond[(st, p)] = cc
+    cols_cond_all.extend(cc)
 
 gsta = [f"G{sid}" for sid in stationids]
 cols_obs = [f"{g}_obs_log10eep_{event}" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
-stats = ["log10pall_eeptarget", "log10pany_eeptarget"]
+stats = [f"{st}_p{p:0.02f}"
+         for st in ["log10pall_eeptarget", "log10pany_eeptarget"]
+         for p in eep_targets]
 
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
-    + cols_mu + cols_sig + cols_smp + cols_obs
+    + cols_cond_all
 
 res = pd.DataFrame(np.nan, index=samples.index,
                    columns=cols)
@@ -200,13 +213,23 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     S22 = cor_all[icond_2][:, icond_2]
     S21 = cor_all[icond_2][:, icond_1]
 
-    muc = S21 @ S11i @ zcond
-    Sc = S22 - S21 @ S11i @ S21.T
-    z = np.random.multivariate_normal(mean=muc, cov=Sc)
+    for eep_target in eep_targets:
+        zcond = norm.ppf([eep_target])
+        muc = S21 @ S11i @ zcond
+        Sc = S22 - S21 @ S11i @ S21.T
+        z = np.random.multivariate_normal(mean=muc, cov=Sc)
 
-    res.loc[i, cols_mu] = muc
-    res.loc[i, cols_sig] = np.sqrt(np.diag(Sc))
-    res.loc[i, cols_smp] = norm.cdf(z)
+        for st in ["mu", "sig", "smp_cdf"]:
+            cc = [f"mvn_cond{stationid_cond}_p{eep_target:0.02f}_{sid}_{st}"
+                  for sid in stationids_conditional]
+            if st == "mu":
+                values = muc
+            elif st == "sig":
+                values = np.sqrt(np.diag(Sc))
+            else:
+                values = norm.cdf(z)
+
+            res.loc[i, cc] = values
 
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
@@ -220,17 +243,20 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         #LOGGER.info("Computing probs", ntab=1)
         rv = mvn(mean=mean, cov=cor)
 
-        # All above threshold
-        x = -zcdf * np.ones(ngstations)
-        pall = rv.cdf(x)
-        lpall = math.log10(pall) if pall > 0 else np.nan
-        res.loc[i, f"{gname}_log10pall"] = lpall
+        for eep_target in eep_targets:
+            zcdf = norm.ppf(eep_target)
 
-        # Any above threshold
-        x = zcdf * np.ones(ngstations)
-        pany = 1 - rv.cdf(x)
-        lpany = math.log10(pany) if pany > 0 else np.nan
-        res.loc[i, f"{gname}_log10pany"] = lpany
+            # All above threshold
+            x = -zcdf * np.ones(ngstations)
+            pall = rv.cdf(x)
+            lpall = math.log10(pall) if pall > 0 else np.nan
+            res.loc[i, f"{gname}_log10pall_eeptarget_p{eep_target:0.02f}"] = lpall
+
+            # Any above threshold
+            x = zcdf * np.ones(ngstations)
+            pany = 1 - rv.cdf(x)
+            lpany = math.log10(pany) if pany > 0 else np.nan
+            res.loc[i, f"{gname}_log10pany_eeptarget_p{eep_target:0.02f}"] = lpany
 
         # Obs eep
         for event in obs:
@@ -268,10 +294,11 @@ comments = {
     "comment": "MVN process results",
     "exclude": exclude,
     "pcensor": pcensor,
+    "rho_min": rho_min,
     "fit_taskid": fit_taskid,
     "stationid_cond": stationid_cond,
-    "eep_target": eep_target,
-    "zcdf": zcdf
+    "eep_targets": eep_targets
+
     }
 csv.write_csv(res, fr, comments,
               source_file,

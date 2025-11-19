@@ -42,7 +42,7 @@ args = parser.parse_args()
 
 debug = args.debug
 excludes = ["NONE", "2022-02-27"]
-pcens = [0.5]
+pcens = [0.1, 0.3, 0.5]
 
 awidth = 6
 aheight = 5

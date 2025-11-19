@@ -140,12 +140,12 @@ for stationid, sinfo in stations.iterrows():
 
         # Plot data
         peaks = data[exclude].loc[:, str(stationid)]
-        time = data[exclude].loc[:, "DAY"]
 
         x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
         same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
         _, same = np.where(same)
-        time = time.iloc[same]
+
+        time = data[exclude].index[same]
 
         ythresh = y[-3]
         arrowprops = {

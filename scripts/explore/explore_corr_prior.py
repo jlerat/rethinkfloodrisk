@@ -19,7 +19,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy import fft, linalg
 from scipy.stats import invwishart
 from scipy.linalg import toeplitz
 import matplotlib.pyplot as plt
@@ -46,53 +45,50 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-nv = 4
+nv = 50
 
 # Cholesky of a circulant matrix
 rho = 0.9
 x = rho * np.ones(nv)
 x[0] = 1
-M = (1 - rho) * np.eye(nv) + rho * np.ones((nv, nv))
+C0 = (1 - rho) * np.eye(nv) + rho * np.ones((nv, nv))
 
-# FFT matrix
-w = np.exp(-2*math.pi*1j/nv)
-kk = np.mgrid[:nv, :nv]
-F = w**(kk[0]*kk[1])
-Fc = F.conj()
+def getL(rho, nv):
+    L = np.zeros((nv, nv))
+    for i in range(nv):
+        for k in range(i):
+            L[i, k] = (rho - (L[i, :k] * L[k, :k]).sum()) / L[k, k]
+        L[i, i] = math.sqrt(1 - (L[i, :i]**2).sum())
+    return L
 
-#lams = fft.fft(x)
-lams = (nv - (1 - rho)*(nv - 1)) * np.ones(nv)
-lams[1:] = 1 - rho
+L0 = getL(rho, nv)
+assert np.allclose(C0, L0@L0.T)
 
-FF = Fc / math.sqrt(nv)
-FFi = Fc.conj() / math.sqrt(nv)
-assert np.allclose(M, FF@np.diag(lams)@FFi)
+rv = invwishart(scale=np.eye(nv), df=int(1.1 * nv))
 
-D = np.diag(np.sqrt(lams))
-C = Fc @ D / math.sqrt(nv)
-assert np.allclose(M, C @ C.conj())
+def corrnorm(M):
+    si = 1./ np.sqrt(np.diag(M))[:, None]
+    return si * M * si.T
 
-sys.exit()
-
-
-rv = invwishart(scale=np.eye(nv), df=int(nv * 1.2))
+# Check corr ok
+C = corrnorm(rv.rvs())
+L = np.linalg.cholesky(C)
 
 nsmp = 10000
-m = rv.rvs(size=nsmp)
-c = np.zeros_like(m)
-c2 = np.zeros_like(c)
+M = np.zeros((nsmp, 4, nv, nv))
 
-rho = 1 - 0.2
-B = toeplitz(rho ** np.arange(nv))
+rho_min = 0.2
+rho_max = 1.0
+w1 = (rho_max - rho_min) / 2
+w0 = (rho_max + rho_min) / 2
 
 for i in range(nsmp):
-    M = m[i]
-    si = 1./ np.sqrt(np.diag(M))[:, None]
-    C = si * M * si.T
-    c[i] = C
+    C = rv.rvs()
+    c[i, 0] = C
+    L = np.linalg.cholesky(C)
+    c[i, 1] = L
 
-    C2 = (B + C) / 2
-    c2[i] = C2
+    c[i, 2] = C * w1 + C0 * w0
 
 bins = np.linspace(-1, 1, 50)
 plt.close("all")
