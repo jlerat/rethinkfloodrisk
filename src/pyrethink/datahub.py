@@ -80,6 +80,21 @@ def get_ams(stationid):
     return ams
 
 
+def get_ams_concat():
+    stations = get_stations()
+    ams_concat = pd.DataFrame(np.nan,
+                              columns=stations.index,
+                              index=np.arange(1957, 2023))
+
+    for stationid in stations.index:
+        ams = get_ams(stationid)
+        peak = ams.filter(regex="_PEAK$", axis=1).squeeze().values
+        wy = ams.WATER_YEAR_START.str[:4].astype(int).values
+        ams_concat.loc[wy, stationid] = peak
+
+    return ams_concat
+
+
 def get_censors(pcensor):
     if pcensor < 0 or pcensor > 1:
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."

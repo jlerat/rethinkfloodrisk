@@ -28,6 +28,11 @@ def test_potpeaks_thresh():
     thresh = datahub.get_potpeaks_thresh()
     assert len(thresh) == 8
 
+
+def test_get_ams_concat():
+    ams = datahub.get_ams_concat()
+
+
 @pytest.mark.parametrize("stationid",
                          datahub.get_stations().index.tolist())
 def test_rating_curves(stationid):
