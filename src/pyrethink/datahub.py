@@ -31,7 +31,7 @@ def get_stations():
     fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(fs, index_col="STATIONID",
                          dtype={"STATIONID": str})
-    potpeaks, _ = get_potpeaks()
+    potpeaks, _, _ = get_potpeaks()
     return df.loc[potpeaks.columns, :]
 
 
@@ -47,7 +47,10 @@ def get_potpeaks():
     df = df.filter(regex="_PEAK", axis=1)
     df.columns = df.columns.str.replace("_PEAK", "")
 
-    return df, wy
+    # Count number of events per year
+    nu = wy.value_counts().mean()
+
+    return df, wy, nu
 
 
 def get_potpeaks_thresh():
@@ -82,7 +85,7 @@ def get_censors(pcensor):
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    potpeaks, _ = get_potpeaks()
+    potpeaks, _, _ = get_potpeaks()
     censors = pd.Series(np.nan, index=potpeaks.columns)
 
     for stationid in potpeaks.columns:
@@ -119,6 +122,10 @@ def get_rating_curves(stationid, only_last=False):
         return rcs[time], metas[time]
     else:
         return rcs, metas
+
+
+def eep2aep(nu, eep):
+    return 1 - np.exp(-nu * eep)
 
 
 def linear_interpolation(xx, x, y):

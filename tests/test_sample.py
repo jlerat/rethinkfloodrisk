@@ -57,7 +57,7 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 def test_sample_data(pcensor, allclose):
-    data, _ = datahub.get_potpeaks()
+    data, _, _ = datahub.get_potpeaks()
     censors = datahub.get_censors(pcensor)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
@@ -90,14 +90,14 @@ def test_sample_data(pcensor, allclose):
 
 
 def test_inits(allclose):
-    data, _ = datahub.get_potpeaks()
+    data, _, _ = datahub.get_potpeaks()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     inits = sv.initial_parameters
 
 
 def test_stan_indexing():
-    data, _ = datahub.get_potpeaks()
+    data, _, _ = datahub.get_potpeaks()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
@@ -176,7 +176,7 @@ def test_stan_cor(allclose):
                                     "censored_missing"])
 @pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
-    data, _ = datahub.get_potpeaks()
+    data, _, _ = datahub.get_potpeaks()
     data = data.iloc[:, :nvars]
 
     if re.search("nomissing", config):
@@ -243,7 +243,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data, _ = datahub.get_potpeaks()
+    data, _, _ = datahub.get_potpeaks()
     data = data.iloc[:, stationpair]
     data = data.loc[data.notnull().any(axis=1)]
 

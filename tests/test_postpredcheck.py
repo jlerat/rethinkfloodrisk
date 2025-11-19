@@ -23,7 +23,7 @@ MARGINAL = GEV()
 
 @pytest.mark.parametrize("station", np.arange(NSTATIONS).tolist())
 def test_univariate_statistics(station):
-    potpeaks, _ = datahub.get_potpeaks()
+    potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks.iloc[:, station]
 
     un = ppc.univariate_statistics(data)
@@ -32,7 +32,7 @@ def test_univariate_statistics(station):
 
 @pytest.mark.parametrize("station", np.arange(NSTATIONS - 1).tolist())
 def test_bivariate_statistics(station):
-    potpeaks, _ = datahub.get_potpeaks()
+    potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks.iloc[:, station:station+2]
     biv = ppc.bivariate_dependence_statistics(data)
     assert biv.notnull().all()
