@@ -47,7 +47,7 @@ JOBCONFIGS["1,5"]="X"            # job id
 # MVN postprocessing job (depends on copula fitting)
 JOBCONFIGS["2,0"]="mvnprocess"   # Job name
 JOBCONFIGS["2,1"]="1"            # number of cpus
-JOBCONFIGS["2,2"]="0-199"         # arrays
+JOBCONFIGS["2,2"]="0-299"         # arrays
 JOBCONFIGS["2,3"]="0"            # use user supplied array if any
 JOBCONFIGS["2,4"]="0"            # parent job number
 JOBCONFIGS["2,5"]="X"            # job id

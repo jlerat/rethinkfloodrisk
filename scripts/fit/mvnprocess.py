@@ -54,7 +54,7 @@ groups_mvn_cdf = {
     "GALL": datahub.get_stations().index.astype(str).tolist(),
     "G02-14-10": ["203002", "203014", "203010"],
     "G14-10": ["203014", "203010"],
-    "G02-14": ["203002", "203014"]
+    "G02-14": ["203002", "203014"],
     "G02-04": ["203002", "203004"]
     }
 
@@ -135,7 +135,9 @@ if debug:
 LOGGER.info("Load data")
 
 # Obs events
-obs = [event for event in opm_fit.options["exclude"] if event != "NONE"]
+potpeaks, _, _ = datahub.get_potpeaks()
+rk = potpeaks.rank(ascending=True)
+obs = rk.index[(rk == 1).any(axis=1)].tolist()
 if debug:
     obs = ["2022-02-27"]
 
