@@ -30,7 +30,7 @@ def test_potpeaks_thresh():
 
 
 def test_get_ams_concat():
-    ams = datahub.get_ams_concat()
+    ams, times = datahub.get_ams_concat()
 
 
 @pytest.mark.parametrize("stationid",

@@ -82,17 +82,24 @@ def get_ams(stationid):
 
 def get_ams_concat():
     stations = get_stations()
-    ams_concat = pd.DataFrame(np.nan,
-                              columns=stations.index,
-                              index=np.arange(1957, 2023))
+    peaks = pd.DataFrame(np.nan,
+                         columns=stations.index,
+                         index=np.arange(1957, 2023))
+    times = pd.DataFrame(pd.NaT,
+                         columns=stations.index,
+                         index=np.arange(1957, 2023))
+
 
     for stationid in stations.index:
         ams = get_ams(stationid)
         peak = ams.filter(regex="_PEAK$", axis=1).squeeze().values
+        time = pd.to_datetime(ams.filter(regex="_TIMEPEAK$", axis=1).squeeze()).values
         wy = ams.WATER_YEAR_START.str[:4].astype(int).values
-        ams_concat.loc[wy, stationid] = peak
 
-    return ams_concat
+        peaks.loc[wy, stationid] = peak
+        times.loc[wy, stationid] = time
+
+    return peaks, times
 
 
 def get_censors(pcensor):
@@ -100,12 +107,10 @@ def get_censors(pcensor):
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    potpeaks, _, _ = get_potpeaks()
-    censors = pd.Series(np.nan, index=potpeaks.columns)
+    ams, _ = get_ams_concat()
+    censors = pd.Series(np.nan, index=ams.columns)
 
-    for stationid in potpeaks.columns:
-        ams = get_ams(stationid)
-        qmax = ams.loc[:, f"{stationid}_PEAK"]
+    for stationid, qmax in ams.items():
         censors.loc[stationid] = qmax.quantile(pcensor)
 
     return censors
