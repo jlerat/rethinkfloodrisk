@@ -15,7 +15,7 @@ fi
 # Configure array numbers
 NTASKS=24
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
-ARRAYS_PROC="0-$((2 * $NTASKS - 2))"
+ARRAYS_PROC="0-$((2 * $NTASKS - 1))"
 
 # Job config
 JOBSCRIPT=$FROOT/scripts/fit/job_script.job
