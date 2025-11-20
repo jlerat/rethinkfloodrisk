@@ -51,7 +51,7 @@ ptype = "gumbel"
 
 pcensor = 0.5
 rho_min = 0.
-excludes = ["NONE", "2022-02-27"]
+excludes = ["NONE", "2021"]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -117,7 +117,9 @@ for taskid in taskids:
     with fd.open("r") as fo:
         d = json.load(fo)
         y = pd.DataFrame(d["y"], columns=d["stationids"])
-        y.loc[:, "DAY"] = d["potpeaks_time"]
+        cn = "WATER_YEAR"
+        y.loc[:, cn] = d["ams_time"]
+        y.loc[:, cn] += 1 # adds 1 because starts in Oct
         data[ex] = y
 
 # ----------------------------------------------------------------------
@@ -152,7 +154,7 @@ for stationid, sinfo in stations.iterrows():
         same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
         _, same = np.where(same)
 
-        time = data[exclude].DAY.iloc[same]
+        time = data[exclude].WATER_YEAR.iloc[same]
 
         ythresh = y[-3]
         arrowprops = {
