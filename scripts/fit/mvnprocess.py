@@ -136,8 +136,9 @@ LOGGER.info("Load data")
 
 # Obs events
 ams, _ = datahub.get_ams_concat()
-rk = ams.rank(ascending=True)
-obs = rk.index[(rk >= 3).any(axis=1)].tolist()
+rk = ams.rank(ascending=False)
+obs = rk.index[(rk <= 2).any(axis=1)].tolist()
+
 if debug:
     obs = [2021]
 

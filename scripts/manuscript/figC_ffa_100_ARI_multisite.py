@@ -47,11 +47,17 @@ from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 parser = argparse.ArgumentParser(description="Plot FFA 100 ARI",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-d", "--debug", help="Debug mode",
+parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.5)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
 args = parser.parse_args()
 
-debug = args.debug
+clear = args.clear
+pcensor = args.pcensor
+rho_min = args.rho_min
 
 awidth = 6
 aheight = 5
@@ -65,7 +71,9 @@ aep_target_plot = 0.95
 sta1 = "203002"
 sta2 = "203014"
 
-pcensor = 0.5
+#sta1 = "203014"
+#sta2 = "203010"
+
 exclude = "NONE"
 
 # ----------------------------------------------------------------------
@@ -80,8 +88,9 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
-for f in fimg.glob("*.png"):
-    f.unlink()
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -114,13 +123,12 @@ def annotate3D(ax, s, *args, **kwargs):
 # ----------------------------------------------------------------------
 # @Get data
 # ----------------------------------------------------------------------
-LOGGER.info("Load data")
-
 stations = datahub.get_stations()
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 taskids = opm.search(pcensor=f"{pcensor:0.1f}",
+                     rho_min=f"{rho_min:0.1f}",
                      exclude=exclude)
 
 data = {}
@@ -134,12 +142,10 @@ for taskid in taskids:
     rm = diag["rho_min"]
     rho_min = rm
     mess = f"Load data TASK {taskid} exclude={ex} pcensor={pc} rho_min={rm}"
-    LOGGER.info(mess)
+    LOGGER.info(mess, nret=1)
+
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
-
-    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-    df, comment = csv.read_csv(fs)
 
     fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
@@ -150,7 +156,7 @@ for taskid in taskids:
     ista1 = stationids.index(sta1)
     ista2 = stationids.index(sta2)
 
-    fe = fimg / f"expected_parameters_rho_min{rho_min:0.02f}.json"
+    fe = fimg / f"expected_parameters_TASK{taskid}.json"
     if not fe.exists():
         LOGGER.info(f"load samples", ntab=1)
         fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_samples_TASK{taskid}.zip"
@@ -179,11 +185,14 @@ for taskid in taskids:
 
     cor = cor.values.reshape((nstations, nstations)).T
 
+    LOGGER.info(f"read mvnprocess results", ntab=1)
     fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-    df, comment = csv.read_csv(fs)
+    mvnproc, comment = csv.read_csv(fs)
 
-    groups = df.columns.str.replace("_.*", "", regex=True).unique()
-    groups = [g for g in groups if re.search("ALL|02-14$", g)]
+    groups = mvnproc.columns.str.replace("_.*", "", regex=True).unique()
+    pat = f"{sta1[-2:]}-{sta2[-2:]}|{sta2[-2:]}-{sta1[-2:]}"
+    groups = [g for g in groups if re.search(f"G(ALL|{pat})$", g)]
+    LOGGER.info(f"Groups = {groups}", ntab=1)
 
     data[rho_min] = {
         "ylocs": ylocs,
@@ -191,7 +200,7 @@ for taskid in taskids:
         "yshape1": yshape1,
         "cor": cor,
         "groups": groups,
-        "df": df
+        "mvnproc": mvnproc
         }
 
 # ----------------------------------------------------------------------
@@ -208,7 +217,7 @@ for rho_min, dd in data.items():
     yshape1 = dd["yshape1"]
     cor = dd["cor"]
     groups = dd["groups"]
-    df = dd["df"]
+    mvnproc = dd["mvnproc"]
 
     plt.close("all")
     mosaic = [["diagram", stat] for stat in ["pall", "pany"]]
@@ -311,19 +320,26 @@ for rho_min, dd in data.items():
 
             # Adjust bounds
             if stat == "pall":
-                x0, x1 = (-8.5, -2.) if rho_min == -1 else (-5., -2.)
+                x0, x1 = (-5.2, -2.) if rho_min == -1 else (-5., -2.)
             else:
-                x0, x1 = -1.9, -1.2
+                x0, x1 = -2.0, -1.3
+
+            # value -> %
+            x0 += 2
+            x1 += 2
 
             bins = np.logspace(x0, x1, 50)
             ax.set_xlim((10**x0, 10**x1))
             ax.set_xscale("log")
 
+            plot_means = {}
             for ig, gname in enumerate(groups):
                 etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
                 cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
-                sel = df.loc[:, cn]
-                se = 10**sel
+                sel = mvnproc.loc[:, cn]
+                # value -> %
+                se = 10**(sel + 2)
+                plot_means[gname] = se.mean()
                 gg = "/".join([f"2030{s}" for s in gname[1:].split("-")])
                 lab = "All sites" if gname == "GALL" else f"Bivariate\n{gg}"
                 ax.hist(se, bins=bins, edgecolor="0.5",
@@ -334,20 +350,15 @@ for rho_min, dd in data.items():
             # Got to do it outside of previous loop to maintain y0/y1
             y0, y1 = ax.get_ylim()
             for ig, gname in enumerate(groups):
-                etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
-                cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
-                sel = df.loc[:, cn]
-                se = 10**sel
-                m = se.mean()
+                m = plot_means[gname]
                 ml = math.log10(m)
                 if (ml - x0) * (x1 - ml) > 0:
-                    #putils.line(ax, 0, 1, m, 0, color=cols[ig], lw=3)
                     ax.plot([m, m], [y0, y1], "-", lw=3, color=cols[ig])
                     ax.set_ylim((y0, y1))
                     w = 0.4
                     xy = (m, y1 * w + y0 * (1-w))
                     xytext = (0, 5)
-                    txt = f"Mean\n{m:0.1e}"
+                    txt = f"Mean\n{m:0.2f}%"
                     ax.annotate(txt, xy, xytext,
                                 xycoords="data",
                                 va="bottom", ha="center",
@@ -355,11 +366,11 @@ for rho_min, dd in data.items():
                                 textcoords="offset points",
                                 path_effects=[paef])
 
-            xlab = "Annual Exceedance Probability [-]"
+            xlab = "Annual Exceedance Probability [%]"
             ylab = "MCMC Sample count [-]"
             ax.set(xlabel=xlab, ylabel=ylab)
 
-            loc = 8
+            loc = 8 if stat == "pany" else 6
             ax.legend(framealpha=0, loc=loc)
 
             ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
@@ -374,7 +385,7 @@ for rho_min, dd in data.items():
                      path_effects=[paef])
 
     LOGGER.info("Saving to disk")
-    fp = fimg / f"{basename}_rho_min{rho_min:0.02f}.png"
+    fp = fimg / f"{basename}_pcensor{pcensor}_rhomin{rho_min:0.02f}.png"
     fig.savefig(fp)
 
 LOGGER.completed()

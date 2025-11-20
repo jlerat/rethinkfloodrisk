@@ -37,11 +37,17 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot FFA spatial variability",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-d", "--debug", help="Debug mode",
+parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.5)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
 args = parser.parse_args()
 
-debug = args.debug
+clear = args.clear
+pcensor = args.pcensor
+rho_min = args.rho_min
 
 awidth = 7
 aheight = 5
@@ -49,9 +55,7 @@ fdpi = 300
 
 stationid_target = "203002"
 
-pcensor = 0.5
 exclude = "NONE"
-rho_mins = [-1, 0]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -65,8 +69,9 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
-for f in fimg.glob("*.png"):
-    f.unlink()
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -80,58 +85,53 @@ LOGGER.info("Load data")
 
 stations = datahub.get_stations()
 
-data = {}
-
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 
-for rho_min in rho_mins:
-    taskid = opm.search(pcensor=f"{pcensor:0.1f}",
-                        exclude=exclude,
-                        rho_min=f"{rho_min:0.1f}")[0]
-    mess = f"Load report TASK {taskid} exclude={exclude}"\
-           + f" pcensor={pcensor} rho_min={rho_min}"
-    LOGGER.info(mess)
+taskid = opm.search(pcensor=f"{pcensor:0.1f}",
+                    exclude=exclude,
+                    rho_min=f"{rho_min:0.1f}")[0]
+mess = f"Load report TASK {taskid} exclude={exclude}"\
+       + f" pcensor={pcensor} rho_min={rho_min}"
+LOGGER.info(mess)
 
-    # Select fit task with
-    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
-    with fd.open("r") as fo:
-        diag = json.load(fo)
+# Select fit task with
+fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+with fd.open("r") as fo:
+    diag = json.load(fo)
 
-    for vn in SDV:
-        LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
+for vn in SDV:
+    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
 
-    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-    df, comment = csv.read_csv(fs)
-    data[rho_min] = df
+fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+mvnproc, comment = csv.read_csv(fs)
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-aep_targets = df.columns.to_series()\
+aep_targets = mvnproc.columns.to_series()\
         .filter(regex="GALL_log10pall_aeptarget")\
         .str.replace(".*get_p", "", regex=True)\
         .str.replace("_", ".").astype(float).values
 
-for rho_min, df in data.items():
-    for aep_target in aep_targets:
-        LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
+for aep_target in aep_targets:
+    LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
 
-        plt.close("all")
-        fig, ax = plt.subplots(figsize=(awidth, aheight),
-                               layout="constrained")
+    plt.close("all")
+    fig, ax = plt.subplots(figsize=(awidth, aheight),
+                           layout="constrained")
 
-        etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
-        ee = (1 - df.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
-        cols = ee.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
-        ee.columns = cols
+    etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
+    aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
+    cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
+    aep.columns = cols
 
-        vm = violinplot.Violin(ee, number_format="0.1f")
-        vm.draw()
+    vm = violinplot.Violin(aep, number_format="0.1f")
+    vm.draw()
 
-        ax.set(xlabel="Station", ylabel="Event Exceedance Probability [%]")
+    ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
 
-        fp = fimg / f"{basename}_rho_min{rho_min}_p{aep_target:0.02f}.png"
-        fig.savefig(fp)
+    fp = fimg / f"{basename}_pcensor{pcensor}_rhomin{rho_min}_p{aep_target:0.02f}.png"
+    fig.savefig(fp)
 
 LOGGER.completed()

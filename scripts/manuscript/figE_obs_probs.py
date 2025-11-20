@@ -43,17 +43,22 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot obs probs",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-d", "--debug", help="Debug mode",
+parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.5)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
 args = parser.parse_args()
 
-debug = args.debug
+clear = args.clear
+pcensor = args.pcensor
+rho_min = args.rho_min
 
 awidth = 4
 aheight = 3
 fdpi = 100 # 300
 
-pcensor = 0.5
 exclude = "NONE"
 
 #events = ["2022-02-27"]
@@ -70,8 +75,9 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
-for f in fimg.glob("*.png"):
-    f.unlink()
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -86,7 +92,8 @@ LOGGER.info("Load data")
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 taskids = opm.search(pcensor=f"{pcensor:0.1f}",
-                    exclude=exclude)
+                     rho_min=f"{rho_min:0.1f}",
+                     exclude=exclude)
 
 data = {}
 for taskid in taskids:
@@ -106,7 +113,7 @@ for taskid in taskids:
         LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
 
     fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-    df, comment = csv.read_csv(fs)
+    mvnproc, comment = csv.read_csv(fs)
 
     fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
@@ -114,16 +121,18 @@ for taskid in taskids:
     stationids = stan_data["stationids"]
     nstations = len(stationids)
 
-    groups = df.columns.str.replace("_.*", "", regex=True).unique()
+    groups = mvnproc.columns.str.replace("_.*", "", regex=True).unique()
     groups = [g for g in groups if g not in ["", "mvn"]]
+    LOGGER.info(f"groups: {groups}", ntab=1)
 
-    events = df.columns.to_series()\
+    events = mvnproc.columns.to_series()\
         .filter(regex="obs_log10")\
         .str.replace(".*aep_", "", regex=True)\
-        .unique()
+        .unique().tolist()
+    LOGGER.info(f"nb events: {len(events)}", ntab=1)
 
     data[(ex, pc, rm)] = {
-        "df": df,
+        "mvnproc": mvnproc,
         "stationids": stationids,
         "groups": groups,
         "events": events
@@ -143,7 +152,7 @@ for key, dd in data.items():
     LOGGER.info(mess)
 
     # Get data
-    df = dd["df"]
+    mvnproc = dd["mvnproc"]
     stationids = dd["stationids"]
     groups = dd["groups"]
     events = dd["events"]
@@ -165,9 +174,9 @@ for key, dd in data.items():
             LOGGER.info(f"Group {grp}", ntab=2)
 
             cn = f"{grp}_obs_log10aep_{event}"
-            aep = 10**df.loc[:, cn]
-            aep = datahub.aep2aep(nu, aep) * 100
-            prob = aep * 100
+            # value -> %
+            aep = 10**(mvnproc.loc[:, cn] + 2)
+            prob = aep
 
             x0 = round(math.log10(max(1e-9, prob.quantile(0.001))), 2)
             x1 = round(math.log10(prob.max()), 2)
@@ -178,7 +187,7 @@ for key, dd in data.items():
             m = prob.mean()
             y0, y1 = ax.get_ylim()
             xy = (m, (y0 + y1) / 2)
-            ax.annotate(f"Mean\n{m:0.1e}%", xy, (0, 5),
+            ax.annotate(f"Mean\n{m:0.2f}%", xy, (0, 5),
                         xycoords="data", textcoords="offset points",
                         fontweight="bold", va="bottom", ha="center",
                         fontsize=15,
@@ -190,12 +199,12 @@ for key, dd in data.items():
             ax.set(xscale="log", title=title,
                    xlabel=xlab, ylim=(y0, y1))
 
-        ftitle = f"Event {event} rho_min={rho_min}\n"
+        ftitle = f"Event {event}\n"
         fig.suptitle(ftitle, fontsize=20, fontweight="bold")
 
         LOGGER.info("Saving to disk", ntab=1)
-        fp = f"{basename}_{event}_exclude{exclude}"\
-             + f"_pcensor{pcensor}_rho_min{rho_min}.png"
+        fp = f"{basename}_{event}"\
+             + f"_pcensor{pcensor}_rhomin{rho_min}.png"
         fp = fimg / fp
         fig.savefig(fp)
 

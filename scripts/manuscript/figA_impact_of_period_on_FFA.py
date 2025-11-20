@@ -36,21 +36,25 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot FFA curves",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-d", "--debug", help="Debug mode",
+parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.5)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
 args = parser.parse_args()
 
-debug = args.debug
-
+clear = args.clear
+pcensor = args.pcensor
+rho_min = args.rho_min
 
 awidth = 6
 aheight = 5
 fdpi = 300
 
 ptype = "gumbel"
+ari_max = 500
 
-pcensor = 0.5
-rho_min = 0.
 excludes = ["NONE", "2021"]
 
 # ----------------------------------------------------------------------
@@ -65,8 +69,9 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
-for f in fimg.glob("*.png"):
-    f.unlink()
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -79,8 +84,6 @@ LOGGER = iutils.get_logger(basename)
 LOGGER.info("Load data")
 
 stations = datahub.get_stations()
-if debug:
-    stations = stations.iloc[:1]
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
@@ -153,7 +156,6 @@ for stationid, sinfo in stations.iterrows():
         x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
         same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
         _, same = np.where(same)
-
         time = data[exclude].WATER_YEAR.iloc[same]
 
         ythresh = y[-3]
@@ -161,11 +163,11 @@ for stationid, sinfo in stations.iterrows():
             "edgecolor": "0.4",
             "arrowstyle": "-"
             }
-        for t, xx, yy in zip(time, x, y):
+        for wy, xx, yy in zip(time, x, y):
             if yy < ythresh:
                 continue
-            d = pd.to_datetime(t).strftime("%b\n%y")
-            ax.annotate(d, xy=(xx, yy),
+            txt = str(wy)
+            ax.annotate(txt, xy=(xx, yy),
                         xycoords="data",
                         xytext=(-40, 40),
                         va="bottom", ha="right",
@@ -180,6 +182,10 @@ for stationid, sinfo in stations.iterrows():
         aris = quantiles.index.to_series().str\
                 .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
 
+        iok = aris <= ari_max
+        aris = aris[iok]
+        quantiles = quantiles.loc[iok]
+
         inocens = 1 - 1./aris >= pcensor
         quantiles = quantiles.loc[inocens]
         aris = aris[inocens]
@@ -191,13 +197,13 @@ for stationid, sinfo in stations.iterrows():
                                           facecolor="tab:blue",
                                           edgecolor="k")
 
-        retp = [100]
+        retp = [10, 100, 500]
         aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
 
         if exclude == "NONE":
             exctxt = "All data"
         else:
-            ev = re.sub("-.*", "", exclude)
+            ev = int(re.sub("-.*", "", exclude)) + 1
             exctxt = f"Without {ev} flood"
 
         title = f"({letters[iax]}) {exctxt}"
@@ -206,20 +212,30 @@ for stationid, sinfo in stations.iterrows():
         ax.set(title=title, ylabel=ylab, xlabel=xlab)
 
         q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
+
         txt = "Uncertainty in 1:100 event\n\n"
-        for st in ["5%", "POSTERIOR_PREDICTIVE", "95%"]:
+        kw = dict(va="top", ha="left", transform=ax.transAxes)
+        ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
+
+        delta = 0.06
+        for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
             q = q100.loc[st]
             h = datahub.linear_interpolation(q, rc_q, rc_h)
             stt = "post pred" if st.startswith("POST") else st
-            txt += f"{stt:<12s} {q:<5.0f} $m^3.s^{{{-1}}}$ ({h:3.1f}m)\n"
 
-        ax.text(0.03, 0.97, txt, va="top", ha="left",
-                transform=ax.transAxes)
+            txt = f"{stt:<12s}"
+            ytxt = 0.97 - delta * (ist + 1)
+            ax.text(0.03, ytxt, txt, **kw)
+
+            txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
+            ax.text(0.18, ytxt, txt, **kw)
 
     ftitle = f"{sinfo.NAME} ({stationid})"
     fig.suptitle(ftitle, fontweight="bold")
 
-    fp = fimg / f"{basename}_station{istation + 1}.png"
+    fp = f"{basename}_{stationid}"\
+         + f"_pcensor{pcensor}_rhomin{rho_min}.png"
+    fp = fimg / fp
     fig.savefig(fp, dpi=fdpi)
 
 LOGGER.completed()
