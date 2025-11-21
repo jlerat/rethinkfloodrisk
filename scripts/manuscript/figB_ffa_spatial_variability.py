@@ -40,7 +40,7 @@ parser = argparse.ArgumentParser(description="Plot FFA spatial variability",
 parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                    type=float, default=0.5)
+                    type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
 args = parser.parse_args()

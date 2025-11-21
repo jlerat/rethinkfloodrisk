@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
@@ -36,11 +37,14 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot posterior predictive checks",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-d", "--debug", help="Debug mode",
+parser.add_argument("-c", "--clear", help="Clear figures",
                     action="store_true", default=False)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
 args = parser.parse_args()
 
-debug = args.debug
+clear = args.clear
+rho_min = args.rho_min
 
 awidth = 6
 aheight = 5
@@ -65,8 +69,9 @@ fout = froot / "outputs"
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
-for f in fimg.glob("*.png"):
-    f.unlink()
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -94,7 +99,9 @@ for fold in fout.glob("copulafit_TASK*"):
         continue
 
     pcensor = diag["pcensor"]
-    rho_min = diag["rho_min"]
+    rm = diag["rho_min"]
+    if rm != rho_min:
+        continue
 
     LOGGER.info(f"Load data from TASK {taskid}", nret=1)
     LOGGER.info(f"pcensor = {pcensor}", ntab=1)
@@ -133,6 +140,9 @@ nrows = nv // ncols + int(nv % ncols > 0)
 mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
           for ic in range(ncols)] for ir in range(nrows)]
 
+arrowprops = dict(arrowstyle="wedge", facecolor="0.6", edgecolor="none")
+paeff = pe.withStroke(linewidth=4, foreground="w")
+
 for (exclude, pcensor, rho_min), pp in postpred.items():
     mess = f"Plot ppchecks pcensor={pcensor} exclude={exclude} rho_min={rho_min}"
     LOGGER.info(mess, nret=1)
@@ -150,15 +160,56 @@ for (exclude, pcensor, rho_min), pp in postpred.items():
         if ppt == "univ":
             df.columns = stationids
             df.squeeze().plot(ax=ax, kind="barh")
+
+            m = (df - 0.5).abs().mean().mean()
+            ax.text(0.5, 0.5, f"mean diff\n{m:0.2f}",
+                    transform=ax.transAxes,
+                    va="center", ha="center",
+                    fontweight="bold", fontsize="x-large",
+                    path_effects=[paeff])
         else:
             #bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
             #df.squeeze().plot(ax=ax, kind="hist", bins=bins,
             #                  edgecolor="0.2", facecolor="0.8")
-            putils.ecdfplot(ax, df.T)
+            obj = putils.ecdfplot(ax, df.T)
+            obj = obj[df.index[0]]
 
+            idx = obj["index"]
+            x = obj["values"]
+            y = obj["position"]
+            out = {
+                "low": x < 0.05,
+                "high": x > 0.95
+                }
+
+            for name, ipb in out.items():
+                npb = ipb.sum()
+                if npb == 0:
+                    continue
+
+                xpb, ypb, idxp = x[ipb], y[ipb], idx[ipb]
+                col = "tab:red"
+                for cnt, (xx, yy, ii) in enumerate(zip(xpb, ypb, idxp)):
+                    ax.plot(xx, yy, "o", color=col)
+                    i1 = int(re.sub(".*\\[|,.*", "", ii)) - 1
+                    sta1 = stationids[i1]
+                    i2 = int(re.sub(".*,|\\].*", "", ii)) - 1
+                    sta2 = stationids[i2]
+                    txt = f"{sta1}\n{sta2}"
+
+                    xt = 0.2 if name == "low" else 0.8
+                    ha = "left" if name == "low" else "right"
+                    yt = np.linspace(0, 1,  2 * npb)[1 + cnt]
+                    ax.annotate(txt, xy=(xx, yy),
+                                xytext=(xt, yt),
+                                textcoords="axes fraction",
+                                va="bottom", ha=ha,
+                                arrowprops=arrowprops)
 
         for x in [0.05, 0.95]:
             putils.line(ax, 0, 1, x, 0, "r--")
+
+        putils.line(ax, 0, 1, 0.5, 0, "k-", lw=2)
 
         title = f"{ppt} post pred checks / {varname}"
         xlab = "check pvalue [-]"
@@ -167,7 +218,7 @@ for (exclude, pcensor, rho_min), pp in postpred.items():
     ftitle = f"Pcensor={pcensor}  Exclude={exclude} rho_min={rho_min}"
     fig.suptitle(ftitle, fontweight="bold")
 
-    fp = fimg / f"{basename}_pcens{pcensor}_exclude{exclude}_rho_min{rho_min}.png"
+    fp = fimg / f"{basename}_pcens{pcensor}_exclude{exclude}_rhomin{rho_min}.png"
     fig.savefig(fp)
 
 LOGGER.completed()

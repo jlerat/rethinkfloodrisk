@@ -46,7 +46,7 @@ parser = argparse.ArgumentParser(description="Plot obs probs",
 parser.add_argument("-c", "--clear", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                    type=float, default=0.5)
+                    type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
 args = parser.parse_args()
@@ -61,7 +61,7 @@ fdpi = 100 # 300
 
 exclude = "NONE"
 
-#events = ["2022-02-27"]
+events = ["2021"]
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -123,13 +123,14 @@ for taskid in taskids:
 
     groups = mvnproc.columns.str.replace("_.*", "", regex=True).unique()
     groups = [g for g in groups if g not in ["", "mvn"]]
-    LOGGER.info(f"groups: {groups}", ntab=1)
+    LOGGER.info(f"nb groups: {len(groups)}", ntab=1)
 
-    events = mvnproc.columns.to_series()\
-        .filter(regex="obs_log10")\
-        .str.replace(".*aep_", "", regex=True)\
-        .unique().tolist()
-    LOGGER.info(f"nb events: {len(events)}", ntab=1)
+    # Get all events
+    #events = mvnproc.columns.to_series()\
+    #    .filter(regex="obs_log10aep_")\
+    #    .str.replace(".*aep_", "", regex=True)\
+    #    .unique().tolist()
+    #LOGGER.info(f"nb events: {len(events)}", ntab=1)
 
     data[(ex, pc, rm)] = {
         "mvnproc": mvnproc,
@@ -174,9 +175,19 @@ for key, dd in data.items():
             LOGGER.info(f"Group {grp}", ntab=2)
 
             cn = f"{grp}_obs_log10aep_{event}"
+            if cn not in mvnproc.columns:
+                LOGGER.info(f"No data for group {grp}, skip", ntab=3)
+                ax.axis("off")
+                continue
+
             # value -> %
             aep = 10**(mvnproc.loc[:, cn] + 2)
             prob = aep
+
+            if prob.notnull().sum() == 0:
+                LOGGER.info(f"No data for group {grp}, skip", ntab=3)
+                ax.axis("off")
+                continue
 
             x0 = round(math.log10(max(1e-9, prob.quantile(0.001))), 2)
             x1 = round(math.log10(prob.max()), 2)
@@ -196,7 +207,7 @@ for key, dd in data.items():
 
             title = f"{grp[1:]}"
             xlab = "AEP [%]"
-            ax.set(xscale="log", title=title,
+            ax.set(title=title, xscale="log",
                    xlabel=xlab, ylim=(y0, y1))
 
         ftitle = f"Event {event}\n"

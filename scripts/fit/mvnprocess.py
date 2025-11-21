@@ -136,11 +136,14 @@ LOGGER.info("Load data")
 
 # Obs events
 ams, _ = datahub.get_ams_concat()
-rk = ams.rank(ascending=False)
-obs = rk.index[(rk <= 2).any(axis=1)].tolist()
+potpeaks, _, _ = datahub.get_potpeaks()
+
+
+rk = potpeaks.rank(ascending=False)
+obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
 
 if debug:
-    obs = [2021]
+    obs = ["2022-02-27", "2022-03-30"]
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -263,7 +266,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         # Obs aep
         for event in obs:
             # Get peak flow data
-            aa = ams.loc[event].squeeze()
+            pp = potpeaks.loc[event].squeeze()
             zstd = np.nan * np.zeros(ngstations)
 
             # Compute cdf for each station
@@ -276,7 +279,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 ylogscale = smp.loc[f"ylogscale[{isid}]"]
                 yshape1 = smp.loc[f"yshape1[{isid}]"]
                 gev.params = [ylocn, ylogscale, yshape1]
-                qo = aa[sid]
+                qo = pp[sid]
                 if ~np.isnan(qo):
                     cdf = gev.cdf(qo)
                     # Store individual estimate of event
