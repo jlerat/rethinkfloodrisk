@@ -1,4 +1,7 @@
+from itertools import combinations
+
 import numpy as np
+import pandas as pd
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
@@ -8,11 +11,16 @@ RHO_MAX_DEFAULT = 1.
 
 MARGINAL = GEV()
 
+DELTA_DAYS_MAX_DEFAULT = 10
+
 
 class StanSamplingMultivariate():
-    def __init__(self, data, censors=None,
+    def __init__(self, data,
+                 times=None,
+                 censors=None,
                  rho_min=RHO_MIN_DEFAULT,
-                 rho_max=RHO_MAX_DEFAULT):
+                 rho_max=RHO_MAX_DEFAULT,
+                 delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -26,6 +34,11 @@ class StanSamplingMultivariate():
         self.rho_max = rho_max
 
         self.set_data(data, censors)
+
+        self.delta_days_max = delta_days_max
+        self.times = times
+        self.set_membership()
+
         self.set_initial_parameters()
 
     @property
@@ -73,6 +86,35 @@ class StanSamplingMultivariate():
         self.idx_cens = np.array(np.where(cases == 2)).T + 1
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
+    def set_membership(self):
+        delta_days_max = self.delta_days_max
+        N, P = self.data.shape
+        membership = np.ones((N, (P * (P - 1)) // 2), dtype=int)
+
+        times = self.times
+        if times is not None:
+            if times.shape != (N, P):
+                errmsg = f"Expected times of shape ({N},{P}),"\
+                         + f" got {times.shape}."
+                raise ValueError(errmsg)
+
+            for i in range(N):
+                for j, k in combinations(range(P), 2):
+                    # Square matrix indexes -> condensed matrix index
+                    icol = (P * (P - 1)) // 2 - ((P - j) * (P - j - 1)) // 2
+                    icol += + k - j - 1
+
+                    # Get the two event times
+                    t1 = times.iloc[i, j]
+                    t2 = times.iloc[i, k]
+                    if pd.isnull(t1) or pd.isnull(t2):
+                        continue
+
+                    delta = abs(t1.toordinal() - t2.toordinal())
+                    membership[i, icol] = delta < delta_days_max
+
+        self.membership = membership
+
     def set_initial_parameters(self):
         # GEV parameters and priors
         P = self.data.shape[1]
@@ -118,6 +160,7 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
+            "membership": self.membership,
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
             "yshape1_prior": MARGINAL.shape1_prior.to_list(),

@@ -89,11 +89,11 @@ def get_ams_concat():
                          columns=stations.index,
                          index=np.arange(1957, 2023))
 
-
     for stationid in stations.index:
         ams = get_ams(stationid)
         peak = ams.filter(regex="_PEAK$", axis=1).squeeze().values
-        time = pd.to_datetime(ams.filter(regex="_TIMEPEAK$", axis=1).squeeze()).values
+        time = ams.filter(regex="_TIMEPEAK$", axis=1).squeeze()
+        time = pd.to_datetime(time).values
         wy = ams.WATER_YEAR_START.str[:4].astype(int).values
 
         peaks.loc[wy, stationid] = peak

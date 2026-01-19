@@ -56,16 +56,30 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
-def test_sample_data(pcensor, allclose):
-    data, _, _ = datahub.get_potpeaks()
+@pytest.mark.parametrize("use_times", [False, True])
+def test_sample_data(pcensor, use_times, allclose):
+    data, times = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor)
-    sv = sample.StanSamplingMultivariate(data, censors=censors)
+    if use_times:
+        sv = sample.StanSamplingMultivariate(data, times, censors=censors)
+    else:
+        sv = sample.StanSamplingMultivariate(data, censors=censors)
+
     stan_data = sv.to_dict()
 
-    assert len(stan_data) == 21
+    assert len(stan_data) == 22
 
     data = pd.DataFrame(stan_data["y"])
     assert data.notnull().any(axis=1).all()
+
+    mem = stan_data["membership"]
+    N, P = data.shape
+    assert mem.shape == (N, (P * (P-1)) // 2)
+
+    if not use_times:
+        assert allclose(mem, 1)
+    else:
+        assert np.all((mem == 0) | (mem == 1))
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
@@ -90,14 +104,14 @@ def test_sample_data(pcensor, allclose):
 
 
 def test_inits(allclose):
-    data, _, _ = datahub.get_potpeaks()
+    data, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     inits = sv.initial_parameters
 
 
 def test_stan_indexing():
-    data, _, _ = datahub.get_potpeaks()
+    data, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
@@ -176,7 +190,7 @@ def test_stan_cor(allclose):
                                     "censored_missing"])
 @pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
-    data, _, _ = datahub.get_potpeaks()
+    data, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
 
     if re.search("nomissing", config):
@@ -243,7 +257,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data, _, _ = datahub.get_potpeaks()
+    data, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
     data = data.loc[data.notnull().any(axis=1)]
 
