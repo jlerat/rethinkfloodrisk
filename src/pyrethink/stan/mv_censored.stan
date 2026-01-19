@@ -157,6 +157,13 @@ model {
   }
 
   // --- Likelihood ---
+  // We could add another loop here 
+  // that would tackle the fact that the zs can be 
+  // assumed to be correlated or not.
+  // For example if they are AMS on different dates.
+  // In this case, the correlation matrix is retained 
+  // except for uncorrelated cases where the correlation
+  // is set to 0.
   z ~ multi_normal(zero_mean, cor_IW);
 }
 
