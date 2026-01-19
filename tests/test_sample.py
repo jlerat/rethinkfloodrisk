@@ -79,7 +79,7 @@ def test_sample_data(pcensor, use_times, allclose):
     if not use_times:
         assert allclose(mem, 1)
     else:
-        assert np.all((mem == 0) | (mem == 1))
+        assert np.all((mem == 0) | (mem == 1) | (mem == -1))
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]

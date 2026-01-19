@@ -89,7 +89,7 @@ class StanSamplingMultivariate():
     def set_membership(self):
         delta_days_max = self.delta_days_max
         N, P = self.data.shape
-        membership = np.ones((N, (P * (P - 1)) // 2), dtype=int)
+        membership = -1 * np.ones((N, (P * (P - 1)) // 2), dtype=int)
 
         times = self.times
         if times is not None:
