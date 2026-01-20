@@ -18,18 +18,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, invwishart
-from scipy.stats import multivariate_normal as mvn
+from scipy.stats import norm
 import matplotlib.pyplot as plt
 
 from cmdstanpy import CmdStanModel, write_stan_json
-
-from rpy2 import situation
-import os
-os.environ["R_HOME"] = situation.get_r_home()
-import rpy2.robjects as robjects
-from rpy2.robjects import numpy2ri
-numpy2ri.activate()
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
@@ -42,7 +34,6 @@ from pyrethink import sample
 from pyrethink import datahub
 
 import importlib
-importlib.reload(datahub)
 importlib.reload(sample)
 
 np.random.seed(5446)
@@ -84,7 +75,7 @@ else:
 source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
-fout = froot / "outputs" / "check_stan" / "mv_censored_membership_check"
+fout = froot / "outputs" / "check_stan" / "mv_censored_check"
 fout.mkdir(exist_ok=True, parents=True)
 for f in fout.glob("*.*"):
     f.unlink()
@@ -100,98 +91,12 @@ LOGGER = get_logger(stan_logger=False)
 # ----------------------------------------------------------------------
 gum = Gumbel()
 
-ams, times = datahub.get_ams_concat()
+truepeaks = datahub.get_truepeaks()
+truepeaks = truepeaks.iloc[:, :P]
 
-pcensor = 0.3
-censors = datahub.get_censors(pcensor)
-
-sv = sample.StanSamplingMultivariate(ams, times, censors=censors)
+sv = sample.StanSamplingMultivariate(truepeaks, pcensor=pcens)
 stan_data = sv.to_dict()
 stan_inits = sv.initial_parameters
-
-mem = sv.membership
-
-mema = mem[np.all(mem >= 0, axis=1)]
-#
-# latent model
-# z ~ N(mu, R)
-# diag(R) == 1 (Correlation)
-# m = z >= 0
-#
-# P(mu, R | m) = int_u  P(mu, R, z | m) du
-#              =x P(mu) P(R) x int_z P(z | mu, R, m) dz
-# m[i] = 1 => z >= 0
-# m[i] = 0 => u <= 0
-#
-N, Q = mema.shape
-beta = norm.ppf(0.7) + np.zeros(Q)
-rho = 0.9
-Sigma = np.eye(Q) + rho * (np.ones((Q, Q)) - np.eye(Q))
-
-def sample_trunc(mu, Sigma, low, up, size=1):
-    v2t = lambda x: ",".join([re.sub("inf", "Inf", f"{v:0.5e}") for v in x.ravel()])
-    rcode = f"library(TruncatedNormal);\n"
-    rcode += f"mu <- c({v2t(mu)});\n"
-    Q = Sigma.shape[1]
-    rcode += f"Sigma <- matrix(c({v2t(Sigma)}), nrow={Q},ncol={Q});\n"
-    rcode += f"low <- c({v2t(low)});\n"
-    rcode += f"up <- c({v2t(up)});\n"
-    rcode += f"x <- rtmvnorm({size},mu,Sigma,low,up);\n"
-    robjects.r(rcode)
-    return robjects.r["x"]
-
-# Prior
-beta0 = np.zeros(Q)
-Psi = np.eye(Q)
-df0 = Q + Q
-M0 = Q
-
-beta_samples = np.zeros((nsamples, Q))
-Sigma_samples = np.zeros((nsamples, Q, Q))
-
-beta = beta0
-Sigma = np.eye(Q)
-
-for ismp in range(nsamples):
-    if ismp % 10 == 0:
-        LOGGER.info(f"Gibbs sample {ismp + 1:4d} / {nsamples}")
-    # -- Gibbs sampler --
-
-    # I. Sample latent variables z given membership, beta and Sigma
-    z = np.zeros((N, Q))
-    for t in range(N):
-        m = mema[t]
-
-        low = np.zeros(Q)
-        low[m == 0] = -np.inf
-        up = np.zeros(Q)
-        up[m == 1] = np.inf
-
-        z[t] = sample_trunc(beta, Sigma, low, up, 1)
-
-    # II. Sample beta and Sigma given z and membership
-    # See https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Bayesian_inference
-
-    # .. II.1 sample beta given Sigma, z and membership
-    zm = z.mean(axis=0)
-    mean = (N * zm + M0 * beta0) / (N + M0)
-    beta = np.random.multivariate_normal(mean=mean, cov=Sigma/(N+M0))
-
-    # .. II.2 sample Sigma given z and membership
-    delta = z - zm[None, :]
-    S = (delta.T @ delta) / N
-    delta0 = (zm - beta0)[None, :]
-    S0 = delta0.T @ delta0
-    scale = Psi + N * S + N*M0/(N+M0) * S0
-    Sigma = invwishart.rvs(df=df0, scale=scale)
-
-    # Store
-    beta_samples[ismp] = beta
-    Sigma_samples[ismp] = Sigma
-
-sys.exit()
-
-
 
 # Generate data
 L_cor = stan_inits["L_cor"]
