@@ -1,12 +1,4 @@
 
-
-//
-// Copula functions
-// https://spinkney.github.io/helpful_stan_functions/group__student__t__copula.html
-//
-
-
-
 // -------------- GEV distribution ------------------------------
 // tau Bounds when kappa > 0 : [ymax-alpha/kapp, +infty[
 // tau Bounds when kappa < 0 : ]-infty, ycensor-alpha/kapp]

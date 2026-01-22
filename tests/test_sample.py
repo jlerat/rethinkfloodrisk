@@ -19,10 +19,7 @@ from floodstan import bivariate_censored_sampling
 
 from pyrethink import sample
 from pyrethink import datahub
-from pyrethink import mv_censored_sampling
-from pyrethink import stan_test_indexing
-from pyrethink import stan_test_functions
-from pyrethink import stan_test_cor
+from pyrethink import mv_censored_no_missing_sampling
 
 FTESTS = Path(__file__).resolve().parent
 
@@ -43,7 +40,7 @@ if FLOG.exists():
     except:
         pass
 
-for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
+for f in FTESTS.glob("test_mv_censored_no_missing_vs_floodstan*.png"):
     f.unlink()
 
 LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
@@ -58,7 +55,9 @@ STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("use_times", [False, True])
 def test_sample_data(pcensor, use_times, allclose):
-    data, times = datahub.get_ams_concat()
+    # Test with missing data
+    data, times = datahub.get_ams_concat(no_missing=False)
+
     censors = datahub.get_censors(pcensor)
     if use_times:
         sv = sample.StanSamplingMultivariate(data, times, censors=censors)
@@ -110,91 +109,11 @@ def test_inits(allclose):
     inits = sv.initial_parameters
 
 
-def test_stan_indexing():
-    data, _ = datahub.get_ams_concat()
-    censors = datahub.get_censors(pcensor=0.2)
-    sv = sample.StanSamplingMultivariate(data, censors=censors)
-    stan_data = sv.to_dict()
-    df = stan_test_indexing(data=stan_data)
-
-    y = stan_data["y"]
-    z = df.filter(regex="^z").values.reshape(y.T.shape).T
-    for ivar, zv in enumerate(z.T):
-        # Check missing
-        ismiss = np.isnan(y[:, ivar])
-        assert all(z[ismiss, ivar] == 3)
-        assert all(z[~ismiss, ivar] != 3)
-
-        # Check censored
-        iscens = y[:, ivar] < stan_data["censors"][ivar]
-        assert all(z[iscens, ivar] == 2)
-        assert all(z[~iscens, ivar] != 2)
-
-
-@pytest.mark.parametrize("kappa", [-1., -0.5, 0., 0.5, 1.])
-def test_stan_functions(kappa, allclose):
-    tau = 100.
-    alpha = 50.
-
-    mname = "GEV" if abs(kappa) > 0 else "Gumbel"
-    marginal = marginals.factory(mname)
-    marginal.params = [tau, math.log(alpha), kappa]
-
-    stan_data = {
-        "Q": 10000,
-        "tau": tau,
-        "alpha": alpha,
-        "kappa": kappa
-    }
-    df = stan_test_functions(data=stan_data)
-
-    u = df.filter(regex="^u\\[").squeeze().values
-    q = df.filter(regex="^qq").squeeze().values
-    expected = marginal.ppf(u)
-    atol = 1e-4
-    rtol = 5e-4
-    assert allclose(q, expected, atol=atol, rtol=rtol)
-
-    uu = df.filter(regex="^uu").squeeze().values
-    expected = marginal.cdf(q)
-    assert allclose(uu, expected, atol=atol, rtol=rtol)
-
-    lp = df.filter(regex="^lp\\[").squeeze().values
-    expected = marginal.logpdf(q)
-    assert allclose(lp, expected, atol=atol, rtol=rtol)
-
-
-def test_stan_cor(allclose):
-    P = 5
-    Q = 20000
-
-    rho = 0.9
-    cor = toeplitz(rho ** np.arange(P))
-    L_cor = np.linalg.cholesky(cor)
-
-    stan_data = {
-        "P": P,
-        "Q": Q,
-        "L_cor": L_cor
-        }
-
-    df = stan_test_cor(data=stan_data)
-
-    z = df.filter(regex="^zrnd").values.reshape((P, Q)).T
-    zcor = np.corrcoef(z.T)
-    assert allclose(zcor, cor, atol=1e-2)
-
-
-@pytest.mark.parametrize("config", ["uncensored_nomissing",
-                                    "uncensored_missing",
-                                    "censored_missing"])
+@pytest.mark.parametrize("config", ["uncensored", "censored"])
 @pytest.mark.parametrize("nvars", [3])
 def test_sampler(config, nvars, allclose):
     data, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
-
-    if re.search("nomissing", config):
-        data = data.loc[data.notnull().all(axis=1)]
 
     if config.startswith("censored"):
         pcensor = 0.3
@@ -206,7 +125,7 @@ def test_sampler(config, nvars, allclose):
     sv = sample.StanSamplingMultivariate(data, censors=censors)
     stan_data = sv.to_dict()
 
-    if config == "uncensored_nomissing":
+    if config == "uncensored":
         assert stan_data["Nobs"] == np.prod(data.shape)
         assert stan_data["Ncens"] == 0
         assert stan_data["Nmiss"] == 0
@@ -230,7 +149,7 @@ def test_sampler(config, nvars, allclose):
               iter_warmup=STAN_NWARM_DEFAULT,
               show_progress=PROGRESS)
 
-    smp = mv_censored_sampling(**kw)
+    smp = mv_censored_no_missing_sampling(**kw)
     df = smp.draws_pd()
     diag = report.process_stan_diagnostic(smp.diagnose())
     for met in STAN_DIAG_METRICS:
@@ -239,7 +158,7 @@ def test_sampler(config, nvars, allclose):
     # Test sample size error
     kw["data"]["Nmiss"] += 1
     with pytest.raises(RuntimeError):
-        mv_censored_sampling(**kw)
+        mv_censored_no_missing_sampling(**kw)
 
     if config == "censored_missing" and WRITE_SAMPLE_DATA:
         fd = FTESTS / "censored_missing_data.zip"
@@ -250,19 +169,14 @@ def test_sampler(config, nvars, allclose):
         df.to_csv(fs, compression=comp)
 
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
-@pytest.mark.parametrize("missing", [False, True])
 @pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])
-def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
-    if DEBUG and (pcensor < 0.5 or missing or stationpair[0] != 44):
+def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
+    if DEBUG and (pcensor < 0.5 or stationpair[0] != 44):
         pytest.skip("Debug mode")
 
     # Two variables only
     data, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
-    data = data.loc[data.notnull().any(axis=1)]
-
-    if not missing:
-        data = data.loc[pd.notnull(data).all(axis=1)]
 
     censors = data.quantile(pcensor)
 
@@ -316,7 +230,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 
-    smp2 = mv_censored_sampling(**kw)
+    smp2 = mv_censored_no_missing_sampling(**kw)
     df2 = smp2.draws_pd()
     diag2 = report.process_stan_diagnostic(smp2.diagnose())
 
@@ -397,7 +311,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
         xb = max(x1.max(), x2.max())
         bins = np.linspace(xa, xb, 30)
         ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
-        ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
+        ax.hist(x2, bins=bins, label="mv_censored_no_missing", edgecolor="0.5", alpha=0.6)
 
         title = f"{pname2} - ks-logpv={kspv:0.1f}"
         ax.set_title(title, fontweight="bold")
@@ -408,7 +322,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, missing, allclose):
     fig.suptitle(ftitle, fontsize="large")
 
     sids = "-".join(data.columns.tolist())
-    fp = f"test_mv_censored_vs_floodstan_stations{sids}"\
+    fp = f"test_mv_censored_no_missing_vs_floodstan_stations{sids}"\
         + f"_pcens{pcensor*100:0.02f}"\
         + f"_missing{missing}.png"
     fp = FTESTS / fp

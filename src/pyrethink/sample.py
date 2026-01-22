@@ -1,10 +1,13 @@
 from itertools import combinations
-
+from datetime import datetime
 import numpy as np
 import pandas as pd
+from scipy.cluster.hierarchy import fclusterdata
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
+
+STUDENT_DF_MAX = 5.
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.
@@ -15,12 +18,17 @@ DELTA_DAYS_MAX_DEFAULT = 10
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data,
+    def __init__(self, data, copula,
                  times=None,
                  censors=None,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
+
+        if copula < 0 or copula > STUDENT_DF_MAX:
+            errmsg = f"Expected copula in [0, {STUDENT_DF_MAX}],"\
+                     + f" got {copula}."
+            raise ValueError(errmsg)
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -30,6 +38,7 @@ class StanSamplingMultivariate():
             errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
             raise ValueError(errmsg)
 
+        self.copula = copula
         self.rho_min = rho_min
         self.rho_max = rho_max
 
@@ -37,7 +46,7 @@ class StanSamplingMultivariate():
 
         self.delta_days_max = delta_days_max
         self.times = times
-        self.set_membership()
+        self.set_clusters()
 
         self.set_initial_parameters()
 
@@ -86,11 +95,10 @@ class StanSamplingMultivariate():
         self.idx_cens = np.array(np.where(cases == 2)).T + 1
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
-    def set_membership(self):
+    def set_clusters(self):
         delta_days_max = self.delta_days_max
         N, P = self.data.shape
-        membership = -1 * np.ones((N, (P * (P - 1)) // 2), dtype=int)
-
+        clusters = -1 * np.ones((N, P), dtype=int)
         times = self.times
         if times is not None:
             if times.shape != (N, P):
@@ -98,22 +106,24 @@ class StanSamplingMultivariate():
                          + f" got {times.shape}."
                 raise ValueError(errmsg)
 
+            ordin = times.map(datetime.toordinal)
             for i in range(N):
-                for j, k in combinations(range(P), 2):
-                    # Square matrix indexes -> condensed matrix index
-                    icol = (P * (P - 1)) // 2 - ((P - j) * (P - j - 1)) // 2
-                    icol += + k - j - 1
+                ordint = ordin.values[i]
+                valid = ordint > 1
+                if valid.sum() > 1:
+                    cl = fclusterdata(ordint[valid][:, None],
+                                      t=delta_days_max,
+                                      criterion="distance")
+                elif valid.sum() == 1:
+                    cl = [1]
+                else:
+                    continue
 
-                    # Get the two event times
-                    t1 = times.iloc[i, j]
-                    t2 = times.iloc[i, k]
-                    if pd.isnull(t1) or pd.isnull(t2):
-                        continue
+                clusters[i, valid] = cl
 
-                    delta = abs(t1.toordinal() - t2.toordinal())
-                    membership[i, icol] = delta < delta_days_max
+            import pdb; pdb.set_trace()
 
-        self.membership = membership
+            self.clusters = clusters
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -160,7 +170,8 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
-            "membership": self.membership,
+            "clusters": self.clusters,
+            "copula": self.copula,
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
             "yshape1_prior": MARGINAL.shape1_prior.to_list(),

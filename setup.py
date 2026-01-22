@@ -22,7 +22,8 @@ MODELS = [
     "test_functions",
     "test_indexing",
     "test_cor",
-    "mv_censored"
+    "test_student",
+    "mv_censored_no_missing"
     ]
 
 CMDSTAN_VERSION = "2.36.0"
