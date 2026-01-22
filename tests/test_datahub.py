@@ -18,19 +18,36 @@ def test_data_folder():
 def test_get_stations():
     df = datahub.get_stations()
 
-def test_potpeaks():
-    df, wy, nu = datahub.get_potpeaks()
-    assert df.shape == (86, 8)
+@pytest.mark.parametrize("no_missing", [False, True])
+def test_potpeaks(no_missing):
+    df, wy, nu = datahub.get_potpeaks(no_missing)
+
+    if no_missing:
+        assert df.shape == (58, 6)
+        assert abs(nu - 1.8125) < 1e-2
+    else:
+        assert df.shape == (86, 8)
+        assert abs(nu - 1.82978) < 1e-2
+
     assert (df.min() > 0).all()
-    assert abs(nu - 1.82978) < 1e-2
 
-def test_potpeaks_thresh():
-    thresh = datahub.get_potpeaks_thresh()
-    assert len(thresh) == 8
+@pytest.mark.parametrize("no_missing", [False, True])
+def test_potpeaks_thresh(no_missing):
+    thresh = datahub.get_potpeaks_thresh(no_missing)
+    if no_missing:
+        assert len(thresh) == 6
+    else:
+        assert len(thresh) == 8
 
+@pytest.mark.parametrize("no_missing", [False, True])
+def test_get_ams_concat(no_missing):
+    ams, times = datahub.get_ams_concat(no_missing)
+    if no_missing:
+        assert ams.shape[1] == 6
+    else:
+        assert ams.shape[1] == 8
 
-def test_get_ams_concat():
-    ams, times = datahub.get_ams_concat()
+    assert ams.shape == times.shape
 
 
 @pytest.mark.parametrize("stationid",

@@ -27,15 +27,14 @@ DATA_FOLDER = replace_root(CONFIG["data_folder"])
 DATA_VERSION = CONFIG["data_version"]
 
 
-def get_stations():
+def get_stations(no_missing=True):
     fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(fs, index_col="STATIONID",
                          dtype={"STATIONID": str})
-    potpeaks, _, _ = get_potpeaks()
-    return df.loc[potpeaks.columns, :]
+    return df
 
 
-def get_potpeaks():
+def get_potpeaks(no_missing=True):
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(ft, index_col="DAY", parse_dates=True)
 
@@ -47,15 +46,24 @@ def get_potpeaks():
     df = df.filter(regex="_PEAK", axis=1)
     df.columns = df.columns.str.replace("_PEAK", "")
 
+    ams, _ = get_ams_concat(no_missing)
+    df = df.loc[:, ams.columns]
+    if no_missing:
+        iok = df.notnull().all(axis=1)
+        df = df.loc[iok]
+        wy = wy.loc[iok]
+
     # Count number of events per year
     nu = wy.value_counts().mean()
 
     return df, wy, nu
 
 
-def get_potpeaks_thresh():
+def get_potpeaks_thresh(no_missing=True):
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     _, comments = csv.read_csv(ft, index_col="DAY", parse_dates=True)
+
+    potpeaks, _, _ = get_potpeaks(no_missing)
 
     qthresh = {re.sub(".*_|\\[.*", "", key): float(val)
                for key, val in comments.items()
@@ -63,6 +71,7 @@ def get_potpeaks_thresh():
 
     qthresh = pd.Series(qthresh)
     qthresh.name = "POT_thresh[m3.s-1]"
+    qthresh = qthresh.loc[potpeaks.columns]
 
     return qthresh
 
@@ -80,7 +89,7 @@ def get_ams(stationid):
     return ams
 
 
-def get_ams_concat():
+def get_ams_concat(no_missing=True):
     stations = get_stations()
     peaks = pd.DataFrame(np.nan,
                          columns=stations.index,
@@ -99,15 +108,22 @@ def get_ams_concat():
         peaks.loc[wy, stationid] = peak
         times.loc[wy, stationid] = time
 
+    if no_missing:
+        miss = peaks.isnull().sum()
+        selected = miss < 30
+        isok = peaks.loc[:, selected].notnull().all(axis=1)
+        peaks = peaks.loc[isok, selected]
+        times = times.loc[isok, selected]
+
     return peaks, times
 
 
-def get_censors(pcensor):
+def get_censors(pcensor, no_missing=True):
     if pcensor < 0 or pcensor > 1:
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    ams, _ = get_ams_concat()
+    ams, _ = get_ams_concat(no_missing)
     censors = pd.Series(np.nan, index=ams.columns)
 
     for stationid, qmax in ams.items():
