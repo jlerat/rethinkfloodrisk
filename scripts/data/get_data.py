@@ -142,10 +142,20 @@ with Dataset(fncin, "r") as ncin:
             .drop(drop, axis=1)\
             .set_index("WATER_YEAR_START")
 
+        # Peak day of year
+        start = pd.Series([pd.to_datetime(f"{y}-{wys}-01")
+                           for y in ams.index], index=ams.index)
+        start = start.dt.tz_localize(None)
+        dow = ams.TIMEPEAK - start
+
+        ams.loc[:, "DAYOFYEAR"] = -1
+        iok = ams.TIMEPEAK.notnull()
+        ams.loc[iok, "DAYOFYEAR"] = dow[iok].dt.days
+
         ams.columns = stationid + "_" + ams.columns
 
         comment = f"AMS streamflow data for station {stationid}."\
-                  + " Water year starts on the 1/{wys}."
+                  + f" Water year starts on the 1/{wys}."
         csv.write_csv(ams, fams, comment,
                       source_file, compress=False,
                       write_sys_info=False,

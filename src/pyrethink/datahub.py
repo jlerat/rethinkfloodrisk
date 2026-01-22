@@ -46,7 +46,7 @@ def get_potpeaks(no_missing=True):
     df = df.filter(regex="_PEAK", axis=1)
     df.columns = df.columns.str.replace("_PEAK", "")
 
-    ams, _ = get_ams_concat(no_missing)
+    ams, _, _ = get_ams_concat(no_missing)
     df = df.loc[:, ams.columns]
     if no_missing:
         iok = df.notnull().all(axis=1)
@@ -97,16 +97,23 @@ def get_ams_concat(no_missing=True):
     times = pd.DataFrame(pd.NaT,
                          columns=stations.index,
                          index=np.arange(1957, 2023))
+    dows = pd.DataFrame(-1,
+                        columns=stations.index,
+                        index=np.arange(1957, 2023))
+
 
     for stationid in stations.index:
         ams = get_ams(stationid)
         peak = ams.filter(regex="_PEAK$", axis=1).squeeze().values
         time = ams.filter(regex="_TIMEPEAK$", axis=1).squeeze()
         time = pd.to_datetime(time).values
+        dow = ams.filter(regex="_DAYOFYEAR", axis=1).squeeze()
+        dow = dow.values
         wy = ams.WATER_YEAR_START.str[:4].astype(int).values
 
         peaks.loc[wy, stationid] = peak
         times.loc[wy, stationid] = time
+        dows.loc[wy, stationid] = dow
 
     if no_missing:
         miss = peaks.isnull().sum()
@@ -114,8 +121,9 @@ def get_ams_concat(no_missing=True):
         isok = peaks.loc[:, selected].notnull().all(axis=1)
         peaks = peaks.loc[isok, selected]
         times = times.loc[isok, selected]
+        dows = dows.loc[isok, selected]
 
-    return peaks, times
+    return peaks, times, dows
 
 
 def get_censors(pcensor, no_missing=True):
@@ -123,7 +131,7 @@ def get_censors(pcensor, no_missing=True):
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    ams, _ = get_ams_concat(no_missing)
+    ams, _, _ = get_ams_concat(no_missing)
     censors = pd.Series(np.nan, index=ams.columns)
 
     for stationid, qmax in ams.items():
