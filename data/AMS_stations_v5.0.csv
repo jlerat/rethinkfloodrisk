@@ -2,9 +2,9 @@
 # nrow : 8
 # ncol : 9
 # comment : Station metadata.
-# time_generated : 2025-11-04 12:05:02
+# time_generated : 2026-01-23 09:03:39
 # author : unknown
-# source_file : D010_get_data.py
+# source_file : get_data.py
 # --------------------------------------------------
 STATIONID,NAME,CATCHMENTAREA[km2],GAUGING_MAX_PROVIDER[m3/sec],LATITUDE[arc_degree],LONGITUDE[arc_degree],STREAMFLOW_MAX[m3/sec],STREAMFLOW_MAX_DATE[day],XOUTLET_EPSG28356[m],YOUTLET_EPSG28356[m]
 203002,Coopers Creek At Repentance,62.00000,127.73722,-28.64129,153.41258,1363.16589,2022-02-28,540324.37500,6831685.50000

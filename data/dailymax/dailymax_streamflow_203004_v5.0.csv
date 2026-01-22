@@ -2,9 +2,9 @@
 # nrow : 19560
 # ncol : 1
 # comment : Daily streamflow maximum and mean for station 203004.
-# time_generated : 2025-11-04 12:04:56
+# time_generated : 2026-01-23 09:03:34
 # author : unknown
-# source_file : D010_get_data.py
+# source_file : get_data.py
 # --------------------------------------------------
 DAY,STREAMFLOW_MAX[m3.s-1]
 1970-03-21,4.47300

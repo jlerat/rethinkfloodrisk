@@ -10,9 +10,9 @@
 # pot_thresh_203014[m3/s] : 243.5
 # pot_thresh_203024[m3/s] : 176.2
 # pot_thresh_203900[m3/s] : 430.7
-# time_generated : 2025-11-04 16:22:21
+# time_generated : 2026-01-23 09:09:49
 # author : unknown
-# source_file : D020_concatenate_ams_data.py
+# source_file : concatenate_ams_data.py
 # --------------------------------------------------
 DAY,203002_PEAK,203004_PEAK,203005_PEAK,203010_PEAK,203012_PEAK,203014_PEAK,203024_PEAK,203900_PEAK,WATERYEAR,START,END
 1958-08-06,,,,,,315.07001,,,1957.00000,1958-08-03,1958-08-09
