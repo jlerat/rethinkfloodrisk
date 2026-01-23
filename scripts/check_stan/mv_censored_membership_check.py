@@ -10,6 +10,7 @@
 
 import os
 import sys
+from itertools import combinations
 import re
 import math
 import argparse
@@ -19,7 +20,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, invwishart
+from scipy.stats import expon
 from scipy.stats import multivariate_normal as mvn
+from scipy.stats import multivariate_t as mvt
+from scipy.stats import t as student_t
+from scipy.special import expit, logit, logsumexp
+from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 
 from cmdstanpy import CmdStanModel, write_stan_json
@@ -100,7 +106,112 @@ LOGGER = get_logger(stan_logger=False)
 # ----------------------------------------------------------------------
 gum = Gumbel()
 
-ams, times = datahub.get_ams_concat()
+ams, times, dows = datahub.get_ams_concat()
+N, P = dows.shape
+
+def get_events(dows, delta_max=10):
+    N, P = dows.shape
+    isorted = np.argsort(np.argsort(dows, axis=1), axis=1)
+    sort = np.sort(dows, axis=1)
+    delta = np.column_stack([np.zeros(N), np.diff(sort, axis=1)])
+    k1 = np.repeat(np.arange(N), P)
+    k2 = isorted.ravel()
+    ev = np.cumsum(delta > delta_max, axis=1)[k1, k2].reshape((N, P))
+    ev = pd.DataFrame(ev, index=dows.index, columns=dows.columns)
+    nev = np.max(ev, axis=1) + 1
+    nevp = nev.value_counts().sort_index()
+    nevp = nevp / nevp.sum()
+    return ev, nev, nevp
+
+dmax = 15
+events, nevents, nevents_p = get_events(dows, dmax)
+
+mu = dows.mean().values
+rho0 = 1 - 1e-3
+cor0 = (1 - rho0) * np.eye(P) + rho0 * np.ones((P, P))
+w = 0.05
+cor = (1-w)*cor0 + w*dows.corr().values
+sigs = dows.std().values
+S = np.diag(sigs)
+cov = S @ cor @ S
+
+nsmp = 1000
+def samples(nsmp):
+    return mvn.rvs(mean=mu, cov=cov, size=nsmp)
+
+isin = lambda x: np.all((x >= 0) & (x <= 365), axis=1)
+
+smp = samples(nsmp)
+iok = isin(smp)
+while iok.sum() < nsmp:
+    smp[~iok] = samples((~iok).sum())
+    iok = isin(smp)
+
+smp = pd.DataFrame(smp, columns=dows.columns)
+sevents, snevents, snevents_p = get_events(smp, dmax)
+
+
+plt.close("all")
+fig, axs = plt.subplots(ncols=3)
+
+ax = axs[0]
+nevents_p.plot(ax=ax, kind="bar")
+ax.set(title="obs")
+
+ax = axs[1]
+snevents_p.plot(ax=ax, kind="bar")
+ax.set(title="sim")
+
+ax = axs[2]
+dows.mean().plot(ax=ax, label="obs")
+smp.mean().plot(ax=ax, label="sim")
+ax.legend()
+
+w = 3
+ncols, nrows = 3, 2
+fig, axs = plt.subplots(nrows=nrows, ncols=ncols,
+                        figsize=(w*ncols, w*nrows),
+                        layout="constrained")
+for iax, ax in enumerate(axs.flat):
+    smpx = smp.iloc[:, iax]
+    ax.hist(smpx, bins=50, fc="0.8", ec="0.2", alpha=0.7,
+            density=True)
+
+    x = dows.iloc[:, iax].values
+    ax.hist(x, bins=10, fc="pink", ec="tab:red", alpha=0.7,
+            density=True)
+
+w = 2.
+ncols, nrows = 4, 4
+combs = np.array([(i, j) for i, j in combinations(range(P), 2)])
+ncombs = (P * (P - 1)) // 2
+fig, axs = plt.subplots(nrows=nrows, ncols=ncols,
+                        figsize=(w*ncols, w*nrows),
+                        layout="constrained")
+
+for iax, ax in enumerate(axs.flat):
+    if iax >= ncombs:
+        ax.axis("off")
+        continue
+
+    i, j = combs[iax]
+
+    sxy = smp.iloc[:, [i, j]].values
+    xx, yy, zz = putils.kde(sxy)
+    ax.contourf(xx, yy, zz, cmap="Reds")
+
+    xy = dows.iloc[:, [i, j]].values
+    ax.plot(xy[:, 0], xy[:, 1], "o", ms=5)
+
+    sx = dows.columns[i]
+    sy = dows.columns[j]
+    ax.set(title=f"X={sx} Y={sy}",
+           xticks=[], yticks=[])
+
+    putils.line(ax, 1, 1, 0, 0, "k-", lw=0.8)
+plt.show()
+sys.exit()
+
 
 pcensor = 0.3
 censors = datahub.get_censors(pcensor)
@@ -111,84 +222,23 @@ stan_inits = sv.initial_parameters
 
 mem = sv.membership
 
-mema = mem[np.all(mem >= 0, axis=1)]
-#
-# latent model
-# z ~ N(mu, R)
-# diag(R) == 1 (Correlation)
-# m = z >= 0
-#
-# P(mu, R | m) = int_u  P(mu, R, z | m) du
-#              =x P(mu) P(R) x int_z P(z | mu, R, m) dz
-# m[i] = 1 => z >= 0
-# m[i] = 0 => u <= 0
-#
-N, Q = mema.shape
-beta = norm.ppf(0.7) + np.zeros(Q)
-rho = 0.9
-Sigma = np.eye(Q) + rho * (np.ones((Q, Q)) - np.eye(Q))
+iok = np.all(mem >= 0, axis=1)
+ams = ams.loc[iok]
+times = times.loc[iok]
+mema = mem[iok]
 
-def sample_trunc(mu, Sigma, low, up, size=1):
-    v2t = lambda x: ",".join([re.sub("inf", "Inf", f"{v:0.5e}") for v in x.ravel()])
-    rcode = f"library(TruncatedNormal);\n"
-    rcode += f"mu <- c({v2t(mu)});\n"
-    Q = Sigma.shape[1]
-    rcode += f"Sigma <- matrix(c({v2t(Sigma)}), nrow={Q},ncol={Q});\n"
-    rcode += f"low <- c({v2t(low)});\n"
-    rcode += f"up <- c({v2t(up)});\n"
-    rcode += f"x <- rtmvnorm({size},mu,Sigma,low,up);\n"
-    robjects.r(rcode)
-    return robjects.r["x"]
+P = ams.shape[1]
+eye = np.eye(P, dtype=int)
+for (_, a), (_, t), m in zip(ams.iterrows(), times.iterrows(), mema):
+    mat = np.eye(P, dtype=int)
+    mat[np.triu_indices(P, 1)] = m
+    mat = mat + mat.T - eye
+    U, S, Vt = np.linalg.svd(mat)
+    if not np.allclose(S, S.round(0)):
+        print("oups")
+        sys.exit()
 
-# Prior
-beta0 = np.zeros(Q)
-Psi = np.eye(Q)
-df0 = Q + Q
-M0 = Q
-
-beta_samples = np.zeros((nsamples, Q))
-Sigma_samples = np.zeros((nsamples, Q, Q))
-
-beta = beta0
-Sigma = np.eye(Q)
-
-for ismp in range(nsamples):
-    if ismp % 10 == 0:
-        LOGGER.info(f"Gibbs sample {ismp + 1:4d} / {nsamples}")
-    # -- Gibbs sampler --
-
-    # I. Sample latent variables z given membership, beta and Sigma
-    z = np.zeros((N, Q))
-    for t in range(N):
-        m = mema[t]
-
-        low = np.zeros(Q)
-        low[m == 0] = -np.inf
-        up = np.zeros(Q)
-        up[m == 1] = np.inf
-
-        z[t] = sample_trunc(beta, Sigma, low, up, 1)
-
-    # II. Sample beta and Sigma given z and membership
-    # See https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Bayesian_inference
-
-    # .. II.1 sample beta given Sigma, z and membership
-    zm = z.mean(axis=0)
-    mean = (N * zm + M0 * beta0) / (N + M0)
-    beta = np.random.multivariate_normal(mean=mean, cov=Sigma/(N+M0))
-
-    # .. II.2 sample Sigma given z and membership
-    delta = z - zm[None, :]
-    S = (delta.T @ delta) / N
-    delta0 = (zm - beta0)[None, :]
-    S0 = delta0.T @ delta0
-    scale = Psi + N * S + N*M0/(N+M0) * S0
-    Sigma = invwishart.rvs(df=df0, scale=scale)
-
-    # Store
-    beta_samples[ismp] = beta
-    Sigma_samples[ismp] = Sigma
-
+print("good")
 sys.exit()
 
 

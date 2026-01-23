@@ -1,9 +1,3 @@
-functions {
-
-    #include marginal.stanfunctions
-
-}
-
 data {
   int N; // total number of values
   int Q; // total number of membership
