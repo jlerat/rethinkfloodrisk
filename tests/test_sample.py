@@ -51,34 +51,64 @@ STAN_NSAMPLES_DEFAULT = 6000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
+@pytest.mark.parametrize("nelems", [1, 2, 3, 4, 5, 10])
+def test_partitions(nelems, allclose):
+    parts = sample.Partitions(nelems)
+    subs = parts.select(2)
+
+    if nelems == 1:
+        assert parts.nsubsets == 1
+        assert len(subs) == 0
+    elif nelems == 2:
+        assert parts.nsubsets == 2
+        assert len(subs) == 1
+    elif nelems == 3:
+        assert parts.nsubsets == 5
+        assert len(subs) == 3
+    elif nelems == 4:
+        assert parts.nsubsets == 15
+        assert len(subs) == 7
+    elif nelems == 5:
+        assert parts.nsubsets == 52
+        assert len(subs) == 15
+    elif nelems == 10:
+        assert parts.nsubsets == 115975
+        assert len(subs) == 511
+
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
-@pytest.mark.parametrize("use_times", [False, True])
-def test_sample_data(pcensor, use_times, allclose):
-    # Test with missing data
-    data, times = datahub.get_ams_concat(no_missing=False)
-
-    censors = datahub.get_censors(pcensor)
-    if use_times:
-        sv = sample.StanSamplingMultivariate(data, times, censors=censors)
-    else:
-        sv = sample.StanSamplingMultivariate(data, censors=censors)
-
+@pytest.mark.parametrize("no_missing", [False, True])
+def test_sample_data(pcensor, no_missing, allclose):
+    data, times, dows = datahub.get_ams_concat(no_missing=no_missing)
+    censors = datahub.get_censors(pcensor, no_missing=no_missing)
+    copula = 0.5
+    sv = sample.StanSamplingMultivariate(data, dows,
+                                         copula=copula,
+                                         censors=censors)
     stan_data = sv.to_dict()
 
-    assert len(stan_data) == 22
+    assert len(stan_data) == 24
 
-    data = pd.DataFrame(stan_data["y"])
+    N = stan_data["N"]
+    P = stan_data["P"]
+    data = pd.DataFrame(stan_data["y"], index=data.index,
+                        columns=data.columns)
+    assert data.shape == (N, P)
     assert data.notnull().any(axis=1).all()
 
-    mem = stan_data["membership"]
-    N, P = data.shape
-    assert mem.shape == (N, (P * (P-1)) // 2)
+    clust = stan_data["clusters"]
+    assert clust.shape == (N, P, P)
 
-    if not use_times:
-        assert allclose(mem, 1)
-    else:
-        assert np.all((mem == 0) | (mem == 1) | (mem == -1))
+    clustc = stan_data["clusters_counts"]
+    assert clustc.shape == (N, 3)
+
+    # Missing data
+    assert clustc[:, 0].min() == 0
+    assert clustc[:, 0].max() == 0 if no_missing else P - 1
+
+    # Number of events
+    assert clustc[:, 1].min() == 1
+    assert clustc[:, 1].max() == 4
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
@@ -99,7 +129,7 @@ def test_sample_data(pcensor, use_times, allclose):
 
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
-        sv = sample.StanSamplingMultivariate(data)
+        sv = sample.StanSamplingMultivariate(data, dows, copula)
 
 
 def test_inits(allclose):

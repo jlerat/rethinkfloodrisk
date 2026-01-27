@@ -1,8 +1,6 @@
-from itertools import combinations
-from datetime import datetime
+from itertools import product as prod
 import numpy as np
 import pandas as pd
-from scipy.cluster.hierarchy import fclusterdata
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
@@ -17,9 +15,62 @@ MARGINAL = GEV()
 DELTA_DAYS_MAX_DEFAULT = 10
 
 
+class Partitions():
+    def __init__(self, nelements):
+        if nelements > 10:
+            errmsg = "Expected nelements <= 10."
+            raise ValueError(errmsg)
+
+        self.nelements = nelements
+        self.data = list(range(nelements))
+        self.subsets = []
+        self.counts = []
+        self.nsubsets = 0
+        self.add_subsets(0, [])
+
+    def add_subsets(self, index, ans):
+        data = self.data
+        nel = self.nelements
+
+        if index == len(data):
+            combs = []
+            nmax = 0
+            for ipart, parts in enumerate(ans):
+                comb = [0] * nel
+                for d in parts:
+                    comb[d] = 1
+                combs.append(comb)
+                nmax = max(nmax, len(parts))
+
+            self.counts.append([len(combs), nmax])
+            self.subsets.append(combs)
+            self.nsubsets += 1
+            return
+
+        elem = data[index]
+
+        for i in range(len(ans)):
+            ans[i].append(elem)
+            self.add_subsets(index + 1, ans)
+            ans[i].pop()
+
+        ans.append([elem])
+        self.add_subsets(index + 1, ans)
+        ans.pop()
+
+    def select(self, nevents, nelem=None):
+        selected = []
+        for i in range(self.nsubsets):
+            nev, nel = self.counts[i]
+            cel = True if nelem is None else nel == nelem
+            if nev == nevents and cel:
+                selected.append(self.subsets[i])
+
+        return selected
+
+
 class StanSamplingMultivariate():
-    def __init__(self, data, copula,
-                 times=None,
+    def __init__(self, data, day_of_year, copula,
                  censors=None,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
@@ -42,11 +93,12 @@ class StanSamplingMultivariate():
         self.rho_min = rho_min
         self.rho_max = rho_max
 
-        self.set_data(data, censors)
+        self.set_data(data, day_of_year, censors)
 
         self.delta_days_max = delta_days_max
-        self.times = times
         self.set_clusters()
+
+        self.set_partitions()
 
         self.set_initial_parameters()
 
@@ -54,19 +106,20 @@ class StanSamplingMultivariate():
     def stan_sample_args(self):
         return {}
 
-    def set_data(self, data, censors):
-        # Clean data
-        if "WATERYEAR" in data:
-            data = data.drop("WATERYEAR", axis=1)
-
+    def set_data(self, data, day_of_year, censors):
         data = np.atleast_2d(data)
+        day_of_year = np.atleast_2d(day_of_year)
+
         if data.shape[0] == 1:
             data = data.T
+            day_of_year = day_of_year.T
 
         # Eliminates cases where all data are missing
         hasdata = np.any(~np.isnan(data), axis=1)
         data = data[hasdata]
+
         self.data = data
+        self.day_of_year = day_of_year[hasdata]
 
         # Check censors
         nvars = data.shape[1]
@@ -96,34 +149,86 @@ class StanSamplingMultivariate():
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
     def set_clusters(self):
-        delta_days_max = self.delta_days_max
+        dmax = self.delta_days_max
         N, P = self.data.shape
-        clusters = -1 * np.ones((N, P), dtype=int)
-        times = self.times
-        if times is not None:
-            if times.shape != (N, P):
-                errmsg = f"Expected times of shape ({N},{P}),"\
-                         + f" got {times.shape}."
-                raise ValueError(errmsg)
+        clusters = np.zeros((N, P, P), dtype=int)
+        counts = np.zeros((N, 3), dtype=int)
+        day_of_year = self.day_of_year
 
-            ordin = times.map(datetime.toordinal)
-            for i in range(N):
-                ordint = ordin.values[i]
-                valid = ordint > 1
-                if valid.sum() > 1:
-                    cl = fclusterdata(ordint[valid][:, None],
-                                      t=delta_days_max,
-                                      criterion="distance")
-                elif valid.sum() == 1:
-                    cl = [1]
-                else:
-                    continue
+        for i in range(N):
+            doy = day_of_year[i]
+            is_valid = np.where(doy >= 0)[0]
+            clusters[i, :, doy < 0] = -1
 
-                clusters[i, valid] = cl
+            doy = doy[is_valid]
+            if len(doy) == 1:
+                clusters[i, 0, is_valid] = 1
+            else:
+                rk = np.argsort(np.argsort(doy))
+                doys = np.sort(doy)
+                clust = np.cumsum(np.insert(np.diff(doys), 0, 0) > dmax)
+                clust = clust[rk]
+                for icl, cl in enumerate(np.unique(clust)):
+                    isin = is_valid[cl == clust]
+                    clusters[i, icl, isin] = 1
 
-            import pdb; pdb.set_trace()
+            # count number of events and max number of
+            # stations per event
+            sm = clusters[i][:, is_valid].sum(axis=1)
+            nev = (sm > 0).sum()
+            nstamax = sm.max()
+            nmiss = P - len(is_valid)
+            counts[i, :] = nmiss, nev, nstamax
 
-            self.clusters = clusters
+        self.clusters = clusters
+        self.clusters_counts = counts
+
+        nevs = np.unique(counts[:, 1])
+        nsta = np.unique(counts[:, 2])
+
+        cases = pd.DataFrame(0, index=nevs, columns=nsta)
+        cases.index.name = "nevents"
+        cases.columns.name = "nstations_per_cluster_max"
+
+        for nev, nsta in prod(nevs, nsta):
+            idx = (counts[:, 0] == 0) & (counts[:, 1] == nev) \
+                & (counts[:, 2] == nsta)
+            ncases = idx.sum()
+            cases.loc[nev, nsta] = ncases
+
+        self.clusters_counts_cases = cases
+
+    def set_partitions(self):
+        P = self.data.shape[1]
+        parts = Partitions(P)
+        nsubsets = parts.nsubsets
+
+        cases = self.clusters_counts_cases
+        nevs = cases.index
+        nsta = cases.columns
+        ntot = cases.sum().sum()
+
+        probs = []
+        submats = []
+        for nev, nsta in prod(nevs, nsta):
+            nc = cases.loc[nev, nsta]
+            if nc > 0:
+                subs = parts.select(nev, nsta)
+
+                # Probability
+                nsubs = len(subs)
+                # WRONG !!! should not use nsubsets
+                # only the number of selected subs
+                prob = nc / ntot * nsubs / nsubsets
+                probs.extend([prob] * nsubs)
+
+                for isub, sub in enumerate(subs):
+                    # Convert subset to matrix
+                    smat = np.zeros((P, P))
+                    for i, s in enumerate(sub):
+                        smat[i, :] = s
+
+                    submats.append(smat)
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -171,6 +276,7 @@ class StanSamplingMultivariate():
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
             "clusters": self.clusters,
+            "clusters_counts": self.clusters_counts,
             "copula": self.copula,
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),

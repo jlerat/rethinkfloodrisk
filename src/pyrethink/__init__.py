@@ -24,5 +24,5 @@ stan_test_student = load_stan_model("stan_test_student",
 
 # Stan sampler
 name = "mv_censored_no_missing_sampling"
-mv_censored_sampling_no_missing = load_stan_model(name,
+mv_censored_no_missing_sampling = load_stan_model(name,
                                                   sf_folder=STAN_FILES_FOLDER)
