@@ -70,6 +70,40 @@ transformed data {
   real lam = (rho_max - rho_min) / 2;
   matrix[P, P] Id = identity_matrix(P);
   matrix[P, P] cor0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
+
+  // Observed cluster data
+  array[N, P] int<lower=0> clusters_invidual_counts;
+  array[N, P] int<lower=0, upper=P> clusters_invidual_indexes;
+  for(i in 1:N) {
+    for(icl in 1:clusters_counts[i]) {
+        array[P] int cl = clusters[i, icl, :];
+        int count = 0;
+        for(j in 1:P) {
+            if(cl[j] == 1) {
+                clusters_individual_indexes[i, count] = j;
+                count += 1;
+            }
+            clusters_individual_counts[i, j] = count;
+        }
+    }
+  }
+
+  // Possible cluster data
+  array[Q, P] int<lower=0> clusters_possible_invidual_counts;
+  array[Q, P] int<lower=0, upper=P> clusters_possible_invidual_indexes;
+  for(i in 1:Q) {
+    for(icl in 1:clusters_possible_counts[i]) {
+        array[P] int cl = clusters_possible[i, icl, :];
+        int count = 0;
+        for(j in 1:P) {
+            if(cl[j] == 1) {
+                clusters_possible_individual_indexes[i, count] = j;
+                count += 1;
+            }
+            clusters_possible_individual_counts[i, j] = count;
+        }
+    }
+  }
 }
 
 parameters {
@@ -159,16 +193,22 @@ model {
 
     // Loop on clusters
     for(icl in 1:clusters_counts[i]) {
+        // Get cluster array indexes
+        int ncl = clusters_individual_counts[i, icl]; 
+        array[ncl] int idx = clusters_individual_indexes[1:ncl];
+
         // Compute likelihood within cluster
-        array[P] int cl = clusters[i, icl, :];
-        target += copula_log_pdf(z[i, cl], copula, cor_IW[cl, cl]);
+        target += copula_log_pdf(z[i, idx], copula, cor_IW[idx, idx]);
     }
 
   }
 }
 
 generated quantities {
+    // Change this for generic copula
     vector[P] zrnd = multi_normal_rng(zero_mean, cor_IW);
+
+    // Add sampling from clusters
     
     vector[P] yrnd;
     for(ivar in 1:P) {
