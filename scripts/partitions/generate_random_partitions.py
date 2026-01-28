@@ -16,10 +16,14 @@ import random
 import json
 import math
 from itertools import combinations
+from itertools import product as prod
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from scipy.stats import poisson
+from scipy.special import lambertw, factorial
 
 from hydrodiy.io import csv, iutils
 
@@ -47,28 +51,39 @@ class Partitions():
     def __init__(self, nelements):
         self.nelements = nelements
         self.data = list(range(nelements))
+
+        # Initialise
         self.subsets = []
+        self.same_cluster = []
         self.counts = []
         self.nsubsets = 0
+
+        # Populate partitions
         self.add_subsets(0, [])
 
     def add_subsets(self, index, ans):
         data = self.data
         nel = self.nelements
+        ncombs = (nel * (nel - 1)) // 2
 
         if index == len(data):
             combs = []
             nmax = 0
+            same = [0] * ncombs
             for ipart, parts in enumerate(ans):
                 comb = [0] * nel
                 for d in parts:
                     comb[d] = 1
                 combs.append(comb)
                 nmax = max(nmax, len(parts))
+                same = [comb[a]*comb[b] or same[ic]
+                        for ic, (a, b) in enumerate(combinations(range(nel), 2))]
 
-            self.counts.append([len(combs), nmax])
+            self.counts.append(len(combs))
             self.subsets.append(combs)
+            self.same_cluster.append(same)
             self.nsubsets += 1
+
             return
 
         elem = data[index]
@@ -82,40 +97,69 @@ class Partitions():
         self.add_subsets(index + 1, ans)
         ans.pop()
 
-    def select(self, nevents, nelem=None):
+    def select(self, nevents):
         selected = []
         for i in range(self.nsubsets):
-            nev, nel = self.counts[i]
-            cel = True if nelem is None else nel == nelem
-            if nev == nevents and cel:
+            nev = self.counts[i]
+            if nev == nevents:
                 selected.append(self.subsets[i])
 
         return selected
 
     def random(self, nsamples, tokenize=False):
         nel = self.nelements
+        x = lambertw(nel).real
+
         samples = []
-        nsubs = self.nsubsets
-        k = np.random.choice(np.arange(nsubs), nsamples)
+        ex = np.arange(1, nel + 1)
+        f = factorial(ex)
+        mus = x**ex / f
 
         for i in range(nsamples):
-            subs = self.subsets[k[i]]
+            nz = 0
+            go_on = True
+            while go_on:
+                s = 0
+                z = []
+                nz = 0
+                for j in range(nel):
+                    z.append(poisson.rvs(mu=mus[j]))
+                    nz += 1
+                    s += (1 + j) * z[j]
+                    if s == nel:
+                        go_on = False
+                        break
+
+            rdata = np.random.choice(self.data, nel, replace=False)
+            #rdata = self.data
+            combs = []
+            nstart = 0
+            for j in range(nz):
+                nb = z[j]
+                nelc = j + 1
+                for k in range(nb):
+                    comb = [0] * nel
+                    for e in rdata[nstart + nelc * k: nstart + nelc * (k + 1)]:
+                        comb[e] = 1
+
+                    combs.append(comb)
+
+                nstart += nelc * nb
+
             if tokenize:
-                combs = "-".join("".join(str(c) for c in s) for s in subs)
-            else:
-                combs = subs
+                combs = "-".join("".join(str(e) for e in comb) for comb in combs)
 
             samples.append(combs)
 
         return samples
 
 
-for i in range(2, 6):
+for i in range(4, 5):
     parts = Partitions(i)
     ntot = parts.nsubsets
     LOGGER.info(f"{i} elements = {ntot:5,d} subsets", nret=2)
 
-    smp = parts.random(50000, True)
+    smp = parts.random(1000, True)
     nuni = len(set(smp))
     LOGGER.info(f"unique random = {nuni:5,d} subsets", ntab=1)
 
@@ -132,17 +176,7 @@ for i in range(2, 6):
         ncheck1 += ntot1
         LOGGER.info(f"{nev} elements in partition = {ntot1:5,d} subsets",
                     ntab=1, nret=1)
-
-        ncheck2 = 0
-        for nel in range(1, i + 1):
-            subs = parts.select(nev, nel)
-            ntot2 = len(subs)
-            counts.loc[nev, nel] = ntot2
-            ncheck2 += ntot2
-            LOGGER.info(f"{nel} max elements = {ntot2:8,d} subsets", ntab=2)
-
-        assert ncheck2 == ntot1
-
     assert ncheck1 == ntot
+
 LOGGER.completed()
 
