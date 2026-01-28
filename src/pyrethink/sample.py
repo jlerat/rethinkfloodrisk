@@ -1,6 +1,5 @@
-from itertools import product as prod
+from itertools import combinations
 import numpy as np
-import pandas as pd
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
@@ -21,30 +20,48 @@ class Partitions():
             errmsg = "Expected nelements <= 10."
             raise ValueError(errmsg)
 
+        # Initialise
         self.nelements = nelements
         self.data = list(range(nelements))
         self.subsets = []
-        self.counts = []
+        self.pair_in_same_cluster = []
+        self.subsets_counts = []
         self.nsubsets = 0
+
+        # Populate
         self.add_subsets(0, [])
+
+        # Convert to arrays
+        self.subsets = np.array(self.subsets)
+        self.subsets_counts = np.array(self.subsets_counts)
+        self.pair_in_same_cluster = np.array(self.pair_in_same_cluster)
+
+    @property
+    def npairs(self):
+        nel = self.nelements
+        return nel * (nel - 1) // 2
 
     def add_subsets(self, index, ans):
         data = self.data
         nel = self.nelements
+        npairs = self.npairs
 
         if index == len(data):
-            combs = []
-            nmax = 0
+            combs = np.zeros((nel, nel))
+            insame = [0] * npairs
             for ipart, parts in enumerate(ans):
-                comb = [0] * nel
                 for d in parts:
-                    comb[d] = 1
-                combs.append(comb)
-                nmax = max(nmax, len(parts))
+                    combs[ipart, d] = 1
 
-            self.counts.append([len(combs), nmax])
+                for ic, (a, b) in enumerate(combinations(range(nel), 2)):
+                    v = combs[ipart, a] * combs[ipart, b] or insame[ic]
+                    insame[ic] = int(v)
+
+            self.pair_in_same_cluster.append(insame)
             self.subsets.append(combs)
+            self.subsets_counts.append(len(ans))
             self.nsubsets += 1
+
             return
 
         elem = data[index]
@@ -58,20 +75,28 @@ class Partitions():
         self.add_subsets(index + 1, ans)
         ans.pop()
 
-    def select(self, nevents, nelem=None):
-        selected = []
+    def find_subset_index(self, pair_in_same):
+        found = []
         for i in range(self.nsubsets):
-            nev, nel = self.counts[i]
-            cel = True if nelem is None else nel == nelem
-            if nev == nevents and cel:
-                selected.append(self.subsets[i])
+            same = self.pair_in_same_cluster[i]
+            if all(s == p for s, p in zip(same, pair_in_same)):
+                found.append(i)
 
-        return selected
+        return found
+
+    def extract_index(self, index):
+        return [self.subsets[i] for i in index]
+
+    def find_subset(self, pair_in_same):
+        idx = self.find_subset_index(pair_in_same)
+        return self.extract_index(idx)
 
 
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year, copula,
                  censors=None,
+                 skip_clusters=False,
+                 dirichlet_alpha=2,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
@@ -93,10 +118,15 @@ class StanSamplingMultivariate():
         self.rho_min = rho_min
         self.rho_max = rho_max
 
+        if dirichlet_alpha < 1:
+            errmsg = "Expected dirichlet_alpha >= 1."
+            raise ValueError(errmsg)
+        self.dirichlet_alpha = 1. if skip_clusters else dirichlet_alpha
+
         self.set_data(data, day_of_year, censors)
 
         self.delta_days_max = delta_days_max
-        self.set_clusters()
+        self.set_clusters(skip_clusters)
 
         self.set_partitions()
 
@@ -148,11 +178,14 @@ class StanSamplingMultivariate():
         self.idx_cens = np.array(np.where(cases == 2)).T + 1
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
-    def set_clusters(self):
+    def set_clusters(self, skip_clusters):
         dmax = self.delta_days_max
         N, P = self.data.shape
+
         clusters = np.zeros((N, P, P), dtype=int)
-        counts = np.zeros((N, 3), dtype=int)
+        miss = np.zeros(N, dtype=int)
+        counts = np.zeros(N, dtype=int)
+        insame = np.zeros((N, P * (P - 1) // 2), dtype=int)
         day_of_year = self.day_of_year
 
         for i in range(N):
@@ -164,71 +197,67 @@ class StanSamplingMultivariate():
             if len(doy) == 1:
                 clusters[i, 0, is_valid] = 1
             else:
-                rk = np.argsort(np.argsort(doy))
-                doys = np.sort(doy)
-                clust = np.cumsum(np.insert(np.diff(doys), 0, 0) > dmax)
-                clust = clust[rk]
+                if skip_clusters:
+                    clust = np.zeros(len(doy), dtype=int)
+                else:
+                    rk = np.argsort(np.argsort(doy))
+                    doys = np.sort(doy)
+                    clust = np.cumsum(np.insert(np.diff(doys), 0, 0) > dmax)
+                    clust = clust[rk]
+
                 for icl, cl in enumerate(np.unique(clust)):
                     isin = is_valid[cl == clust]
                     clusters[i, icl, isin] = 1
 
-            # count number of events and max number of
-            # stations per event
-            sm = clusters[i][:, is_valid].sum(axis=1)
-            nev = (sm > 0).sum()
-            nstamax = sm.max()
-            nmiss = P - len(is_valid)
-            counts[i, :] = nmiss, nev, nstamax
+            # count missing events
+            miss[i] = P - len(is_valid)
+
+            cl = clusters[i]
+            counts[i] = np.any(cl[:, is_valid] > 0, axis=1).sum()
+
+            # check if pairs are in the same cluster
+            ins = [[int(comb[a]*comb[b] and comb[a] >= 0 and comb[b] >= 0)
+                    for ic, (a, b) in enumerate(combinations(range(P), 2))]
+                   for comb in cl]
+            insame[i] = (np.sum(ins, axis=0) > 0).astype(int)
 
         self.clusters = clusters
         self.clusters_counts = counts
-
-        nevs = np.unique(counts[:, 1])
-        nsta = np.unique(counts[:, 2])
-
-        cases = pd.DataFrame(0, index=nevs, columns=nsta)
-        cases.index.name = "nevents"
-        cases.columns.name = "nstations_per_cluster_max"
-
-        for nev, nsta in prod(nevs, nsta):
-            idx = (counts[:, 0] == 0) & (counts[:, 1] == nev) \
-                & (counts[:, 2] == nsta)
-            ncases = idx.sum()
-            cases.loc[nev, nsta] = ncases
-
-        self.clusters_counts_cases = cases
+        self.clusters_missing = miss
+        self.pair_in_same_cluster = insame
 
     def set_partitions(self):
-        P = self.data.shape[1]
+        # Dirichlet prior parameter
+        alpha = self.dirichlet_alpha
+
+        # Initialise
+        N, P = self.data.shape
         parts = Partitions(P)
-        nsubsets = parts.nsubsets
 
-        cases = self.clusters_counts_cases
-        nevs = cases.index
-        nsta = cases.columns
-        ntot = cases.sum().sum()
+        self.clusters_possible = parts.subsets
+        self.clusters_possible_counts = parts.subsets_counts
+        Q = parts.nsubsets
+        probs = np.zeros(Q)
 
-        probs = []
-        submats = []
-        for nev, nsta in prod(nevs, nsta):
-            nc = cases.loc[nev, nsta]
-            if nc > 0:
-                subs = parts.select(nev, nsta)
+        # Get pairs from observed data
+        pair_in_same_data = self.pair_in_same_cluster
 
-                # Probability
-                nsubs = len(subs)
-                # WRONG !!! should not use nsubsets
-                # only the number of selected subs
-                prob = nc / ntot * nsubs / nsubsets
-                probs.extend([prob] * nsubs)
+        # Exclude missing data
+        miss = self.clusters_missing
+        pair_in_same_data = pair_in_same_data[miss == 0]
 
-                for isub, sub in enumerate(subs):
-                    # Convert subset to matrix
-                    smat = np.zeros((P, P))
-                    for i, s in enumerate(sub):
-                        smat[i, :] = s
+        for i in range(Q):
+            pair_in_same = parts.pair_in_same_cluster[i]
+            diff = np.abs(pair_in_same_data - pair_in_same[None, :])
+            nmatch = (diff.sum(axis=1) == 0).sum()
 
-                    submats.append(smat)
+            # Assign maximum posterior of categorical prob
+            # with Dirichlet prior
+            # see https://en.wikipedia.org/wiki/Categorical_distribution
+            probs[i] = (alpha + nmatch - 1)
+
+        probs = probs / probs.sum()
+        self.clusters_possible_probabilities = probs
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -276,7 +305,11 @@ class StanSamplingMultivariate():
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
             "clusters": self.clusters,
-            "clusters_counts": self.clusters_counts,
+            "Q": self.clusters_possible.shape[0],
+            "clusters_possible": self.clusters_possible,
+            "clusters_possible_counts": self.clusters_possible_counts,
+            "clusters_possible_probabilities":
+                self.clusters_possible_probabilities,
             "copula": self.copula,
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),

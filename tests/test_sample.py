@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from itertools import combinations
 import math
 import warnings
 
@@ -51,43 +52,68 @@ STAN_NSAMPLES_DEFAULT = 6000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
-@pytest.mark.parametrize("nelems", [1, 2, 3, 4, 5, 10])
-def test_partitions(nelems, allclose):
+@pytest.mark.parametrize("nelems", [1, 2, 3, 4, 5, 9])
+def test_partitions_size(nelems, allclose):
     parts = sample.Partitions(nelems)
-    subs = parts.select(2)
+    print(f"N subsets = {parts.nsubsets:6,d}")
 
     if nelems == 1:
         assert parts.nsubsets == 1
-        assert len(subs) == 0
     elif nelems == 2:
         assert parts.nsubsets == 2
-        assert len(subs) == 1
     elif nelems == 3:
         assert parts.nsubsets == 5
-        assert len(subs) == 3
     elif nelems == 4:
         assert parts.nsubsets == 15
-        assert len(subs) == 7
     elif nelems == 5:
         assert parts.nsubsets == 52
-        assert len(subs) == 15
+    elif nelems == 9:
+        assert parts.nsubsets == 21147
     elif nelems == 10:
         assert parts.nsubsets == 115975
-        assert len(subs) == 511
+
+    if nelems == 1:
+        return
+
+    for itest in range(5):
+        k = np.random.randint(0, parts.nsubsets)
+        pair_in_same = parts.pair_in_same_cluster[k]
+        subs = parts.find_subset(pair_in_same)
+        assert len(subs) == 1
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("no_missing", [False, True])
-def test_sample_data(pcensor, no_missing, allclose):
+@pytest.mark.parametrize("skip_clusters", [False, True])
+def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
+
     data, times, dows = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
     copula = 0.5
+
     sv = sample.StanSamplingMultivariate(data, dows,
                                          copula=copula,
+                                         skip_clusters=skip_clusters,
                                          censors=censors)
-    stan_data = sv.to_dict()
 
-    assert len(stan_data) == 24
+    pisc = sv.pair_in_same_cluster
+    miss = sv.clusters_missing
+    s = pisc.sum(axis=1)
+    P = sv.data.shape[1]
+    s0 = (P * (P - 1) // 2) / 3
+    s1 = 2 * s0
+    for idx in np.where((miss == 0) & (s >= s0) & (s <= s1))[0]:
+        cl = sv.clusters[idx]
+        pi = pisc[idx]
+        M = np.zeros((P, P))
+        M[np.triu_indices(P, 1)] = pi
+        for i, j in combinations(range(P), 2):
+            same = M[i, j] == 1
+            expected = np.prod(cl[:, [i, j]], axis=1).sum() > 0
+            assert same == expected
+
+    stan_data = sv.to_dict()
+    assert len(stan_data) == 27
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -99,16 +125,30 @@ def test_sample_data(pcensor, no_missing, allclose):
     clust = stan_data["clusters"]
     assert clust.shape == (N, P, P)
 
-    clustc = stan_data["clusters_counts"]
-    assert clustc.shape == (N, 3)
+    assert miss.min() == 0
+    assert miss.max() == 0 if no_missing else P - 1
 
-    # Missing data
-    assert clustc[:, 0].min() == 0
-    assert clustc[:, 0].max() == 0 if no_missing else P - 1
+    clp = stan_data["clusters_possible"]
+    clpp = stan_data["clusters_possible_probabilities"]
+    clpc = stan_data["clusters_possible_counts"]
 
-    # Number of events
-    assert clustc[:, 1].min() == 1
-    assert clustc[:, 1].max() == 4
+    parts = sample.Partitions(P)
+    n = parts.nsubsets
+    assert len(clp) == n
+    assert clpp.shape == (n,)
+    assert clpc.shape == (n,)
+
+    if skip_clusters:
+        # Only one cluster remains probable
+        iprob = np.where(clpp > 0)[0]
+        assert len(iprob) == 1
+
+        # The most probable cluster contains all stations
+        iprob = iprob[0]
+        cl = clp[iprob]
+        expected = np.zeros((P, P))
+        expected[0] = 1.
+        assert allclose(cl, expected)
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]

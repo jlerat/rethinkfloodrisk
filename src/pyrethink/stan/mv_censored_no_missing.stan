@@ -26,6 +26,15 @@ data {
   int<lower=0> Ncens;
   array[Ncens, 2] int idx_cens;
 
+  // Cluster observed data
+  array[N, P, P] int<lower=0, upper=1> clusters;
+  array[N] int<lower=0> clusters_counts;
+
+  // Cluster possible data
+  int Q; // total number of possible clusters
+  array[Q, P, P] int<lower=0, upper=1> clusters_possible;
+  array[Q] int<lower=0, upper=P> clusters_possible_counts;
+
   // Copula model
   // 0 : Gaussian
   // >0 : Student-t df=copula
@@ -146,14 +155,16 @@ model {
   }
 
   // --- Likelihood ---
-  // We could add another loop here 
-  // that would tackle the fact that the zs can be 
-  // assumed to be correlated or not.
-  // For example if they are AMS on different dates.
-  // In this case, the correlation matrix is retained 
-  // except for uncorrelated cases where the correlation
-  // is set to 0.
-  target += copula_log_pdf(z, copula, cor_IW);
+  for(i in 1:N) {
+
+    // Loop on clusters
+    for(icl in 1:clusters_counts[i]) {
+        // Compute likelihood within cluster
+        array[P] int cl = clusters[i, icl, :];
+        target += copula_log_pdf(z[i, cl], copula, cor_IW[cl, cl]);
+    }
+
+  }
 }
 
 generated quantities {

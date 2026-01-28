@@ -175,7 +175,7 @@ real quantile_log_jac(real z, real copula) {
     }    
 }
 
-real copula_log_pdf(array [] vector z, real copula, matrix corr) {
+real copula_log_pdf(vector z, real copula, matrix corr) {
     int P = size(z);
     row_vector[P] zero_mean = zeros_row_vector(P);
 

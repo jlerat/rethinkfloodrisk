@@ -101,7 +101,6 @@ def get_ams_concat(no_missing=True):
                         columns=stations.index,
                         index=np.arange(1957, 2023))
 
-
     for stationid in stations.index:
         ams = get_ams(stationid)
         peak = ams.filter(regex="_PEAK$", axis=1).squeeze().values
