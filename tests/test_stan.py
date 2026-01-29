@@ -19,16 +19,17 @@ from pyrethink import datahub, sample
 from pyrethink import stan_test_indexing
 from pyrethink import stan_test_functions
 from pyrethink import stan_test_cor
-from pyrethink import stan_test_student
+from pyrethink import stan_test_copula
+from pyrethink import stan_test_clusters
 
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
 def test_stan_indexing():
-    data, _ = datahub.get_ams_concat()
+    data, _, dows = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    sv = sample.StanSamplingMultivariate(data, copula=0., censors=censors)
+    sv = sample.StanSamplingMultivariate(data, dows, copula=0., censors=censors)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
 
@@ -100,7 +101,7 @@ def test_stan_cor(allclose):
     assert allclose(zcor, cor, atol=1e-2)
 
 
-def test_stan_student(allclose):
+def test_stan_copula(allclose):
     N = 1000
     P = 20
     stan_data = {
@@ -108,15 +109,52 @@ def test_stan_student(allclose):
         "P": P
         }
 
-    x = stan_test_student(data=stan_data)
-    x = x.filter(regex="^z").values.reshape((P, N)).T
+    x = stan_test_copula(data=stan_data)
 
-    expected = np.zeros_like(x)
-    u = np.linspace(1./N, 1 - 1./N, N)
+    p0 = x.filter(regex="^p0\[").values
+
+    # Normal copula
+    zn = x.filter(regex="^zn\[").values
+    assert allclose(zn, norm.ppf(p0), atol=1e-5)
+
+    pn = x.filter(regex="^pn\[").values
+    assert allclose(pn, p0)
+
+    znr = x.filter(regex="^znr\[").values.reshape((3, N)).T
+    assert allclose(znr.mean(axis=0), 0, atol=5e-2)
+    assert allclose(znr.std(axis=0), 1, atol=5e-2)
+    cor = np.corrcoef(znr.T)
+    cor0 = 0.1 * np.eye(3) + 0.9 * np.ones((3, 3))
+    assert allclose(cor, cor0, atol=3e-2)
+
+    # Student copula
+    zs = x.filter(regex="^zs\[").values.reshape((P, N)).T
+
+    ps = x.filter(regex="^ps\[").values.reshape((P, N)).T
+    assert allclose(ps, p0[:, None])
+
+    zsr = x.filter(regex="^zsr\[").values.reshape((3, N)).T
+    assert allclose(zsr.mean(axis=0), 0, atol=5e-2)
+    cor = np.corrcoef(zsr.T)
+    assert allclose(cor, cor0, atol=3e-2)
+
+    expected = np.zeros((N, P))
     df = np.linspace(0.5, 5, P)
     for j in range(P):
-        expected[:, j] = student_t.ppf(u, df[j], loc=0, scale=1)
+        expected[:, j] = student_t.ppf(p0, df[j], loc=0, scale=1)
 
-    diff = np.arcsinh(x) - np.arcsinh(expected)
+    diff = np.arcsinh(zs) - np.arcsinh(expected)
     assert np.abs(diff).max() < 1e-5
+
+
+def test_stan_clusters(allclose):
+    data, times, dows = datahub.get_ams_concat()
+    censors = datahub.get_censors(pcensor=0.3)
+    sv = sample.StanSamplingMultivariate(data, dows,
+                                         copula=0,
+                                         censors=censors)
+    stan_data = sv.to_dict()
+    x = stan_test_clusters(data=stan_data)
+    import pdb; pdb.set_trace()
+
 

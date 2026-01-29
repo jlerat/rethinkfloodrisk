@@ -84,8 +84,8 @@ def test_partitions_size(nelems, allclose):
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("no_missing", [False, True])
-@pytest.mark.parametrize("skip_clusters", [False, True])
-def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
+@pytest.mark.parametrize("dalpha", [0., 2.])
+def test_sample_data(pcensor, no_missing, dalpha, allclose):
 
     data, times, dows = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
@@ -93,7 +93,7 @@ def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
 
     sv = sample.StanSamplingMultivariate(data, dows,
                                          copula=copula,
-                                         skip_clusters=skip_clusters,
+                                         dirichlet_alpha=dalpha,
                                          censors=censors)
 
     pisc = sv.pair_in_same_cluster
@@ -113,7 +113,7 @@ def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
             assert same == expected
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 27
+    assert len(stan_data) == 28
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -128,9 +128,9 @@ def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
     assert miss.min() == 0
     assert miss.max() == 0 if no_missing else P - 1
 
-    clp = stan_data["clusters_possible"]
-    clpp = stan_data["clusters_possible_probabilities"]
-    clpc = stan_data["clusters_possible_counts"]
+    clp = stan_data["partitions"]
+    clpp = stan_data["partitions_probabilities"]
+    clpc = stan_data["partitions_counts"]
 
     parts = sample.Partitions(P)
     n = parts.nsubsets
@@ -138,7 +138,7 @@ def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
     assert clpp.shape == (n,)
     assert clpc.shape == (n,)
 
-    if skip_clusters:
+    if dalpha < 1:
         # Only one cluster remains probable
         iprob = np.where(clpp > 0)[0]
         assert len(iprob) == 1
@@ -173,17 +173,22 @@ def test_sample_data(pcensor, no_missing, skip_clusters, allclose):
 
 
 def test_inits(allclose):
-    data, _ = datahub.get_ams_concat()
+    data, times, dows = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    sv = sample.StanSamplingMultivariate(data, censors=censors)
+    copula = 0.
+    sv = sample.StanSamplingMultivariate(data, dows,
+                                         copula,
+                                         censors=censors)
     inits = sv.initial_parameters
 
 
 @pytest.mark.parametrize("config", ["uncensored", "censored"])
 @pytest.mark.parametrize("nvars", [3])
-def test_sampler(config, nvars, allclose):
-    data, _ = datahub.get_ams_concat()
+@pytest.mark.parametrize("copula", [0., 2.])
+def test_sampler(config, nvars, copula, allclose):
+    data, times, dows = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
+    dows = dows.iloc[:, :nvars]
 
     if config.startswith("censored"):
         pcensor = 0.3
@@ -192,7 +197,8 @@ def test_sampler(config, nvars, allclose):
     else:
         censors = np.zeros(data.shape[1])
 
-    sv = sample.StanSamplingMultivariate(data, censors=censors)
+    sv = sample.StanSamplingMultivariate(data, dows, copula,
+                                         censors=censors)
     stan_data = sv.to_dict()
 
     if config == "uncensored":
@@ -230,13 +236,13 @@ def test_sampler(config, nvars, allclose):
     with pytest.raises(RuntimeError):
         mv_censored_no_missing_sampling(**kw)
 
-    if config == "censored_missing" and WRITE_SAMPLE_DATA:
-        fd = FTESTS / "censored_missing_data.zip"
-        comp = dict(method="zip", compresslevel=9)
-        data.to_csv(fd, compression=comp)
+    #if config == "censored_missing" and WRITE_SAMPLE_DATA:
+    #    fd = FTESTS / "censored_missing_data.zip"
+    #    comp = dict(method="zip", compresslevel=9)
+    #    data.to_csv(fd, compression=comp)
 
-        fs = FTESTS / "censored_missing_samples.zip"
-        df.to_csv(fs, compression=comp)
+    #    fs = FTESTS / "censored_missing_samples.zip"
+    #    df.to_csv(fs, compression=comp)
 
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])
@@ -245,8 +251,9 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data, _ = datahub.get_ams_concat()
+    data, _, dows = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
+    dows = dows.iloc[:, stationpair]
 
     censors = data.quantile(pcensor)
 
@@ -292,9 +299,15 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         assert diag1[met] == "satisfactory"
 
     # -- pyrethink --
+    # + Gaussian copula
+    # + no clustering
     rho_min = np.floor(df1.rho.min() * 1e2) * 1e-2
     rho_max = 1.
-    sv = sample.StanSamplingMultivariate(data, censors=censors,
+    sv = sample.StanSamplingMultivariate(data,
+                                         dows,
+                                         copula=0.,
+                                         dirichlet_alpha=0.,
+                                         censors=censors,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
     kw["data"] = sv.to_dict()

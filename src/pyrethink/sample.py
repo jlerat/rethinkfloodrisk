@@ -95,7 +95,6 @@ class Partitions():
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year, copula,
                  censors=None,
-                 skip_clusters=False,
                  dirichlet_alpha=2,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
@@ -118,10 +117,10 @@ class StanSamplingMultivariate():
         self.rho_min = rho_min
         self.rho_max = rho_max
 
-        if dirichlet_alpha < 1:
-            errmsg = "Expected dirichlet_alpha >= 1."
-            raise ValueError(errmsg)
-        self.dirichlet_alpha = 1. if skip_clusters else dirichlet_alpha
+        # No clustering accounted if dirichlet prior < 1
+        # (i.e. no prior)
+        skip_clusters = dirichlet_alpha < 1
+        self.dirichlet_alpha = max(1, dirichlet_alpha)
 
         self.set_data(data, day_of_year, censors)
 
@@ -143,6 +142,10 @@ class StanSamplingMultivariate():
         if data.shape[0] == 1:
             data = data.T
             day_of_year = day_of_year.T
+
+        if data.shape != day_of_year.shape:
+            errmsg = "'data' and 'day_of_year' do not have the same shape."
+            raise ValueError(errmsg)
 
         # Eliminates cases where all data are missing
         hasdata = np.any(~np.isnan(data), axis=1)
@@ -233,11 +236,9 @@ class StanSamplingMultivariate():
         # Initialise
         N, P = self.data.shape
         parts = Partitions(P)
-
-        self.clusters_possible = parts.subsets
-        self.clusters_possible_counts = parts.subsets_counts
-        Q = parts.nsubsets
-        probs = np.zeros(Q)
+        self.partition_object = parts
+        self.partitions = parts.subsets
+        self.partitions_counts = parts.subsets_counts
 
         # Get pairs from observed data
         pair_in_same_data = self.pair_in_same_cluster
@@ -246,18 +247,23 @@ class StanSamplingMultivariate():
         miss = self.clusters_missing
         pair_in_same_data = pair_in_same_data[miss == 0]
 
+        # Compute probabilities from max posterior of
+        # categorical dist with Dirichlet prior
+        # see https://en.wikipedia.org/wiki/Categorical_distribution
+        Q = parts.nsubsets
+        probs = np.zeros(Q)
+
         for i in range(Q):
+            # Find all observed clusters matching the given partition
             pair_in_same = parts.pair_in_same_cluster[i]
             diff = np.abs(pair_in_same_data - pair_in_same[None, :])
             nmatch = (diff.sum(axis=1) == 0).sum()
 
-            # Assign maximum posterior of categorical prob
-            # with Dirichlet prior
-            # see https://en.wikipedia.org/wiki/Categorical_distribution
+            # maximum posterior of categorical prob
             probs[i] = (alpha + nmatch - 1)
 
         probs = probs / probs.sum()
-        self.clusters_possible_probabilities = probs
+        self.partitions_probabilities = probs
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -304,13 +310,14 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
-            "clusters": self.clusters,
-            "Q": self.clusters_possible.shape[0],
-            "clusters_possible": self.clusters_possible,
-            "clusters_possible_counts": self.clusters_possible_counts,
-            "clusters_possible_probabilities":
-                self.clusters_possible_probabilities,
-            "copula": self.copula,
+            "clusters": self.clusters.astype(int),
+            "clusters_counts": self.clusters_counts.astype(int),
+            "Q": self.partitions.shape[0],
+            "partitions": self.partitions.astype(int),
+            "partitions_counts": self.partitions_counts.astype(int),
+            "partitions_probabilities":
+                self.partitions_probabilities,
+            "copula": float(self.copula),
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
             "yshape1_prior": MARGINAL.shape1_prior.to_list(),

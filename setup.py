@@ -22,7 +22,8 @@ MODELS = [
     "test_functions",
     "test_indexing",
     "test_cor",
-    "test_student",
+    "test_copula",
+    "test_clusters",
     "mv_censored_no_missing"
     ]
 

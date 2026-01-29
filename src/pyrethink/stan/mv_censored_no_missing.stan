@@ -28,12 +28,13 @@ data {
 
   // Cluster observed data
   array[N, P, P] int<lower=0, upper=1> clusters;
-  array[N] int<lower=0> clusters_counts;
+  array[N] int<lower=0, upper=P> clusters_counts;
 
-  // Cluster possible data
-  int Q; // total number of possible clusters
-  array[Q, P, P] int<lower=0, upper=1> clusters_possible;
-  array[Q] int<lower=0, upper=P> clusters_possible_counts;
+  // Partition data
+  int Q; // total number of partitions
+  array[Q, P, P] int<lower=0, upper=1> partitions;
+  array[Q] int<lower=0, upper=P> partitions_counts;
+  vector<lower=0, upper=1>[Q] partitions_probabilities;
 
   // Copula model
   // 0 : Gaussian
@@ -69,39 +70,43 @@ transformed data {
   // Required for correlation matrix transformation
   real lam = (rho_max - rho_min) / 2;
   matrix[P, P] Id = identity_matrix(P);
-  matrix[P, P] cor0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
+  matrix[P, P] corr0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
 
-  // Observed cluster data
-  array[N, P] int<lower=0> clusters_invidual_counts;
-  array[N, P] int<lower=0, upper=P> clusters_invidual_indexes;
+  // convert observed cluster data
+  // to be usable in the model section
+  array[N, P] int<lower=0, upper=P> clusters_nbstations;
+  array[N, P, P] int<lower=0, upper=P> clusters_indexes;
+  array[P] int cl;
+  int nbsta;
   for(i in 1:N) {
     for(icl in 1:clusters_counts[i]) {
-        array[P] int cl = clusters[i, icl, :];
-        int count = 0;
+        nbsta = 1;
+        cl = clusters[i, icl, :];
         for(j in 1:P) {
             if(cl[j] == 1) {
-                clusters_individual_indexes[i, count] = j;
-                count += 1;
+                clusters_indexes[i, icl, nbsta] = j;
+                nbsta += 1;
             }
-            clusters_individual_counts[i, j] = count;
         }
+        clusters_nbstations[i, icl] = nbsta - 1;
     }
   }
 
-  // Possible cluster data
-  array[Q, P] int<lower=0> clusters_possible_invidual_counts;
-  array[Q, P] int<lower=0, upper=P> clusters_possible_invidual_indexes;
+  // convert partition data
+  // to be usable in the model section
+  array[Q, P] int<lower=0, upper=P> partitions_nbstations;
+  array[Q, P, P] int<lower=0, upper=P> partitions_indexes;
   for(i in 1:Q) {
-    for(icl in 1:clusters_possible_counts[i]) {
-        array[P] int cl = clusters_possible[i, icl, :];
-        int count = 0;
+    for(ipart in 1:partitions_counts[i]) {
+        cl = partitions[i, ipart, :];
+        nbsta = 1;
         for(j in 1:P) {
             if(cl[j] == 1) {
-                clusters_possible_individual_indexes[i, count] = j;
-                count += 1;
+                partitions_indexes[i, ipart, nbsta] = j;
+                nbsta += 1;
             }
-            clusters_possible_individual_counts[i, j] = count;
         }
+        partitions_nbstations[i, ipart] = nbsta - 1;
     }
   }
 }
@@ -143,7 +148,7 @@ transformed parameters {
   matrix[P, P] Si = diag_matrix(1. / sqrt(rows_dot_self(L_IW)));
 
   // Computation of shifted correlation matrix 
-  matrix[P, P] cor_IW = cor0 + lam * quad_form(multiply_lower_tri_self_transpose(L_IW), Si);
+  matrix[P, P] corr_IW = corr0 + lam * quad_form(multiply_lower_tri_self_transpose(L_IW), Si);
 }
 
 model {
@@ -168,54 +173,77 @@ model {
     real kappa = yshape1[ivar];
 
     real obs = y[ival][ivar];
-    real zval = quantile(gev_cdf(obs | tau, alpha, kappa), copula);
+    real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), copula);
     z[ival][ivar] = zval;
 
     // log-Jacobian of z = inv_Phi(gev_cdf(obs))
     // dz/dobs = gev_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
-    target += gev_lpdf(obs | tau, alpha, kappa) + quantile_log_jac(zval, copula);
+    target += gev_lpdf(obs | tau, alpha, kappa) + copula_marginal_quantile_log_jac(zval, copula);
   }
 
   // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-    real zcens = quantile(ulat_cens[i], copula);
+    real zcens = copula_marginal_quantile(ulat_cens[i], copula);
     z[ival][ivar] = zcens;
     
     // log-Jacobian of censored latent variable transform
-    target += log(ucensors[ivar]) + quantile_log_jac(zcens, copula);
+    target += log(ucensors[ivar]) + copula_marginal_quantile_log_jac(zcens, copula);
   }
 
-  // --- Likelihood ---
+  // --- Likelihood computed separately for each year ---
+  // cannot vectorize because of clusters
+  int nsta;
   for(i in 1:N) {
 
-    // Loop on clusters
+    // Loop on clusters for the particular year
     for(icl in 1:clusters_counts[i]) {
-        // Get cluster array indexes
-        int ncl = clusters_individual_counts[i, icl]; 
-        array[ncl] int idx = clusters_individual_indexes[1:ncl];
+        // Number of stations in the particular cluster
+        nsta = clusters_nbstations[i, icl]; 
+
+        // Indexes of stations belonging to the cluster
+        array[nsta] int idxm = clusters_indexes[i, icl, 1:nsta];
 
         // Compute likelihood within cluster
-        target += copula_log_pdf(z[i, idx], copula, cor_IW[idx, idx]);
+        target += copula_log_pdf(z[i, idxm], copula, corr_IW[idxm, idxm]);
     }
 
   }
 }
 
 generated quantities {
-    // Change this for generic copula
-    vector[P] zrnd = multi_normal_rng(zero_mean, cor_IW);
+    // Sample partition
+    int ipart = categorical_rng(partitions_probabilities); 
 
-    // Add sampling from clusters
-    
-    vector[P] yrnd;
-    for(ivar in 1:P) {
-       real tau = ylocn[ivar];
-       real alpha = yscale[ivar];
-       real kappa = yshape1[ivar];
-       yrnd[ivar] = gev_quantile(Phi(zrnd[ivar]), tau, alpha, kappa);
-    }
+    // Loop through subsets in the selected partition
+    vector[P] zrnd, yrnd;
+
+    real tau;
+    real alpha;
+    real kappa;
+    real u;
+    int nsta;
+
+    for(isub in 1:partitions_counts[ipart]) {
+        // Number of stations in the particular subset
+        nsta = partitions_nbstations[ipart, isub];
+
+        // Index of stations in the particular subset
+        array[nsta] int idxg = partitions_indexes[ipart, isub, 1:nsta];
+
+        // Sample from copula
+        zrnd[idxg] = copula_rng(copula, corr_IW[idxg, idxg]);
+
+        // Compute GEV quantile from copula marginal cdf
+        for(ivar in idxg) {
+            tau = ylocn[ivar];
+            alpha = yscale[ivar];
+            kappa = yshape1[ivar];
+            u = copula_marginal_prob(zrnd[ivar], copula);
+            yrnd[ivar] = gev_quantile(u, tau, alpha, kappa);
+        }
+    }    
 }
 

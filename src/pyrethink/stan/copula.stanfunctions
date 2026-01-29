@@ -159,7 +159,16 @@ real student_t_quantile(real p, real ndf) {
 
 // Generic copula function
 
-real quantile(real p, real copula) {
+real copula_marginal_prob(real z, real copula) {
+    if(copula < 1e-10)
+        return normal_cdf(z | 0, 1);
+    else {
+        return student_t_cdf(z | copula, 0, 1);
+    }    
+}
+
+
+real copula_marginal_quantile(real p, real copula) {
     if(copula < 1e-10)
         return inv_Phi(p);
     else {
@@ -167,7 +176,7 @@ real quantile(real p, real copula) {
     }    
 }
 
-real quantile_log_jac(real z, real copula) {
+real copula_marginal_quantile_log_jac(real z, real copula) {
     if(copula < 1e-10)
         return -std_normal_lpdf(z);
     else {
@@ -185,3 +194,16 @@ real copula_log_pdf(vector z, real copula, matrix corr) {
         return multi_student_t_lpdf(z | copula, zero_mean, corr);
     }    
 }
+
+vector copula_rng(real copula, matrix corr) {
+    int P = rows(corr);
+    row_vector[P] zero_mean = zeros_row_vector(P);
+
+    if(copula < 1e-10) {
+        return multi_normal_rng(zero_mean, corr);
+    }
+    else {
+        return multi_student_t_rng(copula, zero_mean, corr);
+    }
+}
+

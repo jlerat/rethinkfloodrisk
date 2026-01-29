@@ -1,0 +1,19 @@
+
+
+  array[N, P] int<lower=0> clusters_invidual_counts;
+  array[N, P] int<lower=0, upper=P> clusters_invidual_indexes;
+  for(i in 1:N) {
+    for(icl in 1:clusters_counts[i]) {
+        array[P] int cl = clusters[i, icl, :];
+        int count = 0;
+        for(j in 1:P) {
+            if(cl[j] == 1) {
+                clusters_individual_indexes[i, count] = j;
+                count += 1;
+            }
+            clusters_individual_counts[i, j] = count;
+        }
+    }
+  }
+
+
