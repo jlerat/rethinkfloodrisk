@@ -1,19 +1,21 @@
+array[,,] int cluster_data_processing(array[,,] int clusters, array[] int counts) {
+    int N = size(clusters);
+    int P = size(clusters[1, 1, :]);
 
-
-  array[N, P] int<lower=0> clusters_invidual_counts;
-  array[N, P] int<lower=0, upper=P> clusters_invidual_indexes;
-  for(i in 1:N) {
-    for(icl in 1:clusters_counts[i]) {
-        array[P] int cl = clusters[i, icl, :];
-        int count = 0;
-        for(j in 1:P) {
-            if(cl[j] == 1) {
-                clusters_individual_indexes[i, count] = j;
-                count += 1;
-            }
-            clusters_individual_counts[i, j] = count;
-        }
+    array[N, P + 1, P] int indexes = rep_array(0, N, P + 1, P);
+    int nbsta;
+    
+    for(i in 1:N) {
+      for(icl in 1:counts[i]) {
+          nbsta = 1;
+          for(j in 1:P) {
+              if(clusters[i, icl, j] == 1) {
+                  indexes[i, icl, 1 + nbsta] = j;
+                  nbsta += 1;
+              }
+          }
+          indexes[i, icl, 1] = nbsta - 1;
+      }
     }
-  }
-
-
+    return indexes;
+}

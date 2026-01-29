@@ -111,16 +111,16 @@ def test_stan_copula(allclose):
 
     x = stan_test_copula(data=stan_data)
 
-    p0 = x.filter(regex="^p0\[").values
+    p0 = x.filter(regex="^p0\\[").values
 
     # Normal copula
-    zn = x.filter(regex="^zn\[").values
+    zn = x.filter(regex="^zn\\[").values
     assert allclose(zn, norm.ppf(p0), atol=1e-5)
 
-    pn = x.filter(regex="^pn\[").values
+    pn = x.filter(regex="^pn\\[").values
     assert allclose(pn, p0)
 
-    znr = x.filter(regex="^znr\[").values.reshape((3, N)).T
+    znr = x.filter(regex="^znr\\[").values.reshape((3, N)).T
     assert allclose(znr.mean(axis=0), 0, atol=5e-2)
     assert allclose(znr.std(axis=0), 1, atol=5e-2)
     cor = np.corrcoef(znr.T)
@@ -128,12 +128,12 @@ def test_stan_copula(allclose):
     assert allclose(cor, cor0, atol=3e-2)
 
     # Student copula
-    zs = x.filter(regex="^zs\[").values.reshape((P, N)).T
+    zs = x.filter(regex="^zs\\[").values.reshape((P, N)).T
 
-    ps = x.filter(regex="^ps\[").values.reshape((P, N)).T
+    ps = x.filter(regex="^ps\\[").values.reshape((P, N)).T
     assert allclose(ps, p0[:, None])
 
-    zsr = x.filter(regex="^zsr\[").values.reshape((3, N)).T
+    zsr = x.filter(regex="^zsr\\[").values.reshape((3, N)).T
     assert allclose(zsr.mean(axis=0), 0, atol=5e-2)
     cor = np.corrcoef(zsr.T)
     assert allclose(cor, cor0, atol=3e-2)
@@ -155,6 +155,20 @@ def test_stan_clusters(allclose):
                                          censors=censors)
     stan_data = sv.to_dict()
     x = stan_test_clusters(data=stan_data)
-    import pdb; pdb.set_trace()
+    N = stan_data["N"]
+    P = stan_data["P"]
+    clust = stan_data["clusters"]
+    idx = x.filter(regex="indexes").values.reshape((P, P + 1, N)).T
+    cnt = idx[:, 0, :]
 
+    for i in range(N):
+        cl = clust[i]
+        assert allclose(cl.sum(axis=1), cnt[i])
 
+        idxc = idx[i, 1:, :]
+        assert allclose(cnt[i], (idxc > 0).sum(axis=1))
+
+        for j in range(P):
+            ii = np.where(cl[j] == 1)[0] + 1
+            n = int(cnt[i, j])
+            assert allclose(ii, idxc[j, :n])

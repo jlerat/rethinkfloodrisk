@@ -74,16 +74,14 @@ transformed data {
 
   // convert observed cluster data
   // to be usable in the model section
-  array[N, P] int<lower=0, upper=P> clusters_nbstations;
-  array[N, P, P] int<lower=0, upper=P> clusters_indexes;
-  array[P] int cl;
+  array[N, P] int<lower=0, upper=P> clusters_nbstations = rep_array(0, N, P);
+  array[N, P, P] int<lower=0, upper=P> clusters_indexes = rep_array(0, N, P, P);
   int nbsta;
   for(i in 1:N) {
     for(icl in 1:clusters_counts[i]) {
         nbsta = 1;
-        cl = clusters[i, icl, :];
         for(j in 1:P) {
-            if(cl[j] == 1) {
+            if(clusters[i, icl, j] == 1) {
                 clusters_indexes[i, icl, nbsta] = j;
                 nbsta += 1;
             }
@@ -94,14 +92,13 @@ transformed data {
 
   // convert partition data
   // to be usable in the model section
-  array[Q, P] int<lower=0, upper=P> partitions_nbstations;
-  array[Q, P, P] int<lower=0, upper=P> partitions_indexes;
+  array[Q, P] int<lower=0, upper=P> partitions_nbstations = rep_array(0, Q, P);
+  array[Q, P, P] int<lower=0, upper=P> partitions_indexes = rep_array(0, Q, P, P);
   for(i in 1:Q) {
     for(ipart in 1:partitions_counts[i]) {
-        cl = partitions[i, ipart, :];
         nbsta = 1;
         for(j in 1:P) {
-            if(cl[j] == 1) {
+            if(partitions[i, ipart, j] == 1) {
                 partitions_indexes[i, ipart, nbsta] = j;
                 nbsta += 1;
             }
