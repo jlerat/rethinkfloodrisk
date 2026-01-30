@@ -2,7 +2,7 @@ array[,,] int cluster_data_processing(array[,,] int clusters, array[] int counts
     int N = size(clusters);
     int P = size(clusters[1, 1, :]);
 
-    array[N, P + 1, P] int indexes = rep_array(0, N, P + 1, P);
+    array[N, P, P + 1] int indexes = rep_array(0, N, P, P + 1);
     int nbsta;
     
     for(i in 1:N) {

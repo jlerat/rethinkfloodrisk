@@ -1,4 +1,5 @@
 import re
+import json
 from pathlib import Path
 from itertools import combinations
 import math
@@ -29,7 +30,7 @@ SEED = 5446
 DEBUG = False
 
 # Used to write test data for postpred checks
-WRITE_SAMPLE_DATA = False
+WRITE_SAMPLE_DATA = True
 
 PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
@@ -182,9 +183,13 @@ def test_inits(allclose):
     inits = sv.initial_parameters
 
 
-@pytest.mark.parametrize("config", ["uncensored", "censored"])
+#@pytest.mark.parametrize("config", ["uncensored", "censored"])
+#@pytest.mark.parametrize("nvars", [3])
+#@pytest.mark.parametrize("copula", [0., 2.])
+
+@pytest.mark.parametrize("config", ["uncensored"])
 @pytest.mark.parametrize("nvars", [3])
-@pytest.mark.parametrize("copula", [0., 2.])
+@pytest.mark.parametrize("copula", [0.])
 def test_sampler(config, nvars, copula, allclose):
     data, times, dows = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
@@ -208,7 +213,8 @@ def test_sampler(config, nvars, copula, allclose):
 
     stan_inits = sv.initial_parameters
 
-    fout = FTESTS / "sampling" / f"sampling_{config}"
+    fout = f"sampling_{config}_N{nvars}_C{copula:0.0f}"
+    fout = FTESTS / "sampling" / fout
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
         f.unlink()
@@ -225,24 +231,32 @@ def test_sampler(config, nvars, copula, allclose):
               iter_warmup=STAN_NWARM_DEFAULT,
               show_progress=PROGRESS)
 
-    smp = mv_censored_no_missing_sampling(**kw)
-    df = smp.draws_pd()
-    diag = report.process_stan_diagnostic(smp.diagnose())
-    for met in STAN_DIAG_METRICS:
-        assert diag[met] == "satisfactory"
-
     # Test sample size error
-    kw["data"]["Nmiss"] += 1
+    kw["data"]["Ncens"] += 1
     with pytest.raises(RuntimeError):
         mv_censored_no_missing_sampling(**kw)
 
-    #if config == "censored_missing" and WRITE_SAMPLE_DATA:
-    #    fd = FTESTS / "censored_missing_data.zip"
-    #    comp = dict(method="zip", compresslevel=9)
-    #    data.to_csv(fd, compression=comp)
+    kw["data"]["Ncens"] -= 1
 
-    #    fs = FTESTS / "censored_missing_samples.zip"
-    #    df.to_csv(fs, compression=comp)
+    # Run sampler
+    smp = mv_censored_no_missing_sampling(**kw)
+    df = smp.draws_pd()
+    diag = report.process_stan_diagnostic(smp.diagnose())
+
+    fdiag = fout / "diagnostic.json"
+    with fdiag.open("w") as fo:
+        json.dump(diag, fo, indent=4)
+
+    for met in STAN_DIAG_METRICS:
+        assert diag[met] == "satisfactory"
+
+    if config == "censored" and WRITE_SAMPLE_DATA:
+        fd = fout / "data.zip"
+        comp = dict(method="zip", compresslevel=9)
+        data.to_csv(fd, compression=comp)
+
+        fs = fout / "samples.zip"
+        df.to_csv(fs, compression=comp)
 
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])

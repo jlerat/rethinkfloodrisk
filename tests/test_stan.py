@@ -154,18 +154,23 @@ def test_stan_clusters(allclose):
                                          copula=0,
                                          censors=censors)
     stan_data = sv.to_dict()
-    x = stan_test_clusters(data=stan_data)
     N = stan_data["N"]
     P = stan_data["P"]
+
+    x = stan_test_clusters(data=stan_data)
+
+    assert N == x["Ncheck"]
+    assert P == x["Pcheck"]
+
     clust = stan_data["clusters"]
-    idx = x.filter(regex="indexes").values.reshape((P, P + 1, N)).T
-    cnt = idx[:, 0, :]
+    idx = x.filter(regex="indexes").values.reshape((P + 1, P, N)).T
+    cnt = idx[:, :, 0]
 
     for i in range(N):
         cl = clust[i]
         assert allclose(cl.sum(axis=1), cnt[i])
 
-        idxc = idx[i, 1:, :]
+        idxc = idx[i, :, 1:]
         assert allclose(cnt[i], (idxc > 0).sum(axis=1))
 
         for j in range(P):

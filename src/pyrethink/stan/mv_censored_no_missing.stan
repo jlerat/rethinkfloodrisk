@@ -10,6 +10,7 @@ functions {
 
     #include marginal.stanfunctions
     #include copula.stanfunctions
+    #include clusters.stanfunctions
 
 }
 
@@ -72,40 +73,13 @@ transformed data {
   matrix[P, P] Id = identity_matrix(P);
   matrix[P, P] corr0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
 
-  // convert observed cluster data
-  // to be usable in the model section
-  array[N, P] int<lower=0, upper=P> clusters_nbstations = rep_array(0, N, P);
-  array[N, P, P] int<lower=0, upper=P> clusters_indexes = rep_array(0, N, P, P);
-  int nbsta;
-  for(i in 1:N) {
-    for(icl in 1:clusters_counts[i]) {
-        nbsta = 1;
-        for(j in 1:P) {
-            if(clusters[i, icl, j] == 1) {
-                clusters_indexes[i, icl, nbsta] = j;
-                nbsta += 1;
-            }
-        }
-        clusters_nbstations[i, icl] = nbsta - 1;
-    }
-  }
+  // Process observed cluster data
+  array[N, P, P + 1] int clusters_indexes = 
+    cluster_data_processing(clusters, clusters_counts);
 
-  // convert partition data
-  // to be usable in the model section
-  array[Q, P] int<lower=0, upper=P> partitions_nbstations = rep_array(0, Q, P);
-  array[Q, P, P] int<lower=0, upper=P> partitions_indexes = rep_array(0, Q, P, P);
-  for(i in 1:Q) {
-    for(ipart in 1:partitions_counts[i]) {
-        nbsta = 1;
-        for(j in 1:P) {
-            if(partitions[i, ipart, j] == 1) {
-                partitions_indexes[i, ipart, nbsta] = j;
-                nbsta += 1;
-            }
-        }
-        partitions_nbstations[i, ipart] = nbsta - 1;
-    }
-  }
+  // Process partition data
+  array[Q, P, P + 1] int partitions_indexes =
+    cluster_data_processing(partitions, partitions_counts);
 }
 
 parameters {
@@ -198,10 +172,10 @@ model {
     // Loop on clusters for the particular year
     for(icl in 1:clusters_counts[i]) {
         // Number of stations in the particular cluster
-        nsta = clusters_nbstations[i, icl]; 
+        nsta = clusters_indexes[i, icl, 1]; 
 
         // Indexes of stations belonging to the cluster
-        array[nsta] int idxm = clusters_indexes[i, icl, 1:nsta];
+        array[nsta] int idxm = clusters_indexes[i, icl, 2:nsta + 1];
 
         // Compute likelihood within cluster
         target += copula_log_pdf(z[i, idxm], copula, corr_IW[idxm, idxm]);
@@ -225,10 +199,10 @@ generated quantities {
 
     for(isub in 1:partitions_counts[ipart]) {
         // Number of stations in the particular subset
-        nsta = partitions_nbstations[ipart, isub];
+        nsta = partitions_indexes[ipart, isub, 1];
 
         // Index of stations in the particular subset
-        array[nsta] int idxg = partitions_indexes[ipart, isub, 1:nsta];
+        array[nsta] int idxg = partitions_indexes[ipart, isub, 2:nsta + 1];
 
         // Sample from copula
         zrnd[idxg] = copula_rng(copula, corr_IW[idxg, idxg]);
