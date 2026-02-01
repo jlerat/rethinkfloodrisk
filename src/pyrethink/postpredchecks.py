@@ -68,7 +68,7 @@ def bivariate_dependence_statistics(data,
 
 def generate_samples(params, copula, nsamples):
     if copula > STUDENT_DF_MAX or copula < 0:
-        errmsg = f"Expected df in [0, {STUDENT_DF_MAX}], got {df}."
+        errmsg = f"Expected copula in [0, {STUDENT_DF_MAX}], got {copula}."
         raise ValueError(errmsg)
 
     ylocn = params.filter(regex="ylocn").values
