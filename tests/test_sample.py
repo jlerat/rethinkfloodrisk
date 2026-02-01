@@ -88,7 +88,7 @@ def test_partitions_size(nelems, allclose):
 @pytest.mark.parametrize("dalpha", [0., 2.])
 def test_sample_data(pcensor, no_missing, dalpha, allclose):
 
-    data, times, dows = datahub.get_ams_concat(no_missing=no_missing)
+    data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
     copula = 0.5
 
@@ -174,7 +174,7 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
 
 
 def test_inits(allclose):
-    data, times, dows = datahub.get_ams_concat()
+    data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
     copula = 0.
     sv = sample.StanSamplingMultivariate(data, dows,
@@ -191,7 +191,7 @@ def test_inits(allclose):
 @pytest.mark.parametrize("nvars", [3])
 @pytest.mark.parametrize("copula", [0.])
 def test_sampler(config, nvars, copula, allclose):
-    data, times, dows = datahub.get_ams_concat()
+    data, times, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
     dows = dows.iloc[:, :nvars]
 
@@ -259,13 +259,13 @@ def test_sampler(config, nvars, copula, allclose):
         df.to_csv(fs, compression=comp)
 
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
-@pytest.mark.parametrize("stationpair", [[0, 1], [5, 6], [4, 7]])
+@pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
 def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     if DEBUG and (pcensor < 0.5 or stationpair[0] != 44):
         pytest.skip("Debug mode")
 
     # Two variables only
-    data, _, dows = datahub.get_ams_concat()
+    data, _, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
     dows = dows.iloc[:, stationpair]
 
@@ -335,12 +335,12 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         assert diag2[met] == "satisfactory"
 
     pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
-    pnames.append("cor_IW[2,1]")
+    pnames.append("corr_IW[2,1]")
 
     LOGGER.info("")
     LOGGER.info("-----------------")
     sids = "/".join(data.columns.tolist())
-    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f} missing={missing}")
+    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f}")
     LOGGER.info(f"nwarm = {nwarm}")
     LOGGER.info(f"nsamples = {nsamples}")
     LOGGER.info(f"rho_min = {rho_min}")
@@ -362,7 +362,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         x2 = df2.loc[:, pname2]
 
         # Get floodstan sample
-        if re.search("cor_IW", pname2):
+        if re.search("corr_IW", pname2):
             pname1 = "rho"
         elif re.search("ucensor", pname2):
             pname1 = "ucensor" if re.search("1", pname2) else "vcensor"
@@ -397,7 +397,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
             assert tpv > pv_thresh
 
         if pname1 == "rho" and (kspv < pv_thresh or tpv < pv_thresh):
-            wmess = f"stations={sids} pcensor={pcensor:0.2f} missing={missing}\n"\
+            wmess = f"stations={sids} pcensor={pcensor:0.2f}\n"\
                     + "rho parameter not passing test criteria:\n"\
                     + re.sub("\\] ", "", msg)
             warnings.warn(wmess)
@@ -415,13 +415,14 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         ax.legend(fontsize="x-small")
 
     sids = "/".join(data.columns.tolist())
-    ftitle = f"Stations={sids} pcens={pcensor:0.2f} missing={missing}"
+    ftitle = f"Stations={sids} pcens={pcensor:0.2f}"
     fig.suptitle(ftitle, fontsize="large")
 
     sids = "-".join(data.columns.tolist())
+    fimg = FTESTS / "images"
+    fimg.mkdir(exist_ok=True)
     fp = f"test_mv_censored_no_missing_vs_floodstan_stations{sids}"\
-        + f"_pcens{pcensor*100:0.02f}"\
-        + f"_missing{missing}.png"
-    fp = FTESTS / fp
+        + f"_pcens{pcensor*100:0.02f}.png"
+    fp = fimg / fp
 
     fig.savefig(fp)

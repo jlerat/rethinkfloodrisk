@@ -27,7 +27,7 @@ FTESTS = Path(__file__).resolve().parent
 SEED = 5446
 
 def test_stan_indexing():
-    data, _, dows = datahub.get_ams_concat()
+    data, _, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, dows, copula=0., censors=censors)
     stan_data = sv.to_dict()
@@ -148,7 +148,7 @@ def test_stan_copula(allclose):
 
 
 def test_stan_clusters(allclose):
-    data, times, dows = datahub.get_ams_concat()
+    data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.3)
     sv = sample.StanSamplingMultivariate(data, dows,
                                          copula=0,

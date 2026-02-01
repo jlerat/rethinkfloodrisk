@@ -41,11 +41,13 @@ def test_potpeaks_thresh(no_missing):
 
 @pytest.mark.parametrize("no_missing", [False, True])
 def test_get_ams_concat(no_missing):
-    ams, times, dows = datahub.get_ams_concat(no_missing)
+    ams, times, dows, stations = datahub.get_ams_concat(no_missing)
     if no_missing:
         assert ams.shape[1] == 6
+        assert stations.shape[0] == 6
     else:
         assert ams.shape[1] == 8
+        assert stations.shape[0] == 8
 
     assert ams.shape == times.shape
     assert ams.shape == dows.shape

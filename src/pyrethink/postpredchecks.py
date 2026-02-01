@@ -3,10 +3,15 @@ import numpy as np
 import pandas as pd
 
 from scipy.stats import norm
+from scipy.stats import t as student_t
+from scipy.stats import multivariate_normal as mvn
+from scipy.stats import multivariate_t as mvt
 from scipy.stats import kendalltau
 
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
+
+from pyrethink.sample import STUDENT_DF_MAX
 
 
 def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
@@ -26,37 +31,67 @@ def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
     return pd.Series(stats, index=idx)
 
 
-def bivariate_dependence_statistics(data):
-    stats = np.zeros(2)
+def bivariate_dependence_statistics(data,
+                                    qtails=[50, 75, 90, 95]):
     data = np.array(data)
     data = data[np.all(~np.isnan(data), axis=1)]
+    N, P = data.shape
+    x = data[:, 0]
+    y = data[:, 1]
+
+    if P != 2:
+        errmsg = "Expected 2 columns in data, got P={P}."
+        raise ValueError(errmsg)
+
+    names = ["kendalltau", "kendalltau_high"]\
+        + [f"taildep_q{q}" for q in qtails]
+    stats = pd.Series(np.nan, index=names)
 
     # Kendall tau
-    stats[0] = kendalltau(data[:, 0], data[:, 1]).statistic
+    stats["kendalltau"] = kendalltau(x, y).statistic
 
+    # Kendall tau above medians
     medians = np.nanmedian(data, axis=0)
-    ihigh = (data[:, 0] >= medians[0]) & (data[:, 1] >= medians[1])
-    stats[1] = kendalltau(data[ihigh, 0], data[ihigh, 1]).statistic
+    ihigh = (x >= medians[0]) & (y >= medians[1])
+    n = "kendalltau_high"
+    stats[n] = kendalltau(x[ihigh], y[ihigh]).statistic
 
-    idx = ["kendalltau", "kendalltauhigh"]
-    return pd.Series(stats, index=idx)
+    # Tail dependence
+    qt = np.nanpercentile(data, qtails, axis=0).T
+    is_greater = data[:, :, None] - qt[None, :, :] >= 0
+    cnt = is_greater.all(axis=1).sum(axis=0)
+    for iq, q in enumerate(qtails):
+        stats[f"taildep_q{q}"] = cnt[iq] / N
+
+    return stats
 
 
-def generate_samples(params, nval):
+def generate_samples(params, copula, nsamples):
+    if copula > STUDENT_DF_MAX or copula < 0:
+        errmsg = f"Expected df in [0, {STUDENT_DF_MAX}], got {df}."
+        raise ValueError(errmsg)
+
     ylocn = params.filter(regex="ylocn").values
     ylogscale = params.filter(regex="ylogscale").values
     yshape1 = params.filter(regex="yshape1").values
 
     P = len(ylocn)
-    cor = params.filter(regex="cor_IW").values.reshape((P, P)).T
+    corr = params.filter(regex="corr_IW").values.reshape((P, P)).T
 
-    z = np.random.multivariate_normal(mean=np.zeros(P), cov=cor,
-                                      size=nval)
+    if copula > 0:
+        z = mvt.rvs(loc=np.zeros(P), shape=corr, df=copula, size=nsamples)
+    else:
+        z = mvn.rvs(mean=np.zeros(P), cov=corr, size=nsamples)
+
     ge = GEV()
     y = np.zeros_like(z)
     for i in range(P):
         ge.params = [ylocn[i], ylogscale[i], yshape1[i]]
-        u = norm.cdf(z[:, i])
+        if copula > 0:
+            u = student_t.cdf(z[:, i], df=copula)
+        else:
+            u = norm.cdf(z[:, i])
+
         y[:, i] = ge.ppf(u)
 
     return y
@@ -86,6 +121,7 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 
 def posterior_predictive_checks(yobs, params,
+                                copula,
                                 logger=None,
                                 iterlog=500):
     yobs = np.array(yobs)
@@ -115,7 +151,7 @@ def posterior_predictive_checks(yobs, params,
             msg = f"[postpred] processing param {isample + 1:5d} / {nsamples}."
             logger.info(msg)
 
-        ysim = generate_samples(param, nval)
+        ysim = generate_samples(param, copula, nval)
 
         for ivar in range(nvar):
             un = univariate_statistics(ysim[:, ivar])

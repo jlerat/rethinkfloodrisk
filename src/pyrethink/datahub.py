@@ -46,7 +46,7 @@ def get_potpeaks(no_missing=True):
     df = df.filter(regex="_PEAK", axis=1)
     df.columns = df.columns.str.replace("_PEAK", "")
 
-    ams, _, _ = get_ams_concat(no_missing)
+    ams, _, _, _ = get_ams_concat(no_missing)
     df = df.loc[:, ams.columns]
     if no_missing:
         iok = df.notnull().all(axis=1)
@@ -121,8 +121,9 @@ def get_ams_concat(no_missing=True):
         peaks = peaks.loc[isok, selected]
         times = times.loc[isok, selected]
         dows = dows.loc[isok, selected]
+        stations = stations.loc[selected]
 
-    return peaks, times, dows
+    return peaks, times, dows, stations
 
 
 def get_censors(pcensor, no_missing=True):
@@ -130,7 +131,7 @@ def get_censors(pcensor, no_missing=True):
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    ams, _, _ = get_ams_concat(no_missing)
+    ams, _, _, _ = get_ams_concat(no_missing)
     censors = pd.Series(np.nan, index=ams.columns)
 
     for stationid, qmax in ams.items():
