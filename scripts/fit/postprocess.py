@@ -33,7 +33,10 @@ parser = argparse.ArgumentParser(description="copula model result post-processin
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=-1)
+parser.add_argument("-v", "--version", help="version",
+                    type=str, required=True)
 args = parser.parse_args()
+version = args.version
 taskid = args.taskid
 debug = taskid < 0
 taskid = max(0, taskid)
@@ -53,7 +56,7 @@ basename = source_file.stem
 froot = source_file.parent.parent.parent
 
 # Get options
-fopm = froot / "outputs" / "copulafit_options.json"
+fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskids = np.arange(opm_fit.ntasks)
 
@@ -65,11 +68,14 @@ task = opm.get_task(taskid)
 fit_taskid = task.fit_taskid
 jobid = task.jobid
 
-if debug:
-    fit_taskid = 0
-    jobid = 1
+copula = opm_fit.get_task(fit_taskid).copula
 
-fout = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
+fout = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
+
+if debug:
+    fit_taskid = -1
+    jobid = 0
+    fout = froot / "logs" / "copulafit" / f"copulafit_v{version}"
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -134,6 +140,7 @@ elif jobid == 1:
     if compute:
         LOGGER.info("Computing posterior predictive checks")
         ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples,
+                                                         copula,
                                                          logger=LOGGER)
 
         LOGGER.info("Store posterior predictive checks")

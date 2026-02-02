@@ -22,7 +22,8 @@ fi
 # Configure array numbers
 NTASKS=144
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
-ARRAYS_PROC="0-$((5 * $NTASKS - 1))"
+ARRAYS_PROC="0-$((2*$NTASKS - 1))"
+ARRAYS_MVN="0-$((5*$NTASKS - 1))"
 
 # Job config
 JOBSCRIPT=$FROOT/scripts/fit/job_script.job
@@ -54,7 +55,7 @@ JOBCONFIGS["1,5"]="X"            # job id
 # MVN postprocessing job (depends on copula fitting)
 JOBCONFIGS["2,0"]="mvnprocess"   # Job name
 JOBCONFIGS["2,1"]="1"            # number of cpus
-JOBCONFIGS["2,2"]="0-299"         # arrays
+JOBCONFIGS["2,2"]=$ARRAYS_MVN    # arrays
 JOBCONFIGS["2,3"]="0"            # use user supplied array if any
 JOBCONFIGS["2,4"]="0"            # parent job number
 JOBCONFIGS["2,5"]="X"            # job id
