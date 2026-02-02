@@ -5,17 +5,24 @@ FROOT=$NFRSK
 set -a 
 
 # Env variables
+VERSION=$1
 if [ -z "$1" ]
+then
+    echo "ERROR - Expected a version number as first argument"
+    exit 1
+fi
+
+if [ -z "$2" ]
 then
     USER_SUPPLIED_ARRAYS="X"
 else
-    USER_SUPPLIED_ARRAYS=$1
+    USER_SUPPLIED_ARRAYS=$2
 fi
 
 # Configure array numbers
-NTASKS=24
+NTASKS=144
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
-ARRAYS_PROC="0-$((2 * $NTASKS - 1))"
+ARRAYS_PROC="0-$((5 * $NTASKS - 1))"
 
 # Job config
 JOBSCRIPT=$FROOT/scripts/fit/job_script.job
@@ -116,12 +123,12 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     then
         echo .. submitting job with array $arrays and no dependency
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
-            --array=$arrays --parsable --export=ALL $JOBSCRIPT)
+            --array=$arrays --parsable --export=ALL,VERSION $JOBSCRIPT)
     else    
         echo .. submitting job with array $arrays and dependency on $parent_jobid
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
             --array=$arrays --parsable --dependency=afterany:${parent_jobid} \
-            --export=ALL $JOBSCRIPT)
+            --export=ALL,VERSION $JOBSCRIPT)
     fi    
 
     # Iterate jobid

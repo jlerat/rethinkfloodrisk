@@ -19,7 +19,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
+from scipy.stats import t as student_t
 from scipy.stats import multivariate_normal as mvn
+from scipy.stats import multivariate_t as mvt
 
 from hydrodiy.io import csv, iutils, hyruns
 
@@ -34,11 +36,14 @@ np.random.seed(5446)
 # ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Process mvn samples",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--version", help="version",
+                    type=str, required=True)
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=-1)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
-                    type=int, default=50)
+                    type=int, default=20)
 args = parser.parse_args()
+version = args.version
 taskid = args.taskid
 nbatch = args.nbatch
 
@@ -51,7 +56,8 @@ aep_targets = [1 - 1e-1, 1 - 1e-2]
 # Configure mvn cdf
 
 groups_mvn_cdf = {
-    "GALL": datahub.get_stations().index.astype(str).tolist(),
+    "GALL": ["203002", "203004", "203005", "203010",
+             "203012", "203014"],
     "G02-14-10": ["203002", "203014", "203010"],
     "G14-10": ["203014", "203010"],
     "G02-14": ["203002", "203014"],
@@ -70,10 +76,14 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 pcensors = [0.1, 0.3, 0.5]
 rho_mins = [-1, 0]
 excludes = ["NONE"]
+copulas = [0, 1, 4]
+has_clusters_all = [True, False]
 
 opm.from_cartesian_product(batch=np.arange(nbatch),
                            pcensor=pcensors,
                            rho_min=rho_mins,
+                           copula=copulas,
+                           has_clusters=has_clusters_all,
                            exclude=excludes)
 
 # Load task
@@ -82,14 +92,18 @@ batch = task.batch
 pcensor = task.pcensor
 exclude = task.exclude
 rho_min = task.rho_min
+copula = task.copula
+has_clusters = task.has_clusters
 
 # Frequency of log report
 iterlog = 5
 
 if debug:
     batch = 0
-    pcensor = 0.5
-    exclude = "NONE"
+    pcensor = 0.3
+    exclude = "2007"
+    copula = 1
+    has_clusters = True
     rho_min = 0
 
 # ----------------------------------------------------------------------
@@ -98,10 +112,12 @@ if debug:
 source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
-fopm = froot / "outputs" / "copulafit_options.json"
+fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
                             rho_min=f"{rho_min:0.1f}",
+                            copula=copula,
+                            has_clusters=has_clusters,
                             exclude=exclude)
 if len(fit_taskid) != 1:
     errmsg = "opm_fit does not return one task"
@@ -109,7 +125,7 @@ if len(fit_taskid) != 1:
 
 fit_taskid = fit_taskid[0]
 
-ftask = froot / "outputs" / f"copulafit_TASK{fit_taskid}"
+ftask = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
 
 fwrite = ftask / "mvnprocess"
 fwrite.mkdir(exist_ok=True, parents=True)
@@ -126,8 +142,12 @@ LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
 if debug:
-    fwrite = froot / "logs" / basename / "mvnprocess"
+    fit_taskid = -1
+    fwrite = froot / "logs" / basename / f"copulafit_v{version}" \
+        / "mvnprocess"
     fwrite.mkdir(exist_ok=True, parents=True)
+
+    ftask = froot / "logs" / "copulafit" / f"copulafit_v{version}"
 
 # ----------------------------------------------------------------------
 # @Get data
@@ -135,7 +155,7 @@ if debug:
 LOGGER.info("Load data")
 
 # Obs events
-ams, _ = datahub.get_ams_concat()
+ams, _, _, stations = datahub.get_ams_concat()
 potpeaks, _, _ = datahub.get_potpeaks()
 
 
@@ -187,7 +207,7 @@ stationids_conditional = stationids[icond_2]
 cols_cond = {}
 cols_cond_all = []
 for st, p in prod(["mu", "sig", "smp_cdf"], aep_targets):
-    cc = [f"mvn_cond{sidc}_p{p:0.02f}_{sid}_{st}"
+    cc = [f"mv_cond{sidc}_p{p:0.02f}_{sid}_{st}"
           for sid in stationids_conditional]
     cols_cond[(st, p)] = cc
     cols_cond_all.extend(cc)
@@ -210,19 +230,33 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
         LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
-    cor_all = smp.filter(regex="cor_IW").values.reshape((nvar, nvar)).T
+    corr_all = smp.filter(regex="corr_IW").values.reshape((nvar, nvar)).T
 
-    # MVN conditional
-    S11 = cor_all[icond_1][:, icond_1]
+    # MV dist conditional
+    S11 = corr_all[icond_1][:, icond_1]
     S11i = np.linalg.inv(S11)
-    S22 = cor_all[icond_2][:, icond_2]
-    S21 = cor_all[icond_2][:, icond_1]
+    S22 = corr_all[icond_2][:, icond_2]
+    S21 = corr_all[icond_2][:, icond_1]
 
     for aep_target in aep_targets:
-        zcond = norm.ppf([aep_target])
+        if copula > 0:
+            zcond = student_t.ppf([aep_target], df=copula)
+        else:
+            zcond = norm.ppf([aep_target])
+
         muc = S21 @ S11i @ zcond
         Sc = S22 - S21 @ S11i @ S21.T
-        z = np.random.multivariate_normal(mean=muc, cov=Sc)
+
+        if copula > 0:
+            # See https://en.wikipedia.org/wiki/Multivariate_t-distribution#Conditional_Distribution
+            nu = copula
+            p1 = len(zcond)
+            d1 = zcond.T @ S11i @ zcond
+            a = (nu + d1) / (nu + p1)
+            df = nu + p1
+            z = mvt.rvs(loc=muc, shape=a * Sc, df=df)
+        else:
+            z = mvn.rvs(mean=muc, cov=Sc)
 
         for st in ["mu", "sig", "smp_cdf"]:
             cc = [f"mvn_cond{stationid_cond}_p{aep_target:0.02f}_{sid}_{st}"
@@ -232,7 +266,10 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
             elif st == "sig":
                 values = np.sqrt(np.diag(Sc))
             else:
-                values = norm.cdf(z)
+                if copula > 0:
+                    values = student_t.cdf(z, df=copula)
+                else:
+                    values = norm.cdf(z)
 
             res.loc[i, cc] = values
 
@@ -242,14 +279,20 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         ngstations = len(grp_stationids)
         mean = np.zeros(ngstations)
 
-        # MVN CDF
-        cor = cor_all[idx][:, idx]
+        # MV CDF
+        corr = np.ascontiguousarray(corr_all[idx][:, idx])
 
         #LOGGER.info("Computing probs", ntab=1)
-        rv = mvn(mean=mean, cov=cor)
+        if copula > 0:
+            rv = mvt(loc=mean, shape=corr, df=copula)
+        else:
+            rv = mvn(mean=mean, cov=corr)
 
         for aep_target in aep_targets:
-            zcdf = norm.ppf(aep_target)
+            if copula > 0:
+                zcdf = student_t.ppf(aep_target, df=copula)
+            else:
+                zcdf = norm.ppf(aep_target)
 
             # All above threshold
             x = -zcdf * np.ones(ngstations)
@@ -287,7 +330,10 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                         lc = math.log10(1 - cdf)
                         res.loc[i, f"G{sid}_obs_log10aep_{event}"] = lc
 
-                    zstd[k] = norm.ppf(cdf)
+                    if copula > 0:
+                        zstd[k] = student_t.ppf(cdf, df=copula)
+                    else:
+                        zstd[k] = norm.ppf(cdf)
 
             lc = math.log10(rv.cdf(-zstd))
             res.loc[i, f"{gname}_obs_log10aep_{event}"] = lc
@@ -296,7 +342,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
 
 comments = {
-    "comment": "MVN process results",
+    "comment": "MV N/T process results",
     "exclude": exclude,
     "pcensor": pcensor,
     "rho_min": rho_min,

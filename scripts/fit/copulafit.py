@@ -27,13 +27,15 @@ from floodstan.sample import get_logger
 
 from pyrethink import datahub
 from pyrethink import sample
-from pyrethink import mv_censored_sampling
+from pyrethink import mv_censored_no_missing_sampling
 
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Fit copula model",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--version", help="version",
+                    type=str, required=True)
 parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
                     type=int, default=50000)
 parser.add_argument("-d", "--debug", help="Debug mode",
@@ -45,6 +47,7 @@ parser.add_argument("-t", "--taskid", help="JobID",
 args = parser.parse_args()
 
 debug = args.debug
+version = args.version
 taskid = args.taskid
 
 # Configure stan
@@ -70,6 +73,8 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
 
 pcensors = [0.1, 0.3, 0.5]
 
+copulas = [0, 1, 4]
+
 excludes = ["NONE",
             "2021",
             "2007",
@@ -77,8 +82,12 @@ excludes = ["NONE",
 
 rho_mins = [-1., 0.]
 
+has_clusters_all = [False, True]
+
 opm.from_cartesian_product(pcensor=pcensors,
                            exclude=excludes,
+                           copula=copulas,
+                           has_clusters=has_clusters_all,
                            rho_min=rho_mins)
 
 # Load task
@@ -86,10 +95,14 @@ task = opm.get_task(max(0, taskid))
 pcensor = task.pcensor
 exclude = task.exclude
 rho_min = task.rho_min
+copula = task.copula
+has_clusters = task.has_clusters
 
 if debug:
     pcensor = 0.3
     exclude = "2007"
+    copula = 1
+    has_clusters = True
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -98,7 +111,7 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
 basename = source_file.stem
-fout = froot / "outputs" / f"{basename}_TASK{taskid}"
+fout = froot / "outputs" / f"copulafit_v{version}" / f"{basename}_TASK{taskid}"
 fout.mkdir(exist_ok=True, parents=True)
 
 fopm = fout.parent / f"{basename}_options.json"
@@ -118,7 +131,7 @@ LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
 if debug:
-    fout = flog.parent / "outputs"
+    fout = flog.parent / f"copulafit_v{version}"
     fout.mkdir(exist_ok=True)
 
 # ----------------------------------------------------------------------
@@ -126,14 +139,14 @@ if debug:
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-stations = datahub.get_stations()
-ams, _ = datahub.get_ams_concat()
+ams, times, dows, stations = datahub.get_ams_concat()
 censors = datahub.get_censors(pcensor)
 
 # Exclude time period
 if exclude != "NONE":
     iok = ams.index != int(exclude)
     ams = ams.loc[iok]
+    dows = dows.loc[iok]
 
 # ----------------------------------------------------------------------
 # @Process
@@ -143,7 +156,8 @@ LOGGER.info(f"nwarm    = {stan_nwarm}", ntab=1, nret=1)
 LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
 LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 
-sv = sample.StanSamplingMultivariate(ams,
+sv = sample.StanSamplingMultivariate(ams, dows,
+                                     copula=copula,
                                      censors=censors,
                                      rho_min=rho_min,
                                      rho_max=1.)
@@ -180,7 +194,7 @@ kw = dict(data=stan_data,
 kw.update(stan_args)
 
 LOGGER.info("Start sampling", nret=1)
-smp = mv_censored_sampling(**kw)
+smp = mv_censored_no_missing_sampling(**kw)
 
 LOGGER.info("Process samples and save to disk", nret=1)
 df = smp.draws_pd()
@@ -192,6 +206,7 @@ for me in report.STAN_DIAGNOSTIC_VARIABLES:
     LOGGER.info(f"Stan diagnostic {me}: {diag[me]}")
 
 diag.update(task.options)
+diag["version"] = version
 diag["stan_nchains"] = stan_nchains
 diag["stan_nwarm"] = stan_nwarm
 
@@ -212,7 +227,9 @@ fdd = fout / f"{basename}_data_TASK{taskid}.json"
 for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:
     stan_data[n] = stan_data[n].tolist()
 with fdd.open("w") as fo:
-    json.dump(stan_data, fo, indent=4)
+    dt = {k: v for k, v in stan_data.items()
+          if not re.search("clusters|partitions", k)}
+    json.dump(dt, fo, indent=4)
 
 fi = fout / f"{basename}_inits_TASK{taskid}.json"
 for key, val in stan_inits.items():

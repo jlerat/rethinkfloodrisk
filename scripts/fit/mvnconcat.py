@@ -31,9 +31,12 @@ np.random.seed(5446)
 # ----------------------------------------------------------------------
 parser = argparse.ArgumentParser(description="Process mvn samples",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--version", help="version",
+                    type=str, required=True)
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=0)
 args = parser.parse_args()
+version = args.version
 taskid = args.taskid
 
 # ----------------------------------------------------------------------
@@ -42,7 +45,7 @@ taskid = args.taskid
 source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 
-fout = froot / "outputs"
+fout = froot / "outputs" / f"copulafit_v{version}"
 
 # ----------------------------------------------------------------------
 # @Logging
