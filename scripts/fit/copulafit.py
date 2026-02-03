@@ -35,7 +35,7 @@ from pyrethink import mv_censored_no_missing_sampling
 parser = argparse.ArgumentParser(description="Fit copula model",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-v", "--version", help="version",
-                    type=str, required=True)
+                    type=int, required=True)
 parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
                     type=int, default=50000)
 parser.add_argument("-d", "--debug", help="Debug mode",
@@ -71,16 +71,16 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
                            stan_nchains=stan_nchains,
                            stan_nsamples=stan_nsamples)
 
-pcensors = [0.1, 0.3, 0.5]
+pcensors = [0., 0.3]
 
-copulas = [0, 1, 4]
+copulas = [0, 1.5, 2, 3, 4]
 
 excludes = ["NONE",
             "2021",
             "2007",
             "2016"]
 
-rho_mins = [-1., 0.]
+rho_mins = [-1.]
 
 has_clusters_all = [False, True]
 
@@ -98,10 +98,11 @@ rho_min = task.rho_min
 copula = task.copula
 has_clusters = task.has_clusters
 
+
 if debug:
     pcensor = 0.3
     exclude = "2007"
-    copula = 1
+    copula = 1.5
     has_clusters = True
 
 # ----------------------------------------------------------------------
@@ -125,6 +126,7 @@ flog.parent.mkdir(exist_ok=True, parents=True)
 
 LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
+LOGGER.info(f"number of tasks: {opm.ntasks}", nret=1)
 LOGGER.context = f"TASK{taskid}"
 LOGGER.log_dict(vars(args), "Command line arguments")
 
@@ -205,10 +207,12 @@ diag = report.process_stan_diagnostic(smp.diagnose())
 for me in report.STAN_DIAGNOSTIC_VARIABLES:
     LOGGER.info(f"Stan diagnostic {me}: {diag[me]}")
 
-diag.update(task.options)
 diag["version"] = version
 diag["stan_nchains"] = stan_nchains
 diag["stan_nwarm"] = stan_nwarm
+diag["taskid"] = taskid
+task_opt = {f"task_{k}": v for k, v in task.to_dict()["options"].items()}
+diag.update(task_opt)
 
 fd = fout / f"{basename}_samples_TASK{taskid}.csv"
 csv.write_csv(df, fd, f"STAN samples for task {taskid}",
@@ -222,6 +226,7 @@ with fd.open("w") as fo:
 stan_data["pcensors"] = pcensors.to_dict()
 stan_data["ams_time"] = ams.index.tolist()
 stan_data["stationids"] = ams.columns.tolist()
+stan_data.update(task_opt)
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
 for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:

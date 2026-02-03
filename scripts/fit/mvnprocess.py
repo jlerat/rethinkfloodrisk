@@ -37,7 +37,7 @@ np.random.seed(5446)
 parser = argparse.ArgumentParser(description="Process mvn samples",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-v", "--version", help="version",
-                    type=str, required=True)
+                    type=int, required=True)
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=-1)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
@@ -73,10 +73,10 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
                            aep_targets=aep_targets)
 
 # Select certain fit tasks
-pcensors = [0.1, 0.3, 0.5]
-rho_mins = [-1, 0]
+pcensors = [0.3]
+rho_mins = [-1]
+copulas = [0, 1.5, 2, 3, 4]
 excludes = ["NONE"]
-copulas = [0, 1, 4]
 has_clusters_all = [True, False]
 
 opm.from_cartesian_product(batch=np.arange(nbatch),
@@ -335,7 +335,8 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                     else:
                         zstd[k] = norm.ppf(cdf)
 
-            lc = math.log10(rv.cdf(-zstd))
+            cdf = rv.cdf(-zstd)
+            lc = math.log10(cdf) if cdf > 0 else np.nan
             res.loc[i, f"{gname}_obs_log10aep_{event}"] = lc
 
 # Save data to disk

@@ -32,7 +32,7 @@ np.random.seed(5446)
 parser = argparse.ArgumentParser(description="Process mvn samples",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-v", "--version", help="version",
-                    type=str, required=True)
+                    type=int, required=True)
 parser.add_argument("-t", "--taskid", help="JobID",
                     type=int, default=0)
 args = parser.parse_args()
