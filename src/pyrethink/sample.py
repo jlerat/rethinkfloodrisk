@@ -1,10 +1,18 @@
+import math
 from itertools import combinations
+
 import numpy as np
+from scipy.stats import norm
+from scipy.stats import invwishart
+from scipy.stats import t as student_t
+from scipy.stats import multivariate_normal as mvn
+from scipy.stats import multivariate_t as mvt
 
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
-STUDENT_DF_MAX = 5.
+STUDENT_DF_MIN = 2.01
+STUDENT_DF_MAX = 1000.
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.
@@ -12,6 +20,47 @@ RHO_MAX_DEFAULT = 1.
 MARGINAL = GEV()
 
 DELTA_DAYS_MAX_DEFAULT = 10
+
+
+def corr_ref(nstations, rho):
+    if rho <= -1 or rho >= 1:
+        errmsg = "Expected rho in ]-1, 1[."
+        raise ValueError(errmsg)
+
+    return (1 - rho) * np.eye(nstations) \
+        + rho * np.ones((nstations, nstations))
+
+
+def cov2corr(cov):
+    invsig = 1. / np.sqrt(np.diag(cov))
+    return np.einsum("ij,i,j->ij", cov, invsig, invsig)
+
+
+def random_corr(nstations, corr0=None, corr1=None):
+    cov = invwishart.rvs(df=nstations+1, scale=np.eye(nstations))
+    corr = cov2corr(cov)
+    if corr0 is None and corr1 is None:
+        return corr
+    else:
+        return corr0 + (corr1 - corr0) * (corr + 1.) / 2
+
+
+def copula_marginal_ppf(copula, u):
+    check_copula(copula)
+    if copula > 0:
+        scale = math.sqrt((copula - 2) / copula)
+        return student_t.ppf(u, scale=scale, df=copula)
+    else:
+        return norm.ppf(u)
+
+
+def copula_marginal_cdf(copula, z):
+    check_copula(copula)
+    if copula > 0:
+        scale = math.sqrt((copula - 2) / copula)
+        return student_t.cdf(z, scale=scale, df=copula)
+    else:
+        return norm.cdf(z)
 
 
 class Partitions():
@@ -91,6 +140,26 @@ class Partitions():
         idx = self.find_subset_index(pair_in_same)
         return self.extract_index(idx)
 
+    def ipart2sets(self, ipart):
+        part = self.subsets[ipart]
+        cnt = self.subsets_counts[ipart]
+        part = part[:cnt]
+        i1, i2 = np.where(part == 1)
+        return i1[np.argsort(i2)]
+
+
+def check_copula(copula):
+    if copula > 0:
+        mini = STUDENT_DF_MIN
+        maxi = STUDENT_DF_MAX
+        if copula < mini or copula > maxi:
+            errmsg = f"Expected copula in [{mini}, {maxi}]."
+            raise ValueError(errmsg)
+
+    elif copula < 0:
+        errmsg = "Expected copula >= 0."
+        raise ValueError(errmsg)
+
 
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year, copula,
@@ -100,10 +169,8 @@ class StanSamplingMultivariate():
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
-        if copula < 0 or copula > STUDENT_DF_MAX:
-            errmsg = f"Expected copula in [0, {STUDENT_DF_MAX}],"\
-                     + f" got {copula}."
-            raise ValueError(errmsg)
+        # Check data
+        check_copula(copula)
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -332,3 +399,188 @@ class StanSamplingMultivariate():
             "rho_max": self.rho_max
         }
         return dd
+
+
+class CopulaSampling():
+    def __init__(self, copula, nstations):
+        check_copula(copula)
+        self._copula = copula
+        self._nstations = nstations
+        self._partitions = Partitions(nstations)
+        self._mean = np.zeros(nstations)
+
+    @property
+    def copula(self):
+        return self._copula
+
+    @property
+    def nstations(self):
+        return self._nstations
+
+    @property
+    def partitions(self):
+        return self._partitions
+
+    @property
+    def corr(self):
+        return self._corr
+
+    @property
+    def corr_rescaled(self):
+        copula = self.copula
+        cov_adjust = (copula - 2) / copula if copula > 0 else 1.
+        return self.corr * cov_adjust
+
+    @corr.setter
+    def corr(self, val):
+        nsta = self.nstations
+        if val.shape != (nsta, nsta):
+            errmsg = f"Expected a square matrix of shape ({nsta},{nsta})."
+            raise ValueError(errmsg)
+
+        try:
+            np.linalg.cholesky(val)
+        except Exception:
+            errmsg = "Expected a semi-definite positive matrix."
+            raise ValueError(errmsg)
+
+        if not np.allclose(np.diag(val), 1):
+            errmsg = "Expected a matrix with ones on the diagonal."
+            raise ValueError(errmsg)
+        self._corr = val
+
+    @property
+    def mean(self):
+        return self._mean
+
+    def conditional_sample(self, ipart, icond, zcond, itarget):
+        """ Sample copula with given zcond """
+
+        # Check inputs
+        nsta = self.nstations
+        allowed = set(range(nsta))
+        scond = set(icond)
+        if scond & allowed != scond:
+            errmsg = f"Expected all elements of icond to be in [0..{nsta}[."
+            raise ValueError(errmsg)
+
+        starget = set(itarget)
+        if starget & allowed != starget:
+            errmsg = f"Expected all elements of itarget to be in [0..{nsta}[."
+            raise ValueError(errmsg)
+
+        if len(icond) > 1:
+            errmsg = "Only one conditional variable allowed."
+            raise ValueError(errmsg)
+
+        if len(scond & starget) > 0:
+            errmsg = "Expected no common elements in icond and itarget."
+            raise ValueError(errmsg)
+
+        if len(icond) != len(zcond):
+            errmsg = "Expected icond and zcond of same length."
+            raise ValueError(errmsg)
+
+        # Get data
+        sets = self.partitions.ipart2sets(ipart)
+        sets_cond = sets[icond]
+        sets_target = sets[itarget]
+
+        copula = self.copula
+        corr_rescaled = self.corr_rescaled
+
+        # Sample targets that are in same set than cond
+        idx_join = sets_cond == sets_target
+        ijoin = itarget[idx_join]
+        z = np.zeros(len(itarget))
+
+        if len(ijoin) > 0:
+            # Conditional covariance matrices
+            S22 = np.ascontiguousarray(corr_rescaled[ijoin][:, ijoin])
+            S21 = np.ascontiguousarray(corr_rescaled[ijoin][:, icond])
+
+            # Full matrices formula:
+            # muc = S21 @ S11i @ zcond
+            # Sc = S22 - S21 @ S11i @ S21.T
+
+            # .. because S11 is a single number:
+            muc = S21 @ zcond
+            Sc = S22 - S21 @ S21.T
+
+            if copula > 0:
+                # See https://en.wikipedia.org/wiki/Multivariate_t-distribution
+                #    #Conditional_Distribution
+                nu = copula
+
+                # Full matrices
+                # p1 = len(zcond)
+                # d1 = zcond.T @ S11i @ zcond
+
+                # .. because S11i and zcond are single numbers
+                # ..
+                p1 = 1
+                d1 = zcond**2
+
+                a = (nu + d1) / (nu + p1)
+                df = nu + p1
+                z[idx_join] = mvt.rvs(loc=muc, shape=a*Sc, df=df)
+
+            else:
+                z[idx_join] = mvn.rvs(mean=muc, cov=Sc)
+
+        # Sample targets that are not in same set than cond
+        idx_sep = sets_cond != sets_target
+        isep = itarget[idx_sep]
+
+        if len(isep) > 0:
+            S22 = np.ascontiguousarray(corr_rescaled[isep][:, isep])
+            mu22 = self.mean[isep]
+            if copula > 0:
+                z[idx_sep] = mvt.rvs(loc=mu22, shape=S22, df=copula)
+            else:
+                z[idx_sep] = mvn.rvs(mean=mu22, cov=S22)
+
+        return z
+
+    def cdf(self, ipart, z):
+        sets = self.partitions.ipart2sets(ipart)
+        copula = self.copula
+        mu = self.mean
+        corr_rescaled = self.corr_rescaled
+
+        value = 1.
+        for iset in np.unique(sets):
+            idx = iset == sets
+            scorr = np.ascontiguousarray(corr_rescaled[idx][:, idx])
+
+            if copula > 0:
+                rv = mvt(loc=mu[idx], shape=scorr, df=copula)
+            else:
+                rv = mvn(mean=mu[idx], cov=scorr)
+
+            value *= rv.cdf(z[idx])
+
+        return value
+
+    def sample(self, ipart, nsamples):
+        sets = self.partitions.ipart2sets(ipart)
+        copula = self.copula
+        mu = self.mean
+        corr_rescaled = self.corr_rescaled
+
+        nsta = self.nstations
+        z = np.empty((nsamples, nsta))
+
+        for iset in np.unique(sets):
+            idx = iset == sets
+            nval = idx.sum()
+            scorr = np.ascontiguousarray(corr_rescaled[idx][:, idx])
+
+            if copula > 0:
+                rv = mvt(loc=mu[idx], shape=scorr, df=copula)
+            else:
+                rv = mvn(mean=mu[idx], cov=scorr)
+
+            z[:, idx] = rv.rvs(size=nsamples).reshape((nsamples, nval))
+
+        return z

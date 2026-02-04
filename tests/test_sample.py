@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import toeplitz
 from scipy.stats import norm
+from scipy.stats import invwishart
 from scipy.stats import ttest_ind, ks_2samp
+from scipy.stats import kstest
 import matplotlib.pyplot as plt
 
 from floodstan import report
@@ -81,6 +83,17 @@ def test_partitions_size(nelems, allclose):
         pair_in_same = parts.pair_in_same_cluster[k]
         subs = parts.find_subset(pair_in_same)
         assert len(subs) == 1
+
+def test_partitions_sets(allclose):
+    nelems = 6
+    parts = sample.Partitions(nelems)
+    for ipart in range(parts.nsubsets):
+        sets = parts.ipart2sets(ipart)
+
+        part = parts.subsets[ipart]
+        part = part[part.sum(axis=1) > 0]
+        expected = [np.where(p == 1)[0][0] for p in part.T]
+        assert allclose(sets, expected)
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
@@ -183,13 +196,150 @@ def test_inits(allclose):
     inits = sv.initial_parameters
 
 
-#@pytest.mark.parametrize("config", ["uncensored", "censored"])
-#@pytest.mark.parametrize("nvars", [3])
-#@pytest.mark.parametrize("copula", [0., 2.])
+@pytest.mark.parametrize("copula", [0., 2.5, 5., 10.])
+def test_copula_marginals(copula, allclose):
+    n = 10000
+    u1 = np.linspace(1./n, 1 - 1./n, n)
+    z1 = sample.copula_marginal_ppf(copula, u1)
 
-@pytest.mark.parametrize("config", ["uncensored"])
+    u2 = sample.copula_marginal_cdf(copula, z1)
+    assert allclose(u1, u2)
+
+    z2 = sample.copula_marginal_ppf(copula, u2)
+    assert allclose(z1, z2)
+
+    n = 1000000
+    u = np.random.uniform(size=n)
+    z = sample.copula_marginal_ppf(copula, u)
+    assert allclose(z.mean(), 0, atol=5e-3)
+    assert allclose(z.std(), 1, atol=5e-2)
+
+
+@pytest.mark.parametrize("repeat", range(10))
+def test_cov2corr(repeat, allclose):
+    nsta = 6
+    cov = invwishart.rvs(df=nsta+1, scale=np.eye(nsta))
+    corr = sample.cov2corr(cov)
+    d = np.diag(1./np.sqrt(np.diag(cov)))
+    assert allclose(corr, d @ cov @ d)
+
+
+@pytest.mark.parametrize("repeat", range(10))
+def test_random_corr(repeat, allclose):
+    nsta = 6
+    z1 = []
+
+    z2 = []
+    rho0, rho1 = 0.2, 0.8
+    c0 = sample.corr_ref(nsta, rho0)
+    c1 = sample.corr_ref(nsta, rho1)
+
+    nrepeat = 100
+    for i in range(nrepeat):
+        idx = np.triu_indices(nsta, 1)
+        x = sample.random_corr(nsta)[idx]
+        z1.append(x)
+
+        x = sample.random_corr(nsta, c0, c1)[idx]
+        z2.append(x)
+
+    z1 = (np.array(z1) + 1) / 2
+    pv1 = np.array([kstest(zi, "uniform").pvalue for zi in z1.T])
+    assert np.percentile(pv1, 10) > 1e-2
+
+    z2 = (np.array(z2) - rho0) / (rho1 - rho0)
+    pv2 = np.array([kstest(zi, "uniform").pvalue for zi in z2.T])
+    assert np.percentile(pv2, 10) > 1e-2
+
+
+@pytest.mark.parametrize("copula", [0., 4.])
+def test_conditional_sample(copula, allclose):
+    nsta = 4
+    ccs = sample.CopulaSampling(copula, nsta)
+
+    rho0, rho1 = 0.8, 0.99
+    c0 = sample.corr_ref(nsta, rho0)
+    c1 = sample.corr_ref(nsta, rho1)
+    ccs.corr = sample.random_corr(nsta, c0, c1)
+
+    icond = np.array([0])
+    itarget = np.array([1, 2])
+    ucond = np.array([0.8])
+    zcond = sample.copula_marginal_ppf(copula, ucond)
+    nrepeat = 1000
+
+    atol_mean = 5./math.sqrt(nrepeat)
+    atol_cov = 10./math.sqrt(nrepeat)
+
+    for ipart in range(ccs.partitions.nsubsets):
+        z = [ccs.conditional_sample(ipart, icond, zcond, itarget)
+             for i in range(nrepeat)]
+        z = np.array(z)
+
+        sets = ccs.partitions.ipart2sets(ipart)
+        sets_cond = sets[icond]
+        sets_target = sets[itarget]
+
+        # If samples are in different sets, the mean should be 0
+        # and covariance should equal to the corresponding elements in corr
+        # (i.e. indepent from zcond)
+        idiff = sets_target != sets_cond
+        if idiff.sum() > 0:
+            zm = z[:, idiff].mean()
+            assert allclose(zm, 0., atol=atol_mean)
+
+            zc = np.cov(z[:, idiff].T)
+            ii = itarget[idiff]
+            expected = ccs.corr[ii][:, ii]
+            assert allclose(zc, expected, atol=atol_cov)
+
+
+@pytest.mark.parametrize("copula", [0., 4.])
+def test_copula_sample(copula, allclose):
+    nsta = 4
+    ccs = sample.CopulaSampling(copula, nsta)
+    rho0, rho1 = 0.5, 0.99
+    c0 = sample.corr_ref(nsta, rho0)
+    c1 = sample.corr_ref(nsta, rho1)
+    ccs.corr = sample.random_corr(nsta, c0, c1)
+    nsamples = 500000
+
+    for ipart in range(ccs.partitions.nsubsets):
+        z = ccs.sample(ipart, nsamples)
+
+        zm = z.mean(axis=0)
+        assert allclose(zm, 0, atol=1e-2)
+        zs = z.std(axis=0)
+        assert allclose(zs, 1, atol=1e-1)
+
+        sets = ccs.partitions.ipart2sets(ipart)
+        for iset in np.unique(sets):
+            idx = iset == sets
+            cov = np.cov(z[:, idx].T)
+            expected = ccs.corr[idx][:, idx]
+            assert allclose(cov, expected, atol=5e-2)
+
+
+@pytest.mark.parametrize("copula", [0., 4.])
+def test_copula_cdf(copula, allclose):
+    nsta = 4
+    ccs = sample.CopulaSampling(copula, nsta)
+    rho0, rho1 = 0.5, 0.99
+    c0 = sample.corr_ref(nsta, rho0)
+    c1 = sample.corr_ref(nsta, rho1)
+    ccs.corr = sample.random_corr(nsta, c0, c1)
+    nsamples = 50000
+
+    for ipart in range(ccs.partitions.nsubsets):
+        z = ccs.sample(ipart, nsamples)
+        p0 = (z<0).all(axis=1).sum() / nsamples
+        c0 = ccs.cdf(ipart, np.zeros(nsta))
+        assert allclose(p0, c0, atol=5e-2)
+
+
+@pytest.mark.parametrize("config", ["censored", "uncensored"])
 @pytest.mark.parametrize("nvars", [3])
-@pytest.mark.parametrize("copula", [0.])
+@pytest.mark.parametrize("copula", [0., 4.])
 def test_sampler(config, nvars, copula, allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
@@ -237,6 +387,13 @@ def test_sampler(config, nvars, copula, allclose):
         mv_censored_no_missing_sampling(**kw)
 
     kw["data"]["Ncens"] -= 1
+
+    # Test copula error : =0 (normal) or >2 (student)
+    kw["data"]["copula"] = 1.9
+    with pytest.raises(RuntimeError):
+        mv_censored_no_missing_sampling(**kw)
+
+    kw["data"]["copula"] = copula
 
     # Run sampler
     smp = mv_censored_no_missing_sampling(**kw)
@@ -426,3 +583,4 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     fp = fimg / fp
 
     fig.savefig(fp)
+

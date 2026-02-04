@@ -10,6 +10,8 @@ import pandas as pd
 from scipy.linalg import toeplitz
 from scipy.stats import norm
 from scipy.stats import t as student_t
+from scipy.stats import multivariate_normal as mvn
+from scipy.stats import multivariate_t as mvt
 from scipy.stats import ttest_ind, ks_2samp
 import matplotlib.pyplot as plt
 
@@ -102,8 +104,8 @@ def test_stan_cor(allclose):
 
 
 def test_stan_copula(allclose):
-    N = 1000
-    P = 20
+    N = 10000
+    P = 5
     stan_data = {
         "N": N,
         "P": P
@@ -116,6 +118,8 @@ def test_stan_copula(allclose):
     # Normal copula
     zn = x.filter(regex="^zn\\[").values
     assert allclose(zn, norm.ppf(p0), atol=1e-5)
+    assert allclose(zn.mean(), 0., atol=5e-3)
+    assert allclose(zn.std(), 1., atol=1e-2)
 
     pn = x.filter(regex="^pn\\[").values
     assert allclose(pn, p0)
@@ -123,28 +127,45 @@ def test_stan_copula(allclose):
     znr = x.filter(regex="^znr\\[").values.reshape((3, N)).T
     assert allclose(znr.mean(axis=0), 0, atol=5e-2)
     assert allclose(znr.std(axis=0), 1, atol=5e-2)
-    cor = np.corrcoef(znr.T)
+    cor = np.cov(znr.T)
     cor0 = 0.1 * np.eye(3) + 0.9 * np.ones((3, 3))
     assert allclose(cor, cor0, atol=3e-2)
+
+    lpdfn = x.filter(regex="^lpdfn\\[").values
+    expected = mvn.logpdf(znr, mean=np.zeros(3), cov=cor0)
+    assert allclose(lpdfn, expected)
 
     # Student copula
     zs = x.filter(regex="^zs\\[").values.reshape((P, N)).T
 
+    df = np.linspace(2.1, 5, P)
+    assert allclose(zs.mean(axis=0)[df > 3], 0., atol=5e-3)
+    assert allclose(zs.std(axis=0)[df > 3], 1., atol=5e-2)
+
     ps = x.filter(regex="^ps\\[").values.reshape((P, N)).T
     assert allclose(ps, p0[:, None])
 
-    zsr = x.filter(regex="^zsr\\[").values.reshape((3, N)).T
-    assert allclose(zsr.mean(axis=0), 0, atol=5e-2)
-    cor = np.corrcoef(zsr.T)
-    assert allclose(cor, cor0, atol=3e-2)
-
     expected = np.zeros((N, P))
-    df = np.linspace(0.5, 5, P)
     for j in range(P):
-        expected[:, j] = student_t.ppf(p0, df[j], loc=0, scale=1)
+        adjust = math.sqrt((df[j] - 2) / df[j])
+        expected[:, j] = student_t.ppf(p0, df[j], loc=0, scale=adjust)
 
     diff = np.arcsinh(zs) - np.arcsinh(expected)
     assert np.abs(diff).max() < 1e-5
+
+    zsr = x.filter(regex="^zsr\\[").values.reshape((3, N)).T
+    assert allclose(zsr.mean(axis=0), 0, atol=5e-2)
+    # We should use np.cov here, not corrcoef...
+    cor = np.corrcoef(zsr.T)
+    assert allclose(cor, cor0, atol=3e-2)
+
+    lpdfs = x.filter(regex="^lpdfs\\[").values
+    dfr = x.filter(regex="dfr")[0]
+    adjust = (dfr - 2) / dfr
+    expected = mvt.logpdf(zsr, df=dfr, loc=np.zeros(3),
+                          shape=adjust * cor0)
+    assert allclose(lpdfs, expected)
+
 
 
 def test_stan_clusters(allclose):

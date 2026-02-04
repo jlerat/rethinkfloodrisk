@@ -39,8 +39,8 @@ data {
 
   // Copula model
   // 0 : Gaussian
-  // >0 : Student-t df=copula
-  real<lower=0, upper=5> copula; 
+  // >2 : Student-t df=copula
+  real copula; 
 
   // Prior parameters
   vector[2] ylocn_prior;
@@ -62,6 +62,14 @@ data {
 }
 
 transformed data {
+  // Check copula
+  real copula_low;
+  if (copula > 0)
+    copula_low = 0;
+  else
+    copula_low = 2.01;
+  real<lower=copula_low, upper=1000> copula_test = copula;
+
   // Check number of data in each category adds up 
   int Ntest = N * P - Nobs - Ncens;
   int<lower=0, upper=0> Ncheck = Ntest; 
