@@ -28,6 +28,7 @@ from hydrodiy.io import csv, iutils, hyruns
 from floodstan.marginals import GEV
 
 from pyrethink import datahub
+from pyrethink.sample import Partitions
 
 np.random.seed(5446)
 
@@ -182,6 +183,9 @@ def get_station_index(sid):
 icond_1 = np.where(stationids == stationid_cond)[0]
 icond_2 = np.where(stationids != stationid_cond)[0]
 
+# Partitions
+parts = Partitions(nvar)
+
 LOGGER.info(f"Load samples TASK {fit_taskid}")
 fs = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
 samples = pd.read_csv(fs, skiprows=15)
@@ -230,7 +234,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
         LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
+    # retrieve correlation matrix
     corr_all = smp.filter(regex="corr_IW").values.reshape((nvar, nvar)).T
+
+    # retrieve partition
+    ipartition = int(smp.filter(regex="ipart").squeeze())
+    cnt = parts.subsets_counts[ipartition]
+    part = parts.subsets[ipartition][:cnt]
 
     # MV dist conditional
     S11 = corr_all[icond_1][:, icond_1]
