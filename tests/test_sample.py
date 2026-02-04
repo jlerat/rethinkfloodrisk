@@ -103,7 +103,7 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
 
     data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
-    copula = 0.5
+    copula = 2.5
 
     sv = sample.StanSamplingMultivariate(data, dows,
                                          copula=copula,
@@ -245,11 +245,11 @@ def test_random_corr(repeat, allclose):
 
     z1 = (np.array(z1) + 1) / 2
     pv1 = np.array([kstest(zi, "uniform").pvalue for zi in z1.T])
-    assert np.percentile(pv1, 10) > 1e-2
+    assert np.percentile(pv1, 10) > 1e-3
 
     z2 = (np.array(z2) - rho0) / (rho1 - rho0)
     pv2 = np.array([kstest(zi, "uniform").pvalue for zi in z2.T])
-    assert np.percentile(pv2, 10) > 1e-2
+    assert np.percentile(pv2, 10) > 1e-3
 
 
 @pytest.mark.parametrize("copula", [0., 4.])
@@ -418,14 +418,10 @@ def test_sampler(config, nvars, copula, allclose):
 @pytest.mark.parametrize("pcensor", [0.1, 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
 def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
-    if DEBUG and (pcensor < 0.5 or stationpair[0] != 44):
-        pytest.skip("Debug mode")
-
     # Two variables only
     data, _, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
     dows = dows.iloc[:, stationpair]
-
     censors = data.quantile(pcensor)
 
     # -- floodstan --

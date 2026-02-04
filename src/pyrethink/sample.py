@@ -12,7 +12,7 @@ from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
 STUDENT_DF_MIN = 2.01
-STUDENT_DF_MAX = 1000.
+STUDENT_DF_MAX = 100.
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.

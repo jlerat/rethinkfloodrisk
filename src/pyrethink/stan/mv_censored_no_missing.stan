@@ -65,10 +65,10 @@ transformed data {
   // Check copula
   real copula_low;
   if (copula > 0)
-    copula_low = 0;
-  else
     copula_low = 2.01;
-  real<lower=copula_low, upper=1000> copula_test = copula;
+  else
+    copula_low = 0;
+  real<lower=copula_low, upper=100> copula_test = copula;
 
   // Check number of data in each category adds up 
   int Ntest = N * P - Nobs - Ncens;

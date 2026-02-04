@@ -15,10 +15,13 @@ tests/*.stat
 *.png
 tests/sampling/*
 src/pyrethink/stan/mv_censored
+src/pyrethink/stan/mv_censored_no_missing
 src/pyrethink/stan/test_cor
 src/pyrethink/stan/test_functions
 src/pyrethink/stan/test_indexing
 src/pyrethink/stan/test_mv
+src/pyrethink/stan/test_clusters
+src/pyrethink/stan/test_copula
 
 scripts/check_stan
 

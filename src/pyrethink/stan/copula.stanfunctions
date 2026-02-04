@@ -159,6 +159,11 @@ real student_t_quantile(real p, real ndf) {
 
 // Generic copula function
 
+
+// This a the multiplicative factor
+// needed to correct the scale of a
+// student random var so that its std
+// is equal to the scale like a normal variable.
 real get_student_std_adjust(real copula){
     if(copula < 2.01)
         return not_a_number();
@@ -201,13 +206,22 @@ real copula_marginal_quantile_log_jac(real z, real copula) {
 real copula_log_pdf(vector z, real copula, matrix corr) {
     int P = size(z);
     row_vector[P] zero_mean = zeros_row_vector(P);
-    real adj;
+    real adj1;
+    real adj2;
 
     if(copula < 1e-10)
         return multi_normal_lpdf(z | zero_mean, corr);
     else {
-        adj = get_student_std_adjust(copula);
-        return multi_student_t_lpdf(adj * z | copula, zero_mean, corr);
+        // This is the inverse of the adjustment factor
+        // to correct for the change in the 
+        // inverse covariance matrix
+        adj1 = 1. / get_student_std_adjust(copula);
+
+        // We also need to take into account a correction
+        // on the determinant of the covariance matrix
+        adj2 = P * log(adj1);
+        
+        return adj2 + multi_student_t_lpdf(adj1 * z | copula, zero_mean, corr);
     }    
 }
 
