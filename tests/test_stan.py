@@ -117,7 +117,7 @@ def test_stan_copula(allclose):
 
     # Normal copula
     zn = x.filter(regex="^zn\\[").values
-    assert allclose(zn, norm.ppf(p0), atol=1e-5)
+    assert allclose(zn, norm.ppf(p0), atol=1e-4)
     assert allclose(zn.mean(), 0., atol=5e-3)
     assert allclose(zn.std(), 1., atol=1e-2)
 

@@ -266,7 +266,7 @@ def test_conditional_sample(copula, allclose):
     itarget = np.array([1, 2])
     ucond = np.array([0.8])
     zcond = sample.copula_marginal_ppf(copula, ucond)
-    nrepeat = 1000
+    nrepeat = 5000
 
     atol_mean = 5./math.sqrt(nrepeat)
     atol_cov = 10./math.sqrt(nrepeat)
