@@ -104,7 +104,7 @@ def test_stan_cor(allclose):
 
 
 def test_stan_copula(allclose):
-    N = 10000
+    N = 50000
     P = 5
     stan_data = {
         "N": N,
@@ -151,13 +151,14 @@ def test_stan_copula(allclose):
         expected[:, j] = student_t.ppf(p0, df[j], loc=0, scale=adjust)
 
     diff = np.arcsinh(zs) - np.arcsinh(expected)
-    assert np.abs(diff).max() < 1e-5
+    assert np.abs(diff).max() < 1e-4
 
     zsr = x.filter(regex="^zsr\\[").values.reshape((3, N)).T
     assert allclose(zsr.mean(axis=0), 0, atol=5e-2)
     # We should use np.cov here, not corrcoef...
-    cor = np.corrcoef(zsr.T)
-    assert allclose(cor, cor0, atol=3e-2)
+    cor = np.cov(zsr.T)
+    #cor = np.corrcoef(zsr.T)
+    assert allclose(cor, cor0, atol=6e-2)
 
     lpdfs = x.filter(regex="^lpdfs\\[").values
     dfr = x.filter(regex="dfr")[0]

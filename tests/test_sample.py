@@ -415,7 +415,7 @@ def test_sampler(config, nvars, copula, allclose):
         fs = fout / "samples.zip"
         df.to_csv(fs, compression=comp)
 
-@pytest.mark.parametrize("pcensor", [0.1, 0.4])
+@pytest.mark.parametrize("pcensor", [0., 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
 def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     # Two variables only
