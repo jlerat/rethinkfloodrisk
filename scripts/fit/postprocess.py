@@ -102,6 +102,7 @@ with fd.open("r") as fo:
     stan_data = json.load(fo)
 
 yobs = np.array(stan_data["y"])
+probs = np.array(stan_data["partitions_probabilities"])
 
 # ----------------------------------------------------------------------
 # @Process
@@ -141,6 +142,7 @@ elif jobid == 1:
         LOGGER.info("Computing posterior predictive checks")
         ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples,
                                                          copula,
+                                                         probs,
                                                          logger=LOGGER)
 
         LOGGER.info("Store posterior predictive checks")
