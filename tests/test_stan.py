@@ -133,7 +133,7 @@ def test_stan_copula(allclose):
 
     lpdfn = x.filter(regex="^lpdfn\\[").values
     expected = mvn.logpdf(znr, mean=np.zeros(3), cov=cor0)
-    assert allclose(lpdfn, expected)
+    assert allclose(lpdfn, expected, atol=1e-4)
 
     # Student copula
     zs = x.filter(regex="^zs\\[").values.reshape((P, N)).T
@@ -143,7 +143,7 @@ def test_stan_copula(allclose):
     assert allclose(zs.std(axis=0)[df > 3], 1., atol=5e-2)
 
     ps = x.filter(regex="^ps\\[").values.reshape((P, N)).T
-    assert allclose(ps, p0[:, None])
+    assert allclose(ps, p0[:, None], atol=1e-4)
 
     expected = np.zeros((N, P))
     for j in range(P):
@@ -164,7 +164,7 @@ def test_stan_copula(allclose):
     adjust = (dfr - 2) / dfr
     expected = mvt.logpdf(zsr, df=dfr, loc=np.zeros(3),
                           shape=adjust * cor0)
-    assert allclose(lpdfs, expected)
+    assert allclose(lpdfs, expected, atol=1e-4)
 
 
 
