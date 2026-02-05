@@ -2,16 +2,12 @@ from itertools import combinations as combs
 import numpy as np
 import pandas as pd
 
-from scipy.stats import norm
-from scipy.stats import t as student_t
-from scipy.stats import multivariate_normal as mvn
-from scipy.stats import multivariate_t as mvt
 from scipy.stats import kendalltau
 
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
-from pyrethink.sample import STUDENT_DF_MAX
+from pyrethink.sample import CopulaSampling
 
 
 def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
@@ -66,37 +62,6 @@ def bivariate_dependence_statistics(data,
     return stats
 
 
-def generate_samples(params, copula, nsamples):
-    if copula > STUDENT_DF_MAX or copula < 0:
-        errmsg = f"Expected copula in [0, {STUDENT_DF_MAX}], got {copula}."
-        raise ValueError(errmsg)
-
-    ylocn = params.filter(regex="ylocn").values
-    ylogscale = params.filter(regex="ylogscale").values
-    yshape1 = params.filter(regex="yshape1").values
-
-    P = len(ylocn)
-    corr = params.filter(regex="corr_IW").values.reshape((P, P)).T
-
-    if copula > 0:
-        z = mvt.rvs(loc=np.zeros(P), shape=corr, df=copula, size=nsamples)
-    else:
-        z = mvn.rvs(mean=np.zeros(P), cov=corr, size=nsamples)
-
-    ge = GEV()
-    y = np.zeros_like(z)
-    for i in range(P):
-        ge.params = [ylocn[i], ylogscale[i], yshape1[i]]
-        if copula > 0:
-            u = student_t.cdf(z[:, i], df=copula)
-        else:
-            u = norm.cdf(z[:, i])
-
-        y[:, i] = ge.ppf(u)
-
-    return y
-
-
 def compute_predictive_checks(metric_obs, metric_sim):
     nparams = len(metric_sim)
     sim_mean = metric_sim.mean()
@@ -122,49 +87,68 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 def posterior_predictive_checks(yobs, params,
                                 copula,
+                                partitions_probabilities,
                                 logger=None,
                                 iterlog=500):
     yobs = np.array(yobs)
+
+    # Dimensions
+    nval, nsta = yobs.shape
     nsamples = len(params)
+
+    # copula sampling tools
+    copsamp = CopulaSampling(copula, nsta)
+    copsamp.partitions.probabilities = partitions_probabilities
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
                              for v in yobs.T]).T
-    nvar = yobs.shape[1]
-    univ_obs.columns = [f"univ[{ivar + 1}]" for ivar in range(nvar)]
+    univ_obs.columns = [f"univ[{ivar + 1}]" for ivar in range(nsta)]
 
     biv_obs = []
-    for i1, i2 in combs(range(nvar), 2):
+    for i1, i2 in combs(range(nsta), 2):
         m = bivariate_dependence_statistics(yobs[:, [i1, i2]])
         m.name = f"bivariate[{i1 + 1},{i2 + 1}]"
         biv_obs.append(m)
 
     biv_obs = pd.DataFrame(biv_obs).T
 
+    # Marginal
+    gev = GEV()
+
     # Loop over params
-    nval = len(yobs)
-    univ_sim = {ivar: [] for ivar in range(nvar)}
-    biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nvar), 2)}
+    univ_sim = {ivar: [] for ivar in range(nsta)}
+    biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nsta), 2)}
 
     for isample, param in params.iterrows():
         if logger is not None and isample % iterlog == 0:
             msg = f"[postpred] processing param {isample + 1:5d} / {nsamples}."
             logger.info(msg)
 
-        ysim = generate_samples(param, copula, nval)
+        # Sample data with same size as obs
+        corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))
+        copsamp.corr = corr
+        usim, iparts = copsamp.sample_u(nval)
+        ysim = np.empty((nval, nsta))
+        for ista in range(nsta):
+            cc = [f"ylocn[{ista + 1}]", f"ylogscale[{ista + 1}]",
+                  f"yshape1[{ista + 1}]"]
+            gev.params = param.loc[cc]
+            ysim[:, ista] = gev.ppf(usim[:, ista])
 
-        for ivar in range(nvar):
+        # Compute
+        for ivar in range(nsta):
             un = univariate_statistics(ysim[:, ivar])
             univ_sim[ivar].append(un)
 
-        for i1, i2 in combs(range(nvar), 2):
+        for i1, i2 in combs(range(nsta), 2):
             bi = bivariate_dependence_statistics(ysim[:, [i1, i2]])
             biv_sim[(i1, i2)].append(bi)
 
     # Compute predictiive checks
     # .. univariate
     pcheck_univ = []
-    for ivar in range(nvar):
+    for ivar in range(nsta):
         # Reformat univ sim stats
         usim = pd.concat(univ_sim[ivar], axis=1).T
         univ_sim[ivar] = usim
@@ -181,7 +165,7 @@ def posterior_predictive_checks(yobs, params,
 
     # .. bivariate
     pcheck_biv = []
-    for i1, i2 in combs(range(nvar), 2):
+    for i1, i2 in combs(range(nsta), 2):
         # Reformat biv sim stats
         bsim = pd.concat(biv_sim[(i1, i2)], axis=1).T
         biv_sim[(i1, i2)] = bsim

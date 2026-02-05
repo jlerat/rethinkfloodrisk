@@ -70,25 +70,72 @@ class Partitions():
             raise ValueError(errmsg)
 
         # Initialise
-        self.nelements = nelements
-        self.data = list(range(nelements))
-        self.subsets = []
-        self.pair_in_same_cluster = []
-        self.subsets_counts = []
-        self.nsubsets = 0
+        self._nelements = nelements
+        self._data = list(range(nelements))
+        self._subsets = []
+        self._pair_in_same_cluster = []
+        self._subsets_counts = []
+        self._nsubsets = 0
+
+        self._probabilities = None
 
         # Populate
         self.add_subsets(0, [])
 
         # Convert to arrays
-        self.subsets = np.array(self.subsets)
-        self.subsets_counts = np.array(self.subsets_counts)
-        self.pair_in_same_cluster = np.array(self.pair_in_same_cluster)
+        self._subsets = np.array(self.subsets)
+        self._subsets_counts = np.array(self.subsets_counts)
+        self._pair_in_same_cluster = np.array(self.pair_in_same_cluster)
+
+    @property
+    def nelements(self):
+        return self._nelements
+
+    @property
+    def data(self):
+        return self._data
+
+    @property
+    def subsets(self):
+        return self._subsets
+
+    @property
+    def subsets_counts(self):
+        return self._subsets_counts
+
+    @property
+    def pair_in_same_cluster(self):
+        return self._pair_in_same_cluster
+
+    @property
+    def nsubsets(self):
+        return len(self._subsets)
 
     @property
     def npairs(self):
         nel = self.nelements
         return nel * (nel - 1) // 2
+
+    @property
+    def probabilities(self):
+        probs = self._probabilities
+        if probs is None:
+            errmsg = "No probabilities set."
+            raise ValueError(errmsg)
+        return probs
+
+    @probabilities.setter
+    def probabilities(self, values):
+        if len(values) != self.nsubsets:
+            errmsg = f"Expected {self.nsubsets} elements in"\
+                     + " probabilities, got {len(values)}."
+            raise ValueError(errmsg)
+
+        if np.any(~np.isfinite(values)):
+            errmsg = "All probabilities should be finite."
+            raise ValueError(errmsg)
+
+        self._probabilities = values / np.sum(values)
 
     def add_subsets(self, index, ans):
         data = self.data
@@ -109,7 +156,6 @@ class Partitions():
             self.pair_in_same_cluster.append(insame)
             self.subsets.append(combs)
             self.subsets_counts.append(len(ans))
-            self.nsubsets += 1
 
             return
 
@@ -146,6 +192,12 @@ class Partitions():
         part = part[:cnt]
         i1, i2 = np.where(part == 1)
         return i1[np.argsort(i2)]
+
+    def sample(self, nsamples):
+        probs = self.probabilities
+        k = np.arange(self.nsubsets)
+        return np.random.choice(k, p=probs,
+                                size=nsamples)
 
 
 def check_copula(copula):
@@ -303,9 +355,7 @@ class StanSamplingMultivariate():
         # Initialise
         N, P = self.data.shape
         parts = Partitions(P)
-        self.partition_object = parts
-        self.partitions = parts.subsets
-        self.partitions_counts = parts.subsets_counts
+        self.partitions = parts
 
         # Get pairs from observed data
         pair_in_same_data = self.pair_in_same_cluster
@@ -329,8 +379,7 @@ class StanSamplingMultivariate():
             # maximum posterior of categorical prob
             probs[i] = (alpha + nmatch - 1)
 
-        probs = probs / probs.sum()
-        self.partitions_probabilities = probs
+        self.partitions.probabilities = probs
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -379,11 +428,9 @@ class StanSamplingMultivariate():
             "idx_miss": self.idx_miss,
             "clusters": self.clusters.astype(int),
             "clusters_counts": self.clusters_counts.astype(int),
-            "Q": self.partitions.shape[0],
-            "partitions": self.partitions.astype(int),
-            "partitions_counts": self.partitions_counts.astype(int),
+            "Q": self.partitions.nsubsets,
             "partitions_probabilities":
-                self.partitions_probabilities,
+                self.partitions.probabilities,
             "copula": float(self.copula),
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
@@ -425,12 +472,6 @@ class CopulaSampling():
     def corr(self):
         return self._corr
 
-    @property
-    def corr_rescaled(self):
-        copula = self.copula
-        cov_adjust = (copula - 2) / copula if copula > 0 else 1.
-        return self.corr * cov_adjust
-
     @corr.setter
     def corr(self, val):
         nsta = self.nstations
@@ -450,10 +491,16 @@ class CopulaSampling():
         self._corr = val
 
     @property
+    def corr_rescaled(self):
+        copula = self.copula
+        cov_adjust = (copula - 2) / copula if copula > 0 else 1.
+        return self.corr * cov_adjust
+
+    @property
     def mean(self):
         return self._mean
 
-    def conditional_sample(self, ipart, icond, zcond, itarget):
+    def conditional_sample_given_ipart(self, ipart, icond, zcond, itarget):
         """ Sample copula with given zcond """
 
         # Check inputs
@@ -542,7 +589,7 @@ class CopulaSampling():
 
         return z
 
-    def cdf(self, ipart, z):
+    def cdf_given_ipart(self, ipart, z):
         sets = self.partitions.ipart2sets(ipart)
         copula = self.copula
         mu = self.mean
@@ -562,7 +609,7 @@ class CopulaSampling():
 
         return value
 
-    def sample(self, ipart, nsamples):
+    def sample_z_given_ipart(self, ipart, nsamples):
         sets = self.partitions.ipart2sets(ipart)
         copula = self.copula
         mu = self.mean
@@ -584,3 +631,25 @@ class CopulaSampling():
             z[:, idx] = rv.rvs(size=nsamples).reshape((nsamples, nval))
 
         return z
+
+    def sample_z(self, nsamples):
+        nsta = self.nstations
+        z = np.empty((nsamples, nsta))
+        iparts = self.partitions.sample(nsamples)
+
+        for ipart in np.unique(iparts):
+            idx = ipart == iparts
+            z[idx, :] = self.sample_z_given_ipart(ipart, idx.sum())
+
+        return z, iparts
+
+    def sample_u(self, nsamples):
+        z, iparts = self.sample_z(nsamples)
+        copula = self.copula
+        if copula > 0:
+            adj = math.sqrt(self.corr_rescaled[0, 0])
+            u = student_t.cdf(z, df=copula, loc=0, scale=adj)
+        else:
+            u = norm.cdf(z)
+
+        return u, iparts

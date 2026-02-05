@@ -31,12 +31,6 @@ data {
   array[N, P, P] int<lower=0, upper=1> clusters;
   array[N] int<lower=0, upper=P> clusters_counts;
 
-  // Partition data
-  int Q; // total number of partitions
-  array[Q, P, P] int<lower=0, upper=1> partitions;
-  array[Q] int<lower=0, upper=P> partitions_counts;
-  vector<lower=0, upper=1>[Q] partitions_probabilities;
-
   // Copula model
   // 0 : Gaussian
   // >2 : Student-t df=copula
@@ -84,10 +78,6 @@ transformed data {
   // Process observed cluster data
   array[N, P, P + 1] int clusters_indexes = 
     cluster_data_processing(clusters, clusters_counts);
-
-  // Process partition data
-  array[Q, P, P + 1] int partitions_indexes =
-    cluster_data_processing(partitions, partitions_counts);
 }
 
 parameters {
@@ -191,38 +181,3 @@ model {
 
   }
 }
-
-generated quantities {
-    // Sample partition
-    int ipart = categorical_rng(partitions_probabilities); 
-
-    // Loop through subsets in the selected partition
-    vector[P] zrnd, yrnd;
-
-    real tau;
-    real alpha;
-    real kappa;
-    real u;
-    int nsta;
-
-    for(isub in 1:partitions_counts[ipart]) {
-        // Number of stations in the particular subset
-        nsta = partitions_indexes[ipart, isub, 1];
-
-        // Index of stations in the particular subset
-        array[nsta] int idxg = partitions_indexes[ipart, isub, 2:nsta + 1];
-
-        // Sample from copula
-        zrnd[idxg] = copula_rng(copula, corr_IW[idxg, idxg]);
-
-        // Compute GEV quantile from copula marginal cdf
-        for(ivar in idxg) {
-            tau = ylocn[ivar];
-            alpha = yscale[ivar];
-            kappa = yshape1[ivar];
-            u = copula_marginal_prob(zrnd[ivar], copula);
-            yrnd[ivar] = gev_quantile(u, tau, alpha, kappa);
-        }
-    }    
-}
-

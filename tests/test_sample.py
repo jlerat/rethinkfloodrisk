@@ -95,6 +95,16 @@ def test_partitions_sets(allclose):
         expected = [np.where(p == 1)[0][0] for p in part.T]
         assert allclose(sets, expected)
 
+@pytest.mark.parametrize("nelems", [2, 3, 4, 5])
+def test_partitions_sample(nelems, allclose):
+    parts = sample.Partitions(nelems)
+    ns = parts.nsubsets
+    parts.probabilities = np.random.uniform(0, 1, ns)
+
+    iparts = parts.sample(1000000)
+    pp = pd.Series(iparts).value_counts().sort_index() / len(iparts)
+    assert allclose(pp, parts.probabilities, atol=1e-3)
+
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("no_missing", [False, True])
@@ -127,7 +137,7 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
             assert same == expected
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 28
+    assert len(stan_data) == 26
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -142,27 +152,12 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
     assert miss.min() == 0
     assert miss.max() == 0 if no_missing else P - 1
 
-    clp = stan_data["partitions"]
-    clpp = stan_data["partitions_probabilities"]
-    clpc = stan_data["partitions_counts"]
-
     parts = sample.Partitions(P)
     n = parts.nsubsets
-    assert len(clp) == n
-    assert clpp.shape == (n,)
-    assert clpc.shape == (n,)
-
-    if dalpha < 1:
-        # Only one cluster remains probable
-        iprob = np.where(clpp > 0)[0]
-        assert len(iprob) == 1
-
-        # The most probable cluster contains all stations
-        iprob = iprob[0]
-        cl = clp[iprob]
-        expected = np.zeros((P, P))
-        expected[0] = 1.
-        assert allclose(cl, expected)
+    assert stan_data["Q"] == n
+    pp = stan_data["partitions_probabilities"]
+    assert len(pp) == n
+    assert allclose(pp.sum(), 1.)
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
@@ -272,7 +267,7 @@ def test_conditional_sample(copula, allclose):
     atol_cov = 10./math.sqrt(nrepeat)
 
     for ipart in range(ccs.partitions.nsubsets):
-        z = [ccs.conditional_sample(ipart, icond, zcond, itarget)
+        z = [ccs.conditional_sample_given_ipart(ipart, icond, zcond, itarget)
              for i in range(nrepeat)]
         z = np.array(z)
 
@@ -298,14 +293,12 @@ def test_conditional_sample(copula, allclose):
 def test_copula_sample(copula, allclose):
     nsta = 4
     ccs = sample.CopulaSampling(copula, nsta)
-    rho0, rho1 = 0.5, 0.99
-    c0 = sample.corr_ref(nsta, rho0)
-    c1 = sample.corr_ref(nsta, rho1)
-    ccs.corr = sample.random_corr(nsta, c0, c1)
+    ccs.corr = sample.random_corr(nsta)
     nsamples = 500000
 
+    # Sample given ipart
     for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample(ipart, nsamples)
+        z = ccs.sample_z_given_ipart(ipart, nsamples)
 
         zm = z.mean(axis=0)
         assert allclose(zm, 0, atol=1e-2)
@@ -319,6 +312,20 @@ def test_copula_sample(copula, allclose):
             expected = ccs.corr[idx][:, idx]
             assert allclose(cov, expected, atol=5e-2)
 
+    # Sample integrating ipart out
+    with pytest.raises(ValueError, match="No probabilities set"):
+        z, iparts = ccs.sample_u(nsamples)
+
+    ns = ccs.partitions.nsubsets
+    ccs.partitions.probabilities = np.random.uniform(0, 1, ns)
+    u, iparts = ccs.sample_u(nsamples)
+
+    pv = np.array([kstest(ui, "uniform").pvalue for ui in u.T])
+    assert np.median(pv) > 1e-2
+
+    pp = pd.Series(iparts).value_counts().sort_index() / nsamples
+    assert allclose(pp, ccs.partitions.probabilities, atol=1e-3)
+
 
 @pytest.mark.parametrize("copula", [0., 4.])
 def test_copula_cdf(copula, allclose):
@@ -331,9 +338,9 @@ def test_copula_cdf(copula, allclose):
     nsamples = 50000
 
     for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample(ipart, nsamples)
+        z = ccs.sample_z_given_ipart(ipart, nsamples)
         p0 = (z<0).all(axis=1).sum() / nsamples
-        c0 = ccs.cdf(ipart, np.zeros(nsta))
+        c0 = ccs.cdf_given_ipart(ipart, np.zeros(nsta))
         assert allclose(p0, c0, atol=5e-2)
 
 
