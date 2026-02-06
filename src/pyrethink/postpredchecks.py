@@ -87,7 +87,8 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 def posterior_predictive_checks(yobs, params,
                                 copula,
-                                partitions_probabilities,
+                                partitions_id,
+                                dirichlet_alpha,
                                 logger=None,
                                 iterlog=500):
     yobs = np.array(yobs)
@@ -98,8 +99,8 @@ def posterior_predictive_checks(yobs, params,
 
     # copula sampling tools
     copsamp = CopulaSampling(copula, nsta)
-    copsamp.partitions.probabilities = partitions_probabilities
-
+    probs = copsamp.partitions.compute_probabilities(partitions_id,
+                                                     dirichlet_alpha)
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
                              for v in yobs.T]).T
@@ -128,7 +129,7 @@ def posterior_predictive_checks(yobs, params,
         # Sample data with same size as obs
         corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))
         copsamp.corr = corr
-        usim, iparts = copsamp.sample_u(nval)
+        usim, iparts = copsamp.sample_u(probs, nval)
         ysim = np.empty((nval, nsta))
         for ista in range(nsta):
             cc = [f"ylocn[{ista + 1}]", f"ylogscale[{ista + 1}]",

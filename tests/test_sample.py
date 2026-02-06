@@ -505,7 +505,6 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     sv = sample.StanSamplingMultivariate(data,
                                          dows,
                                          copula=0.,
-                                         dirichlet_alpha=0.,
                                          censors=censors,
                                          rho_min=rho_min,
                                          rho_max=rho_max)

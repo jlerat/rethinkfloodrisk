@@ -48,14 +48,16 @@ def test_bivariate_statistics(station):
 @pytest.mark.parametrize("copula", [0, 2.5, 5])
 def test_posterior_predictive_checks(copula):
     parts = Partitions(DATA.shape[1])
-    probs = np.random.uniform(0, 1, parts.nsubsets)
+    parts_id = np.random.randint(0, parts.nsubsets,
+                                 len(DATA))
+    dalpha = 1.
 
     with pytest.raises(ValueError, match="Expected copula in"):
         ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                        1.5, probs)
+                                        1.5, parts_id, dalpha)
 
     ppu, ppb, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                                     copula, probs)
+                                                     copula, parts_id, dalpha)
 
     assert ppu.shape == (7, 21)
     assert ppb.shape == (6, 21)
