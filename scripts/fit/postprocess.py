@@ -63,13 +63,23 @@ fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskids = np.arange(opm_fit.ntasks)
 
+dirichlet_alphas = [1., 1.5]
 
 opm = hyruns.OptionManager()
 opm.from_cartesian_product(fit_taskid=fit_taskids,
+                           dirichlet_alpha=dirichlet_alphas,
                            jobid=[0, 1])
+tasks = []
+for task in opm.tasks:
+    if task["jobid"] == 0 and task["dirichlet_alpha"] > 1:
+        continue
+    tasks.append(task)
+opm.tasks = tasks
+
 task = opm.get_task(taskid)
 fit_taskid = task.fit_taskid
 jobid = task.jobid
+dirichlet_alpha = task.dirichlet_alpha
 
 copula = opm_fit.get_task(fit_taskid).copula
 
@@ -104,6 +114,7 @@ with fd.open("r") as fo:
     stan_data = json.load(fo)
 
 yobs = np.array(stan_data["y"])
+partitions_id = np.array(stan_data["partitions_id"])
 
 # ----------------------------------------------------------------------
 # @Process
@@ -143,7 +154,8 @@ elif jobid == 1:
         LOGGER.info("Computing posterior predictive checks")
         ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples,
                                                          copula,
-                                                         probs,
+                                                         partitions_id,
+                                                         dirichlet_alpha,
                                                          logger=LOGGER)
 
         LOGGER.info("Store posterior predictive checks")

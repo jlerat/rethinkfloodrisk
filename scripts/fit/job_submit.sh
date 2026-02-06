@@ -22,7 +22,7 @@ fi
 # Configure array numbers
 NTASKS=80
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
-ARRAYS_PROC="0-$((2*$NTASKS - 1))"
+ARRAYS_PROC="0-$((3*$NTASKS - 1))"
 ARRAYS_MVN="0-399"
 
 # Job config
