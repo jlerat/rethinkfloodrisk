@@ -84,6 +84,7 @@ def test_partitions_size(nelems, allclose):
         subs = parts.find_subset(pair_in_same)
         assert len(subs) == 1
 
+
 def test_partitions_sets(allclose):
     nelems = 6
     parts = sample.Partitions(nelems)
@@ -95,21 +96,48 @@ def test_partitions_sets(allclose):
         expected = [np.where(p == 1)[0][0] for p in part.T]
         assert allclose(sets, expected)
 
-@pytest.mark.parametrize("nelems", [2, 3, 4, 5])
+
+@pytest.mark.parametrize("nelems", [4, 5])
+def test_partitions_probabilities(nelems, allclose):
+    parts = sample.Partitions(nelems)
+    ns = parts.nsubsets
+
+    # Sample random partition ids
+    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.8, 0)
+    pp /= pp.sum()
+    pids = np.random.choice(np.arange(ns), p=pp, size=50)
+
+    dalpha = 2.
+    probs = parts.compute_probabilities(pids, dalpha)
+    assert len(probs) == ns
+
+    cnt = pd.Series(pids).value_counts()
+    total = (cnt + dalpha - 1).sum()
+    for ipart in np.unique(pids):
+        n = (pids == ipart).sum()
+        assert probs[ipart] == (n + dalpha - 1) / total
+
+
+@pytest.mark.parametrize("nelems", [3, 4, 5])
 def test_partitions_sample(nelems, allclose):
     parts = sample.Partitions(nelems)
     ns = parts.nsubsets
-    parts.probabilities = np.random.uniform(0, 1, ns)
 
-    iparts = parts.sample(1000000)
+    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.2, 0)
+    pp /= pp.sum()
+    pids = np.random.choice(np.arange(ns), p=pp, size=50)
+    dalpha = 2.
+    probs = parts.compute_probabilities(pids, dalpha)
+
+    iparts = parts.sample(probs, 1000000)
     pp = pd.Series(iparts).value_counts().sort_index() / len(iparts)
-    assert allclose(pp, parts.probabilities, atol=1e-3)
+    expected = [probs[i] for i in pp.index]
+    assert allclose(pp, expected, atol=1e-2)
 
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("no_missing", [False, True])
-@pytest.mark.parametrize("dalpha", [0., 2.])
-def test_sample_data(pcensor, no_missing, dalpha, allclose):
+def test_sample_data(pcensor, no_missing, allclose):
 
     data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
@@ -117,7 +145,6 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
 
     sv = sample.StanSamplingMultivariate(data, dows,
                                          copula=copula,
-                                         dirichlet_alpha=dalpha,
                                          censors=censors)
 
     pisc = sv.pair_in_same_cluster
@@ -137,7 +164,7 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
             assert same == expected
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 26
+    assert len(stan_data) == 25
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -149,15 +176,8 @@ def test_sample_data(pcensor, no_missing, dalpha, allclose):
     clust = stan_data["clusters"]
     assert clust.shape == (N, P, P)
 
-    assert miss.min() == 0
-    assert miss.max() == 0 if no_missing else P - 1
-
-    parts = sample.Partitions(P)
-    n = parts.nsubsets
-    assert stan_data["Q"] == n
-    pp = stan_data["partitions_probabilities"]
-    assert len(pp) == n
-    assert allclose(pp.sum(), 1.)
+    pid = stan_data["partitions_id"]
+    assert pid.shape == (N, )
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
@@ -312,19 +332,24 @@ def test_copula_sample(copula, allclose):
             expected = ccs.corr[idx][:, idx]
             assert allclose(cov, expected, atol=5e-2)
 
-    # Sample integrating ipart out
-    with pytest.raises(ValueError, match="No probabilities set"):
-        z, iparts = ccs.sample_u(nsamples)
+    # Random probs
+    ns = ccs.partitions.nsubsets
+    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.2, 0)
+    pp /= pp.sum()
+    pids = np.random.choice(np.arange(ns), p=pp, size=50)
+    probs = ccs.partitions.compute_probabilities(pids, 1)
 
+    # Sample integrating ipart out
     ns = ccs.partitions.nsubsets
     ccs.partitions.probabilities = np.random.uniform(0, 1, ns)
-    u, iparts = ccs.sample_u(nsamples)
+    u, iparts = ccs.sample_u(probs, nsamples)
 
     pv = np.array([kstest(ui, "uniform").pvalue for ui in u.T])
     assert np.median(pv) > 1e-2
 
-    pp = pd.Series(iparts).value_counts().sort_index() / nsamples
-    assert allclose(pp, ccs.partitions.probabilities, atol=1e-3)
+    pp = pd.Series(iparts).value_counts() / nsamples
+    expected = pd.Series(probs)[pp.index]
+    assert allclose(pp, expected, atol=1e-3)
 
 
 @pytest.mark.parametrize("copula", [0., 4.])

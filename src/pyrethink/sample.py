@@ -2,6 +2,7 @@ import math
 from itertools import combinations
 
 import numpy as np
+
 from scipy.stats import norm
 from scipy.stats import invwishart
 from scipy.stats import t as student_t
@@ -116,27 +117,6 @@ class Partitions():
         nel = self.nelements
         return nel * (nel - 1) // 2
 
-    @property
-    def probabilities(self):
-        probs = self._probabilities
-        if probs is None:
-            errmsg = "No probabilities set."
-            raise ValueError(errmsg)
-        return probs
-
-    @probabilities.setter
-    def probabilities(self, values):
-        if len(values) != self.nsubsets:
-            errmsg = f"Expected {self.nsubsets} elements in"\
-                     + " probabilities, got {len(values)}."
-            raise ValueError(errmsg)
-
-        if np.any(~np.isfinite(values)):
-            errmsg = "All probabilities should be finite."
-            raise ValueError(errmsg)
-
-        self._probabilities = values / np.sum(values)
-
     def add_subsets(self, index, ans):
         data = self.data
         nel = self.nelements
@@ -193,8 +173,27 @@ class Partitions():
         i1, i2 = np.where(part == 1)
         return i1[np.argsort(i2)]
 
-    def sample(self, nsamples):
-        probs = self.probabilities
+    def compute_probabilities(self, partitions_id, dirichlet_alpha):
+        if dirichlet_alpha < 1:
+            errmsg = "Expected dirichlet_alpha >= 1."
+            raise ValueError(errmsg)
+
+        ns = self.nsubsets
+        probs = np.zeros(ns)
+        for pid in np.unique(partitions_id):
+            if pid >= ns:
+                errmsg = f"Expected partition IDs in [0, {ns}[."
+                raise ValueError(errmsg)
+            elif pid == -1:
+                # Missing data
+                continue
+
+            n = (pid == partitions_id).sum()
+            probs[pid] = float(n) + dirichlet_alpha - 1.
+
+        return probs / probs.sum()
+
+    def sample(self, probs, nsamples):
         k = np.arange(self.nsubsets)
         return np.random.choice(k, p=probs,
                                 size=nsamples)
@@ -216,7 +215,7 @@ def check_copula(copula):
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year, copula,
                  censors=None,
-                 dirichlet_alpha=2,
+                 skip_clusters=False,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
@@ -236,18 +235,10 @@ class StanSamplingMultivariate():
         self.rho_min = rho_min
         self.rho_max = rho_max
 
-        # No clustering accounted if dirichlet prior < 1
-        # (i.e. no prior)
-        skip_clusters = dirichlet_alpha < 1
-        self.dirichlet_alpha = max(1, dirichlet_alpha)
-
         self.set_data(data, day_of_year, censors)
 
         self.delta_days_max = delta_days_max
         self.set_clusters(skip_clusters)
-
-        self.set_partitions()
-
         self.set_initial_parameters()
 
     @property
@@ -307,8 +298,12 @@ class StanSamplingMultivariate():
         clusters = np.zeros((N, P, P), dtype=int)
         miss = np.zeros(N, dtype=int)
         counts = np.zeros(N, dtype=int)
+        partitions_id = np.zeros(N, dtype=int)
         insame = np.zeros((N, P * (P - 1) // 2), dtype=int)
         day_of_year = self.day_of_year
+
+        parts = Partitions(P)
+        parts_psc = parts.pair_in_same_cluster
 
         for i in range(N):
             doy = day_of_year[i]
@@ -343,43 +338,18 @@ class StanSamplingMultivariate():
                    for comb in cl]
             insame[i] = (np.sum(ins, axis=0) > 0).astype(int)
 
+            if miss[i] == 0:
+                delta = parts_psc - insame[[i]]
+                pid = np.where(np.abs(delta).sum(axis=1) == 0)[0][0]
+            else:
+                pid = -1
+            partitions_id[i] = pid
+
         self.clusters = clusters
         self.clusters_counts = counts
         self.clusters_missing = miss
         self.pair_in_same_cluster = insame
-
-    def set_partitions(self):
-        # Dirichlet prior parameter
-        alpha = self.dirichlet_alpha
-
-        # Initialise
-        N, P = self.data.shape
-        parts = Partitions(P)
-        self.partitions = parts
-
-        # Get pairs from observed data
-        pair_in_same_data = self.pair_in_same_cluster
-
-        # Exclude missing data
-        miss = self.clusters_missing
-        pair_in_same_data = pair_in_same_data[miss == 0]
-
-        # Compute probabilities from max posterior of
-        # categorical dist with Dirichlet prior
-        # see https://en.wikipedia.org/wiki/Categorical_distribution
-        Q = parts.nsubsets
-        probs = np.zeros(Q)
-
-        for i in range(Q):
-            # Find all observed clusters matching the given partition
-            pair_in_same = parts.pair_in_same_cluster[i]
-            diff = np.abs(pair_in_same_data - pair_in_same[None, :])
-            nmatch = (diff.sum(axis=1) == 0).sum()
-
-            # maximum posterior of categorical prob
-            probs[i] = (alpha + nmatch - 1)
-
-        self.partitions.probabilities = probs
+        self.partitions_id = partitions_id
 
     def set_initial_parameters(self):
         # GEV parameters and priors
@@ -428,9 +398,7 @@ class StanSamplingMultivariate():
             "idx_miss": self.idx_miss,
             "clusters": self.clusters.astype(int),
             "clusters_counts": self.clusters_counts.astype(int),
-            "Q": self.partitions.nsubsets,
-            "partitions_probabilities":
-                self.partitions.probabilities,
+            "partitions_id": self.partitions_id,
             "copula": float(self.copula),
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
@@ -589,11 +557,20 @@ class CopulaSampling():
 
         return z
 
-    def cdf_given_ipart(self, ipart, z):
-        sets = self.partitions.ipart2sets(ipart)
+    def cdf_given_ipart(self, ipart, z, iselect=None):
+        nsta = self.nstations
+        if len(z) != nsta:
+            errmsg = f"Expected z of length {nsta}."
+            raise ValueError(errmsg)
+
+        iselect = np.arange(nsta) if iselect is None \
+            else iselect
+
+        sets = self.partitions.ipart2sets(ipart)[iselect]
+
         copula = self.copula
-        mu = self.mean
-        corr_rescaled = self.corr_rescaled
+        mu = self.mean[iselect]
+        corr_rescaled = self.corr_rescaled[iselect][:, iselect]
 
         value = 1.
         for iset in np.unique(sets):
@@ -632,10 +609,21 @@ class CopulaSampling():
 
         return z
 
-    def sample_z(self, nsamples):
+    def sample_u_given_ipart(self, ipart, nsamples):
+        z = self.sample_z_given_ipart(ipart, nsamples)
+        copula = self.copula
+        if copula > 0:
+            adj = math.sqrt(self.corr_rescaled[0, 0])
+            u = student_t.cdf(z, df=copula, loc=0, scale=adj)
+        else:
+            u = norm.cdf(z)
+
+        return u
+
+    def sample_z(self, probabilities, nsamples):
         nsta = self.nstations
         z = np.empty((nsamples, nsta))
-        iparts = self.partitions.sample(nsamples)
+        iparts = self.partitions.sample(probabilities, nsamples)
 
         for ipart in np.unique(iparts):
             idx = ipart == iparts
@@ -643,8 +631,8 @@ class CopulaSampling():
 
         return z, iparts
 
-    def sample_u(self, nsamples):
-        z, iparts = self.sample_z(nsamples)
+    def sample_u(self, probabilities, nsamples):
+        z, iparts = self.sample_z(probabilities, nsamples)
         copula = self.copula
         if copula > 0:
             adj = math.sqrt(self.corr_rescaled[0, 0])
