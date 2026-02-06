@@ -28,7 +28,10 @@ from hydrodiy.io import csv, iutils, hyruns
 from floodstan.marginals import GEV
 
 from pyrethink import datahub
-from pyrethink.sample import Partitions
+from pyrethink import sample
+
+import importlib
+importlib.reload(sample)
 
 np.random.seed(5446)
 
@@ -40,15 +43,16 @@ parser = argparse.ArgumentParser(description="Process mvn samples",
 parser.add_argument("-v", "--version", help="version",
                     type=int, required=True)
 parser.add_argument("-t", "--taskid", help="JobID",
-                    type=int, default=-1)
+                    type=int, default=0)
+parser.add_argument("-d", "--debug", help="Debug mode",
+                    action="store_true", default=False)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
                     type=int, default=20)
 args = parser.parse_args()
 version = args.version
 taskid = args.taskid
 nbatch = args.nbatch
-
-debug = taskid < 0
+debug = args.debug
 
 # Configure mvn conditional
 stationid_cond = "203002"
@@ -76,15 +80,17 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 # Select certain fit tasks
 pcensors = [0.3]
 rho_mins = [-1]
-copulas = [0, 1.5, 2, 3, 4]
+copulas = [0, 2.5, 3., 3.5, 4.]
 excludes = ["NONE"]
 has_clusters_all = [True, False]
+dirichlet_alphas = [1., 1.5]
 
 opm.from_cartesian_product(batch=np.arange(nbatch),
                            pcensor=pcensors,
                            rho_min=rho_mins,
                            copula=copulas,
                            has_clusters=has_clusters_all,
+                           dirichlet_alpha=dirichlet_alphas,
                            exclude=excludes)
 
 # Load task
@@ -95,6 +101,7 @@ exclude = task.exclude
 rho_min = task.rho_min
 copula = task.copula
 has_clusters = task.has_clusters
+dirichlet_alpha = task.dirichlet_alpha
 
 # Frequency of log report
 iterlog = 5
@@ -102,10 +109,10 @@ iterlog = 5
 if debug:
     batch = 0
     pcensor = 0.3
-    exclude = "2007"
-    copula = 1
+    exclude = "NONE"
+    copula = 3.
     has_clusters = True
-    rho_min = 0
+    rho_min = -1
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -159,7 +166,6 @@ LOGGER.info("Load data")
 ams, _, _, stations = datahub.get_ams_concat()
 potpeaks, _, _ = datahub.get_potpeaks()
 
-
 rk = potpeaks.rank(ascending=False)
 obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
 
@@ -180,11 +186,14 @@ stationids = np.array(data["stationids"])
 def get_station_index(sid):
     return np.where(sid == stationids)[0][0]
 
-icond_1 = np.where(stationids == stationid_cond)[0]
-icond_2 = np.where(stationids != stationid_cond)[0]
+icond = np.where(stationids == stationid_cond)[0]
+itarget = np.where(stationids != stationid_cond)[0]
 
-# Partitions
-parts = Partitions(nvar)
+# Sampler
+ccs = sample.CopulaSampling(copula, nvar)
+pids = np.array(data["partitions_id"])
+probs = ccs.partitions.compute_probabilities(pids,
+                                             dirichlet_alpha)
 
 LOGGER.info(f"Load samples TASK {fit_taskid}")
 fs = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
@@ -205,14 +214,13 @@ if debug:
 gev = GEV()
 
 nsamples = len(samples)
-sidc = stationid_cond
-stationids_conditional = stationids[icond_2]
 
 cols_cond = {}
 cols_cond_all = []
-for st, p in prod(["mu", "sig", "smp_cdf"], aep_targets):
+sidc = stationid_cond
+for st, p in prod(["smp_cdf"], aep_targets):
     cc = [f"mv_cond{sidc}_p{p:0.02f}_{sid}_{st}"
-          for sid in stationids_conditional]
+          for sid in stationids if sid != sidc]
     cols_cond[(st, p)] = cc
     cols_cond_all.extend(cc)
 
@@ -230,89 +238,44 @@ cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
 res = pd.DataFrame(np.nan, index=samples.index,
                    columns=cols)
 
+iparts = ccs.partitions.sample(probs, len(samples))
+
 for ismp, (i, smp) in enumerate(samples.iterrows()):
     if i % iterlog == 0:
         LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
 
     # retrieve correlation matrix
-    corr_all = smp.filter(regex="corr_IW").values.reshape((nvar, nvar)).T
+    corr = smp.filter(regex="corr_IW").values.reshape((nvar, nvar)).T
+    ccs.corr = corr
 
-    # retrieve partition
-    ipartition = int(smp.filter(regex="ipart").squeeze())
-    cnt = parts.subsets_counts[ipartition]
-    part = parts.subsets[ipartition][:cnt]
+    # Get random partition
+    ipartition = iparts[ismp]
 
-    # MV dist conditional
-    S11 = corr_all[icond_1][:, icond_1]
-    S11i = np.linalg.inv(S11)
-    S22 = corr_all[icond_2][:, icond_2]
-    S21 = corr_all[icond_2][:, icond_1]
-
+    # Sample conditional
     for aep_target in aep_targets:
-        if copula > 0:
-            zcond = student_t.ppf([aep_target], df=copula)
-        else:
-            zcond = norm.ppf([aep_target])
+        zcond = sample.copula_marginal_ppf(copula, [aep_target])
+        u = ccs.conditional_sample_given_ipart(ipartition, icond, zcond,
+                                               itarget)
 
-        muc = S21 @ S11i @ zcond
-        Sc = S22 - S21 @ S11i @ S21.T
-
-        if copula > 0:
-            # See https://en.wikipedia.org/wiki/Multivariate_t-distribution#Conditional_Distribution
-            nu = copula
-            p1 = len(zcond)
-            d1 = zcond.T @ S11i @ zcond
-            a = (nu + d1) / (nu + p1)
-            df = nu + p1
-            z = mvt.rvs(loc=muc, shape=a * Sc, df=df)
-        else:
-            z = mvn.rvs(mean=muc, cov=Sc)
-
-        for st in ["mu", "sig", "smp_cdf"]:
-            cc = [f"mvn_cond{stationid_cond}_p{aep_target:0.02f}_{sid}_{st}"
-                  for sid in stationids_conditional]
-            if st == "mu":
-                values = muc
-            elif st == "sig":
-                values = np.sqrt(np.diag(Sc))
-            else:
-                if copula > 0:
-                    values = student_t.cdf(z, df=copula)
-                else:
-                    values = norm.cdf(z)
-
-            res.loc[i, cc] = values
+        sid = stationid_cond
+        cc = [f"mv_cond{sidc}_p{aep_target:0.02f}_{sid}_smp_cdf"
+              for sid in stationids if sid != sidc]
+        res.loc[i, cc] = u
 
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
-        idx = [get_station_index(sid) for sid in grp_stationids]
-        ngstations = len(grp_stationids)
-        mean = np.zeros(ngstations)
-
-        # MV CDF
-        corr = np.ascontiguousarray(corr_all[idx][:, idx])
-
-        #LOGGER.info("Computing probs", ntab=1)
-        if copula > 0:
-            rv = mvt(loc=mean, shape=corr, df=copula)
-        else:
-            rv = mvn(mean=mean, cov=corr)
+        grp_idx = [get_station_index(sid) for sid in grp_stationids]
 
         for aep_target in aep_targets:
-            if copula > 0:
-                zcdf = student_t.ppf(aep_target, df=copula)
-            else:
-                zcdf = norm.ppf(aep_target)
-
-            # All above threshold
-            x = -zcdf * np.ones(ngstations)
-            pall = rv.cdf(x)
+            zcdf = sample.copula_marginal_cdf(copula, aep_target)
+            z = -zcdf * np.ones(ccs.nstations)
+            pall = ccs.cdf_given_ipart(ipartition, z, grp_idx)
             lpall = math.log10(pall) if pall > 0 else np.nan
             res.loc[i, f"{gname}_log10pall_aeptarget_p{aep_target:0.02f}"] = lpall
 
             # Any above threshold
-            x = zcdf * np.ones(ngstations)
-            pany = 1 - rv.cdf(x)
+            z = zcdf * np.ones(ccs.nstations)
+            pany = 1 - ccs.cdf_given_ipart(ipartition, z, grp_idx)
             lpany = math.log10(pany) if pany > 0 else np.nan
             res.loc[i, f"{gname}_log10pany_aeptarget_p{aep_target:0.02f}"] = lpany
 
@@ -320,7 +283,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         for event in obs:
             # Get peak flow data
             pp = potpeaks.loc[event].squeeze()
-            zstd = np.nan * np.zeros(ngstations)
+            zev = np.nan * np.zeros(ccs.nstations)
 
             # Compute cdf for each station
             # Careful here, don't mix up the station
@@ -340,14 +303,11 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                         lc = math.log10(1 - cdf)
                         res.loc[i, f"G{sid}_obs_log10aep_{event}"] = lc
 
-                    if copula > 0:
-                        zstd[k] = student_t.ppf(cdf, df=copula)
-                    else:
-                        zstd[k] = norm.ppf(cdf)
+                    zev[isid - 1] = sample.copula_marginal_ppf(copula, cdf)
 
-            cdf = rv.cdf(-zstd)
-            lc = math.log10(cdf) if cdf > 0 else np.nan
-            res.loc[i, f"{gname}_obs_log10aep_{event}"] = lc
+            pevent = ccs.cdf_given_ipart(ipartition, zev, grp_idx)
+            lpev = math.log10(pevent) if pevent > 0 else np.nan
+            res.loc[i, f"{gname}_obs_log10aep_{event}"] = lpev
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

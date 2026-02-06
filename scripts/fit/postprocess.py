@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from hydrodiy.io import csv, iutils, hyruns
+from pyrethink.sample import Partitions
 from pyrethink import report
 from pyrethink import postpredchecks as ppc
 
@@ -32,13 +33,15 @@ importlib.reload(ppc)
 parser = argparse.ArgumentParser(description="copula model result post-processing",
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-t", "--taskid", help="JobID",
-                    type=int, default=-1)
+                    type=int, default=0)
+parser.add_argument("-d", "--debug", help="Debug mode",
+                    action="store_true", default=False)
 parser.add_argument("-v", "--version", help="version",
                     type=str, required=True)
 args = parser.parse_args()
 version = args.version
 taskid = args.taskid
-debug = taskid < 0
+debug = args.debug
 taskid = max(0, taskid)
 
 design_eris = [1.1, 1.2, 1.4, 1.6, 1.8,
@@ -74,7 +77,6 @@ fout = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid
 
 if debug:
     fit_taskid = -1
-    jobid = 0
     fout = froot / "logs" / "copulafit" / f"copulafit_v{version}"
 
 # ----------------------------------------------------------------------
@@ -102,7 +104,6 @@ with fd.open("r") as fo:
     stan_data = json.load(fo)
 
 yobs = np.array(stan_data["y"])
-probs = np.array(stan_data["partitions_probabilities"])
 
 # ----------------------------------------------------------------------
 # @Process

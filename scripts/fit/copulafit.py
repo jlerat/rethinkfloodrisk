@@ -73,7 +73,7 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
 
 pcensors = [0., 0.3]
 
-copulas = [0, 1.5, 2, 3, 4]
+copulas = [0, 2.5, 3., 3.5, 4.]
 
 excludes = ["NONE",
             "2021",
@@ -102,7 +102,7 @@ has_clusters = task.has_clusters
 if debug:
     pcensor = 0.3
     exclude = "2007"
-    copula = 1.5
+    copula = 2.5
     has_clusters = True
 
 # ----------------------------------------------------------------------
@@ -229,12 +229,13 @@ stan_data["stationids"] = ams.columns.tolist()
 stan_data.update(task_opt)
 
 fdd = fout / f"{basename}_data_TASK{taskid}.json"
-for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:
+for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors",
+          "clusters", "clusters_counts",
+          "partitions_id"]:
     stan_data[n] = stan_data[n].tolist()
+
 with fdd.open("w") as fo:
-    dt = {k: v for k, v in stan_data.items()
-          if not re.search("clusters|partitions", k)}
-    json.dump(dt, fo, indent=4)
+    json.dump(stan_data, fo, indent=4)
 
 fi = fout / f"{basename}_inits_TASK{taskid}.json"
 for key, val in stan_inits.items():
