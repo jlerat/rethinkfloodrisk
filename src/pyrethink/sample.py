@@ -573,7 +573,7 @@ class CopulaSampling():
 
         copula = self.copula
         mu = self.mean
-        morr_rescaled = self.corr_rescaled
+        corr_rescaled = self.corr_rescaled
 
         value = 1.
         for iset in np.unique(sets_selected):
