@@ -127,11 +127,8 @@ fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
                             copula=copula,
                             has_clusters=has_clusters,
                             exclude=exclude)
-if len(fit_taskid) != 1:
-    errmsg = "opm_fit does not return one task"
-    raise ValueError(errmsg)
-
-fit_taskid = fit_taskid[0]
+fit_taskid = next(tid for tid in fit_taskid
+                  if opm_fit.get_task(tid)["copula"] == copula)
 
 ftask = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
 
@@ -148,6 +145,9 @@ LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
                            contextual=True)
 LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
+
+LOGGER.info("Fit task:")
+opm_fit.get_task(fit_taskid).log(LOGGER)
 
 if debug:
     fit_taskid = -1
