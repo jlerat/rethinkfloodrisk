@@ -27,5 +27,9 @@ stan_test_clusters = load_stan_model("stan_test_clusters",
 
 # Stan sampler
 name = "mv_censored_no_missing_sampling"
-mv_censored_no_missing_sampling = load_stan_model(name,
-                                                  sf_folder=STAN_FILES_FOLDER)
+FO = STAN_FILES_FOLDER
+mv_censored_no_missing_sampling = load_stan_model(name, sf_folder=FO)
+
+name = "mv_censored_no_missing_no_clusters_sampling"
+mv_censored_no_missing_no_clusters_sampling = load_stan_model(name,
+                                                              sf_folder=FO)
