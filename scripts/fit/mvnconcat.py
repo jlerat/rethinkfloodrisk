@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -69,7 +70,22 @@ for ftask in fout.glob("*TASK*"):
 
     concat = []
     for f in lf:
-        df, comments = csv.read_csv(f)
+        try:
+            df, comments = csv.read_csv(f)
+        except Exception as err:
+            LOGGER.warning("Issue with zipfile opening. Switching to os.")
+            ftmp = f.parent / "tmp"
+            ftmp.mkdir(exist_ok=True)
+            fcsv = ftmp / f"{f.stem}.csv"
+            if fcsv.exists():
+                fcsv.unlink()
+            cmd = f"unzip {f} -d {ftmp}"
+
+            subprocess.run(cmd, shell=True, check=True)
+            df, comments = csv.read_csv(fcsv)
+            fcsv.unlink()
+            ftmp.rmdir()
+
         concat.append(df)
 
     cc = ["comment", "period", "pcensor", "fit_taskid",
