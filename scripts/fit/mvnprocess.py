@@ -80,7 +80,7 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 # Select certain fit tasks
 pcensors = [0.3]
 rho_mins = [-1]
-copulas = [0, 2.5, 3., 3.5, 4.]
+copulas = [0, 2.01, 2.1, 3., 4.]
 excludes = ["NONE"]
 has_clusters_all = [True, False]
 dirichlet_alphas = [1., 1.5]

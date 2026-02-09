@@ -28,6 +28,7 @@ from floodstan.sample import get_logger
 from pyrethink import datahub
 from pyrethink import sample
 from pyrethink import mv_censored_no_missing_sampling
+from pyrethink import mv_censored_no_missing_no_clusters_sampling
 
 # ----------------------------------------------------------------------
 # @Config
@@ -73,7 +74,7 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
 
 pcensors = [0., 0.3]
 
-copulas = [0, 2.5, 3., 3.5, 4.]
+copulas = [0, 2.01, 2.1, 3., 4.]
 
 excludes = ["NONE",
             "2021",
@@ -96,14 +97,18 @@ pcensor = task.pcensor
 exclude = task.exclude
 rho_min = task.rho_min
 copula = task.copula
-has_clusters = task.has_clusters
 
+has_clusters = task.has_clusters
+if has_clusters:
+    stan_sampler = mv_censored_no_missing_sampling
+else:
+    stan_sampler = mv_censored_no_missing_no_clusters_sampling
 
 if debug:
     pcensor = 0.3
     exclude = "2007"
     copula = 2.5
-    has_clusters = True
+    has_clusters = False
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -161,9 +166,11 @@ LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 sv = sample.StanSamplingMultivariate(ams, dows,
                                      copula=copula,
                                      censors=censors,
+                                     skip_clusters=not has_clusters,
                                      rho_min=rho_min,
                                      rho_max=1.)
 stan_data = sv.to_dict()
+
 LOGGER.info(f"nobs    = {stan_data['Nobs']}", ntab=1, nret=1)
 LOGGER.info(f"ncens   = {stan_data['Ncens']}", ntab=1)
 LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
@@ -196,7 +203,7 @@ kw = dict(data=stan_data,
 kw.update(stan_args)
 
 LOGGER.info("Start sampling", nret=1)
-smp = mv_censored_no_missing_sampling(**kw)
+smp = stan_sampler(**kw)
 
 LOGGER.info("Process samples and save to disk", nret=1)
 df = smp.draws_pd()
