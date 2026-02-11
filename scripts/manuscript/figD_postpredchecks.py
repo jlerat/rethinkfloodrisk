@@ -25,7 +25,7 @@ from scipy.stats import norm
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 
-from hydrodiy.io import csv, iutils
+from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
 
 from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
@@ -37,14 +37,23 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot posterior predictive checks",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-c", "--clear", help="Clear figures",
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
                     action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
+parser.add_argument("-cp", "--copula", help="Copula parameter",
+                    type=float, default=2.01)
 args = parser.parse_args()
 
-clear = args.clear
+version = args.version
+pcensor = args.pcensor
 rho_min = args.rho_min
+copula = args.copula
+has_clusters = not args.no_clusters
 
 awidth = 6
 aheight = 5
@@ -53,9 +62,10 @@ fdpi = 300
 # Define list of postpred checks to plot
 variables = {
     "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
-    "biv": ["kendalltau", "kendalltauhigh"]
+    "biv": ["kendalltau", "kendalltauhigh", "taildep_q75"]
     }
 
+exclude = "NONE"
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -64,11 +74,12 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 fdata = froot / "data"
 
-fout = froot / "outputs"
+fout = froot / "outputs" / f"copulafit_v{version}"
 
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
+clear = True
 if clear:
     for f in fimg.glob("*.png"):
         f.unlink()
@@ -83,35 +94,34 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-stations = datahub.get_stations()
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskids = opm.search(pcensor=f"{pcensor:0.1f}",
+                     rho_min=f"{rho_min:0.1f}",
+                     copula=copula,
+                     has_clusters=has_clusters,
+                     exclude=exclude)
+
+_, _, _, stations = datahub.get_ams_concat()
 
 # Select fit task with
 postpred = {}
-for fold in fout.glob("copulafit_TASK*"):
-    taskid = int(re.sub(".*TASK", "", fold.stem))
-
-    fd = fold / f"copulafit_diagnostic_TASK{taskid}.json"
+for taskid in taskids:
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
     with fd.open("r") as fo:
         diag = json.load(fo)
-
-    exclude = diag["exclude"]
-    if exclude != "NONE":
-        continue
-
-    pcensor = diag["pcensor"]
-    rm = diag["rho_min"]
-    if rm != rho_min:
-        continue
 
     LOGGER.info(f"Load data from TASK {taskid}", nret=1)
     LOGGER.info(f"pcensor = {pcensor}", ntab=1)
     LOGGER.info(f"exclude = {exclude}", ntab=1)
     LOGGER.info(f"rho_min = {rho_min}", ntab=1)
+    LOGGER.info(f"copula  = {copula}", ntab=1)
+    LOGGER.info(f"has_clusters = {has_clusters}", ntab=1)
 
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:20]}", ntab=1)
 
-    fd = fold / f"copulafit_data_TASK{taskid}.json"
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
     with fd.open("r") as fo:
         data = json.load(fo)
 
@@ -120,7 +130,7 @@ for fold in fout.glob("copulafit_TASK*"):
     pp = {}
     for ppt in ["univ", "biv"]:
         fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
-        fp = fold / fp
+        fp = fout / f"copulafit_TASK{taskid}" / fp
         if not fp.exists():
             continue
         df = pd.read_csv(fp, skiprows=15)
@@ -128,7 +138,8 @@ for fold in fout.glob("copulafit_TASK*"):
         pp[ppt] = df
 
     if len(pp) == 2:
-        postpred[(exclude, pcensor, rho_min)] = pp
+        config = (pcensor, exclude, rho_min, copula, has_clusters)
+        postpred[config] = pp
 
 # ----------------------------------------------------------------------
 # @Process
@@ -143,9 +154,10 @@ mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
 arrowprops = dict(arrowstyle="wedge", facecolor="0.6", edgecolor="none")
 paeff = pe.withStroke(linewidth=4, foreground="w")
 
-for (exclude, pcensor, rho_min), pp in postpred.items():
-    mess = f"Plot ppchecks pcensor={pcensor} exclude={exclude} rho_min={rho_min}"
-    LOGGER.info(mess, nret=1)
+for config, pp in postpred.items():
+    pcensor, exclude, rho_min, copula, has_clusters = config
+    otxt = f"PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}"
+    LOGGER.info(f"Plotting {otxt}", nret=1)
 
     plt.close("all")
     fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),

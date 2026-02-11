@@ -36,17 +36,23 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot FFA curves",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-c", "--clear", help="Debug mode",
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
                     action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                     type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
+parser.add_argument("-cp", "--copula", help="Copula parameter",
+                    type=float, default=2.01)
 args = parser.parse_args()
 
-clear = args.clear
+version = args.version
 pcensor = args.pcensor
 rho_min = args.rho_min
+copula = args.copula
+has_clusters = not args.no_clusters
 
 awidth = 6
 aheight = 5
@@ -64,11 +70,12 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 fdata = froot / "data"
 
-fout = froot / "outputs"
+fout = froot / "outputs" / f"copulafit_v{version}"
 
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
+clear = True
 if clear:
     for f in fimg.glob("*.png"):
         f.unlink()
@@ -83,13 +90,16 @@ LOGGER = iutils.get_logger(basename)
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-stations = datahub.get_stations()
+_, _, _, stations = datahub.get_ams_concat()
 
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 taskids = opm.find(pcensor=f"{pcensor:0.1f}",
                    exclude="|".join(excludes),
+                   copula=copula,
+                   has_clusters=has_clusters,
                    rho_min=f"{rho_min:0.1f}")
+
 assert len(taskids) == len(excludes)
 
 ffa = {}
@@ -100,13 +110,16 @@ for taskid in taskids:
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    ex = diag["exclude"]
-    pc = diag["pcensor"]
-    rm = diag["rho_min"]
-    mess = f"Load report TASK {taskid} exclude={ex} pcensor={pc} rho_min={rm}"
+    ex = diag["task_exclude"]
+    pc = diag["task_pcensor"]
+    rm = diag["task_rho_min"]
+    cop = diag["task_copula"]
+    hc = diag["task_has_clusters"]
+    otxt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}"
+    mess = f"Load report TASK {taskid} {otxt}"
     LOGGER.info(mess)
-    if rm != rho_min or pc != pcensor:
-        errmsg = "Expected pcensor={pcensor} rho_min={rho_min}"
+    if rm != rho_min or pc != pcensor or cop != copula or hc != has_clusters:
+        errmsg = "Pb with options"
         raise ValueError(errmsg)
 
     for vn in SDV:
@@ -234,7 +247,7 @@ for stationid, sinfo in stations.iterrows():
     fig.suptitle(ftitle, fontweight="bold")
 
     fp = f"{basename}_{stationid}"\
-         + f"_pcensor{pcensor}_rhomin{rho_min}.png"
+         + f"_PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}_v{version}.png"
     fp = fimg / fp
     fig.savefig(fp, dpi=fdpi)
 

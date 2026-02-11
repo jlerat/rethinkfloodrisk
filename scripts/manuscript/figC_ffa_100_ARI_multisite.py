@@ -47,17 +47,23 @@ from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 parser = argparse.ArgumentParser(description="Plot FFA 100 ARI",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-c", "--clear", help="Debug mode",
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
                     action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                     type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
+parser.add_argument("-cp", "--copula", help="Copula parameter",
+                    type=float, default=2.01)
 args = parser.parse_args()
 
-clear = args.clear
+version = args.version
 pcensor = args.pcensor
 rho_min = args.rho_min
+copula = args.copula
+has_clusters = not args.no_clusters
 
 awidth = 6
 aheight = 5
@@ -83,11 +89,12 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 fdata = froot / "data"
 
-fout = froot / "outputs"
+fout = froot / "outputs" / f"copulafit_v{version}"
 
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
+clear = True
 if clear:
     for f in fimg.glob("*.png"):
         f.unlink()
@@ -123,12 +130,12 @@ def annotate3D(ax, s, *args, **kwargs):
 # ----------------------------------------------------------------------
 # @Get data
 # ----------------------------------------------------------------------
-stations = datahub.get_stations()
-
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 taskids = opm.search(pcensor=f"{pcensor:0.1f}",
                      rho_min=f"{rho_min:0.1f}",
+                     copula=copula,
+                     has_clusters=has_clusters,
                      exclude=exclude)
 
 data = {}
@@ -137,11 +144,14 @@ for taskid in taskids:
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    pc = diag["pcensor"]
-    ex = diag["exclude"]
-    rm = diag["rho_min"]
-    rho_min = rm
-    mess = f"Load data TASK {taskid} exclude={ex} pcensor={pc} rho_min={rm}"
+    pc = diag["task_pcensor"]
+    ex = diag["task_exclude"]
+    rm = diag["task_rho_min"]
+    cop = diag["task_copula"]
+    hc = diag["task_has_clusters"]
+    config = (pc, ex, rm, cop, hc)
+    otxt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}"
+    mess = f"Load report TASK {taskid} {otxt}"
     LOGGER.info(mess, nret=1)
 
     for vn in SDV:
@@ -164,7 +174,7 @@ for taskid in taskids:
         ylocs = samples.filter(regex="ylocn", axis=1).mean()
         ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
         yshape1 = samples.filter(regex="yshape1", axis=1).mean()
-        cor = samples.filter(regex="cor_IW", axis=1).mean()
+        cor = samples.filter(regex="corr_IW", axis=1).mean()
         expected = {
             "ylocs": ylocs.to_dict(),
             "ylogscales": ylogscales.to_dict(),
@@ -181,7 +191,7 @@ for taskid in taskids:
         ylocs = pd.Series(expected["ylocs"])
         ylogscales = pd.Series(expected["ylogscales"])
         yshape1 = pd.Series(expected["yshape1"])
-        cor = pd.Series(expected["cor_IW"])
+        cor = pd.Series(expected["corr_IW"])
 
     cor = cor.values.reshape((nstations, nstations)).T
 
@@ -194,7 +204,7 @@ for taskid in taskids:
     groups = [g for g in groups if re.search(f"G(ALL|{pat})$", g)]
     LOGGER.info(f"Groups = {groups}", ntab=1)
 
-    data[rho_min] = {
+    data[config] = {
         "ylocs": ylocs,
         "ylogscales": ylogscales,
         "yshape1": yshape1,
@@ -208,8 +218,10 @@ for taskid in taskids:
 # ----------------------------------------------------------------------
 gev = marginals.GEV()
 
-for rho_min, dd in data.items():
-    LOGGER.info(f"Plotting rho_min = {rho_min}", nret=1)
+for config, dd in data.items():
+    pcensor, exclude, rho_min, copula, has_clusters = config
+    otxt = f"PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}"
+    LOGGER.info(f"Plotting {otxt}", nret=1)
 
     # Get data
     ylocs = dd["ylocs"]
@@ -385,7 +397,9 @@ for rho_min, dd in data.items():
                      path_effects=[paef])
 
     LOGGER.info("Saving to disk")
-    fp = fimg / f"{basename}_pcensor{pcensor}_rhomin{rho_min:0.02f}.png"
+    fp = f"{basename}_PC{pcensor}_RM{rho_min}_C{copula}"\
+         + f"_HC{has_clusters}_v{version}.png"
+    fp = fimg / fp
     fig.savefig(fp)
 
 LOGGER.completed()

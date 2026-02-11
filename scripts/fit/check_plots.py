@@ -13,6 +13,7 @@ import os
 import re
 import json
 import math
+import argparse
 from itertools import combinations as combs
 
 import warnings
@@ -34,6 +35,13 @@ from pyrethink import datahub
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Fit copula model",
+                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+
+args = parser.parse_args()
+version = args.version
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -42,8 +50,9 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 fdata = froot / "data"
 
-fout = froot / "outputs"
-fimg = froot / "images" / "copulafit"
+fout = froot / "outputs" / f"copulafit_v{version}"
+
+fimg = froot / "images" / "check_plots" / f"copulafit_v{version}"
 fimg.mkdir(exist_ok=True, parents=True)
 
 # ----------------------------------------------------------------------
@@ -63,23 +72,30 @@ LOGGER = iutils.get_logger(basename, contextual=True)
 for ftask in fout.glob("*TASK*"):
     # Setup folders
     taskid = int(re.sub("^.*TASK", "", ftask.stem))
-    fimg_task = fimg / f"copulafit_TASK{taskid}"
-    fimg_task.mkdir(exist_ok=True)
-    for f in fimg.glob("*.png"):
-        f.unlink()
-
     LOGGER.context = f"TASK{taskid}"
 
     # Get data
-    LOGGER.info("Load diagnostic")
     fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
     with fd.open("r") as fo:
         diag = json.load(fo)
 
-    mess = f"pcens={diag['pcensor']}"\
-           + f" - period={diag['exclude']}"\
-           + f" - rho_min={diag['rho_min']}"
+    mess = f"pcens={diag['task_pcensor']}"\
+           + f" - period={diag['task_exclude']}"\
+           + f" - rho_min={diag['task_rho_min']}"\
+           + f" - copula={diag['task_copula']}"
     LOGGER.info(mess, nret=1)
+
+    skip = diag["task_copula"] != 2.01 \
+        or diag["task_exclude"] != "NONE"\
+        or diag["task_pcensor"] != 0.3
+    if skip:
+        LOGGER.info("Skip this one.")
+        continue
+
+    fimg_task = fimg / f"copulafit_TASK{taskid}"
+    fimg_task.mkdir(exist_ok=True)
+    for f in fimg.glob("*.png"):
+        f.unlink()
 
     for imet, me in enumerate(report.STAN_DIAGNOSTIC_VARIABLES):
         txt = diag[me][:100]
@@ -122,11 +138,11 @@ for ftask in fout.glob("*TASK*"):
     fig.savefig(fp)
 
     LOGGER.info("MCMC param distribution", ntab=1)
-    pini = df.columns.to_series().filter(regex="^y(locn|shape|logsc)|cor_IW").values
+    pini = df.columns.to_series().filter(regex="^y(locn|shape|logsc)|corr_IW").values
     def select_parameters(pini):
         pnames = []
         for pn in pini:
-            if re.search("cor_IW", pn):
+            if re.search("corr_IW", pn):
                 i1, i2 = [int(i) for i in re.sub(".*\\[|\\]", "", pn).split(",")]
                 if i2 < i1:
                     pnames.append(pn)

@@ -37,17 +37,23 @@ from pyrethink import datahub
 parser = argparse.ArgumentParser(description="Plot FFA spatial variability",
                                  formatter_class=
                                  argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-c", "--clear", help="Debug mode",
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
                     action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                     type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
+parser.add_argument("-cp", "--copula", help="Copula parameter",
+                    type=float, default=2.01)
 args = parser.parse_args()
 
-clear = args.clear
+version = args.version
 pcensor = args.pcensor
 rho_min = args.rho_min
+copula = args.copula
+has_clusters = not args.no_clusters
 
 awidth = 7
 aheight = 5
@@ -64,11 +70,12 @@ source_file = Path(__file__).resolve()
 froot = source_file.parent.parent.parent
 fdata = froot / "data"
 
-fout = froot / "outputs"
+fout = froot / "outputs" / f"copulafit_v{version}"
 
 basename = source_file.stem
 fimg = froot / "images" / "manuscript" / basename
 fimg.mkdir(exist_ok=True, parents=True)
+clear = True
 if clear:
     for f in fimg.glob("*.png"):
         f.unlink()
@@ -90,6 +97,8 @@ opm = hyruns.OptionManager.from_file(fopm)
 
 taskid = opm.search(pcensor=f"{pcensor:0.1f}",
                     exclude=exclude,
+                    copula=copula,
+                    has_clusters=has_clusters,
                     rho_min=f"{rho_min:0.1f}")[0]
 mess = f"Load report TASK {taskid} exclude={exclude}"\
        + f" pcensor={pcensor} rho_min={rho_min}"
@@ -131,7 +140,9 @@ for aep_target in aep_targets:
 
     ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
 
-    fp = fimg / f"{basename}_pcensor{pcensor}_rhomin{rho_min}_p{aep_target:0.02f}.png"
+    fn = f"{basename}_PC{pcensor}_RM{rho_min}_HC{has_clusters}"\
+         + f"_AEP{aep_target}_v{version}.png"
+    fp = fimg / fn
     fig.savefig(fp)
 
 LOGGER.completed()
