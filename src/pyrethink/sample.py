@@ -565,16 +565,19 @@ class CopulaSampling():
 
         iselect = np.arange(nsta) if iselect is None \
             else iselect
+        isin = np.zeros(nsta).astype(bool)
+        isin[iselect] = True
 
-        sets = self.partitions.ipart2sets(ipart)[iselect]
+        sets = self.partitions.ipart2sets(ipart)
+        sets_selected = sets[iselect]
 
         copula = self.copula
-        mu = self.mean[iselect]
-        corr_rescaled = self.corr_rescaled[iselect][:, iselect]
+        mu = self.mean
+        corr_rescaled = self.corr_rescaled
 
         value = 1.
-        for iset in np.unique(sets):
-            idx = iset == sets
+        for iset in np.unique(sets_selected):
+            idx = (iset == sets) & isin
             scorr = np.ascontiguousarray(corr_rescaled[idx][:, idx])
 
             if copula > 0:

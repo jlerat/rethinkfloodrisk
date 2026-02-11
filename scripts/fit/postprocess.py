@@ -71,9 +71,11 @@ opm.from_cartesian_product(fit_taskid=fit_taskids,
                            jobid=[0, 1])
 tasks = []
 for task in opm.tasks:
-    if task["jobid"] == 0 and task["dirichlet_alpha"] > 1:
+    skip = task["jobid"] == 0
+    if task["dirichlet_alpha"] > 1 and skip:
         continue
     tasks.append(task)
+
 opm.tasks = tasks
 
 task = opm.get_task(taskid)

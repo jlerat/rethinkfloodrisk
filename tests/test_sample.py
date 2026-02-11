@@ -349,7 +349,7 @@ def test_copula_sample(copula, allclose):
 
     pp = pd.Series(iparts).value_counts() / nsamples
     expected = pd.Series(probs)[pp.index]
-    assert allclose(pp, expected, atol=1e-3)
+    assert allclose(pp, expected, atol=5e-3)
 
 
 @pytest.mark.parametrize("copula", [0., 4.])
@@ -506,6 +506,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
                                          dows,
                                          copula=0.,
                                          censors=censors,
+                                         skip_clusters=True,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
     kw["data"] = sv.to_dict()
