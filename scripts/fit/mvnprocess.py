@@ -150,12 +150,11 @@ LOGGER.info("Fit task:")
 opm_fit.get_task(fit_taskid).log(LOGGER)
 
 if debug:
-    fit_taskid = -1
     fwrite = froot / "logs" / basename / f"copulafit_v{version}" \
         / "mvnprocess"
     fwrite.mkdir(exist_ok=True, parents=True)
 
-    ftask = froot / "logs" / "copulafit" / f"copulafit_v{version}"
+    #ftask = froot / "logs" / "copulafit" / f"copulafit_v{version}"
 
 # ----------------------------------------------------------------------
 # @Get data
@@ -254,9 +253,9 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     # Sample conditional
     for aep_target in aep_targets:
         zcond = sample.copula_marginal_ppf(copula, [aep_target])
-        u = ccs.conditional_sample_given_ipart(ipartition, icond, zcond,
+        z = ccs.conditional_sample_given_ipart(ipartition, icond, zcond,
                                                itarget)
-
+        u = sample.copula_marginal_cdf(copula, z)
         sid = stationid_cond
         cc = [f"mv_cond{sidc}_p{aep_target:0.02f}_{sid}_smp_cdf"
               for sid in stationids if sid != sidc]
@@ -267,7 +266,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         grp_idx = [get_station_index(sid) for sid in grp_stationids]
 
         for aep_target in aep_targets:
-            zcdf = sample.copula_marginal_cdf(copula, aep_target)
+            zcdf = sample.copula_marginal_ppf(copula, aep_target)
             z = -zcdf * np.ones(ccs.nstations)
             pall = ccs.cdf_given_ipart(ipartition, z, grp_idx)
             lpall = math.log10(pall) if pall > 0 else np.nan
