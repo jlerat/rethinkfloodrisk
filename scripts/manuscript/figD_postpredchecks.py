@@ -13,6 +13,7 @@ import re
 import argparse
 import json
 from string import ascii_letters as letters
+from collections import namedtuple
 
 import warnings
 warnings.simplefilter("ignore")
@@ -46,7 +47,7 @@ parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
 parser.add_argument("-cp", "--copula", help="Copula parameter",
-                    type=float, default=2.01)
+                    type=str, default="^0|2.01|4")
 args = parser.parse_args()
 
 version = args.version
@@ -62,7 +63,7 @@ fdpi = 300
 # Define list of postpred checks to plot
 variables = {
     "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
-    "biv": ["kendalltau", "kendalltauhigh", "taildep_q75"]
+    "biv": ["kendalltau_high", "taildep_q75", "taildep_q90"]
     }
 
 exclude = "NONE"
@@ -104,6 +105,15 @@ taskids = opm.search(pcensor=f"{pcensor:0.1f}",
 
 _, _, _, stations = datahub.get_ams_concat()
 
+Config = namedtuple("Config",
+                    ["copula", "pcensor", "exclude",
+                     "rho_min", "has_clusters"])
+
+def diag2config(diag):
+    return Config(diag["task_copula"], diag["task_pcensor"],
+                  diag["task_exclude"], diag["task_rho_min"],
+                  diag["task_has_clusters"])
+
 # Select fit task with
 postpred = {}
 for taskid in taskids:
@@ -111,12 +121,11 @@ for taskid in taskids:
     with fd.open("r") as fo:
         diag = json.load(fo)
 
+    config = diag2config(diag)
+
     LOGGER.info(f"Load data from TASK {taskid}", nret=1)
-    LOGGER.info(f"pcensor = {pcensor}", ntab=1)
-    LOGGER.info(f"exclude = {exclude}", ntab=1)
-    LOGGER.info(f"rho_min = {rho_min}", ntab=1)
-    LOGGER.info(f"copula  = {copula}", ntab=1)
-    LOGGER.info(f"has_clusters = {has_clusters}", ntab=1)
+    for k, v in config._asdict().items():
+        LOGGER.info(f"{k:8>} = {v}", ntab=1)
 
     for vn in SDV:
         LOGGER.info(f"{vn}: {diag[vn][:20]}", ntab=1)
@@ -138,14 +147,13 @@ for taskid in taskids:
         pp[ppt] = df
 
     if len(pp) == 2:
-        config = (pcensor, exclude, rho_min, copula, has_clusters)
         postpred[config] = pp
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
 ncols = 3
-varnames = [f"{ppt}_{vn}" for ppt in variables for vn in variables[ppt]]
+varnames = [f"{ppt}/{vn}" for ppt in variables for vn in variables[ppt]]
 nv = len(varnames)
 nrows = nv // ncols + int(nv % ncols > 0)
 mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
@@ -155,8 +163,8 @@ arrowprops = dict(arrowstyle="wedge", facecolor="0.6", edgecolor="none")
 paeff = pe.withStroke(linewidth=4, foreground="w")
 
 for config, pp in postpred.items():
-    pcensor, exclude, rho_min, copula, has_clusters = config
-    otxt = f"PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}"
+    otxt = f"PC{config.pcensor}_RM{config.rho_min}"\
+           + f"_C{config.copula}_HC{config.has_clusters}"
     LOGGER.info(f"Plotting {otxt}", nret=1)
 
     plt.close("all")
@@ -165,7 +173,7 @@ for config, pp in postpred.items():
     axs = fig.subplot_mosaic(mosaic)
 
     for aname, ax in axs.items():
-        ppt, varname = aname.split("_")
+        ppt, varname = aname.split("/")
         df = pp[ppt]
         df = df.loc[df.VARIABLE == varname].filter(regex="pvalue\\[", axis=1)
 
@@ -227,10 +235,10 @@ for config, pp in postpred.items():
         xlab = "check pvalue [-]"
         ax.set(title=title, xlabel=xlab, xlim=(0, 1))
 
-    ftitle = f"Pcensor={pcensor}  Exclude={exclude} rho_min={rho_min}"
-    fig.suptitle(ftitle, fontweight="bold")
+    fig.suptitle(otxt, fontweight="bold")
 
-    fp = fimg / f"{basename}_pcens{pcensor}_exclude{exclude}_rhomin{rho_min}.png"
+    fp = f"{basename}_{otxt}.png"
+    fp = fimg / fp
     fig.savefig(fp)
 
 LOGGER.completed()

@@ -179,7 +179,7 @@ for taskid in taskids:
             "ylocs": ylocs.to_dict(),
             "ylogscales": ylogscales.to_dict(),
             "yshape1": yshape1.to_dict(),
-            "cor_IW": cor.to_dict()
+            "corr_IW": cor.to_dict()
             }
         with fe.open("w") as fo:
             json.dump(expected, fo, indent=4)
