@@ -61,7 +61,7 @@ LOGGER.log_dict(vars(args), "Command line arguments")
 # @Process
 # ----------------------------------------------------------------------
 for ftask in fout.glob("*TASK*"):
-    lf = list((ftask / "mvnprocess").glob("*.zip"))
+    lf = list((ftask / "mvnprocess").glob("*.csv"))
     if len(lf) == 0:
         continue
 
@@ -70,22 +70,7 @@ for ftask in fout.glob("*TASK*"):
 
     concat = []
     for f in lf:
-        try:
-            df, comments = csv.read_csv(f)
-        except Exception as err:
-            LOGGER.warning("Issue with zipfile opening. Switching to os.")
-            ftmp = f.parent / "tmp"
-            ftmp.mkdir(exist_ok=True)
-            fcsv = ftmp / f"{f.stem}.csv"
-            if fcsv.exists():
-                fcsv.unlink()
-            cmd = f"unzip {f} -d {ftmp}"
-
-            subprocess.run(cmd, shell=True, check=True)
-            df, comments = csv.read_csv(fcsv)
-            fcsv.unlink()
-            ftmp.rmdir()
-
+        df, comments = csv.read_csv(f)
         concat.append(df)
 
     cc = ["comment", "period", "pcensor", "fit_taskid",
