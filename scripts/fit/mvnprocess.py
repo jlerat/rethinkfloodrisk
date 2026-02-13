@@ -323,6 +323,7 @@ comments = {
     }
 csv.write_csv(res, fr, comments,
               source_file,
-              write_index=True)
+              write_index=True,
+              compress=False)
 
 LOGGER.completed()
