@@ -10,7 +10,13 @@ import pytest
 import numpy as np
 import pandas as pd
 from scipy.linalg import toeplitz
+
 from scipy.stats import norm
+from scipy.stats import multivariate_normal as mvn
+
+from scipy.stats import t as student_t
+from scipy.stats import multivariate_t as mvt
+
 from scipy.stats import invwishart
 from scipy.stats import ttest_ind, ks_2samp
 from scipy.stats import kstest
@@ -267,7 +273,7 @@ def test_random_corr(repeat, allclose):
     assert np.percentile(pv2, 10) > 1e-3
 
 
-@pytest.mark.parametrize("copula", [0., 4.])
+@pytest.mark.parametrize("copula", [0., 3., 4.])
 def test_conditional_sample(copula, allclose):
     nsta = 4
     ccs = sample.CopulaSampling(copula, nsta)
@@ -278,14 +284,51 @@ def test_conditional_sample(copula, allclose):
     ccs.corr = sample.random_corr(nsta, c0, c1)
 
     icond = np.array([0])
-    itarget = np.array([1, 2])
-    ucond = np.array([0.8])
+    itarget = np.array([1, 2, 3])
+
+    ucond = np.array([0.6])
+
     zcond = sample.copula_marginal_ppf(copula, ucond)
     nrepeat = 5000
 
     atol_mean = 5./math.sqrt(nrepeat)
     atol_cov = 10./math.sqrt(nrepeat)
 
+    # Check conditional on full cluster
+    z = np.array([ccs.conditional_sample_given_ipart(0, icond, zcond, itarget)
+                  for i in range(nrepeat)])
+
+    zz_cond = np.empty(z.shape)
+    zz_target = np.empty(z.shape[0])
+    iok = np.zeros(nrepeat)
+    nok, niter = 0, 0
+
+    while nok < nrepeat:
+        to_sample = np.where(iok == 0)[0]
+        n_to_sample = len(to_sample)
+        if copula == 0:
+            zz = mvn.rvs(mean=np.zeros(nsta), cov=ccs.corr_rescaled,
+                         size=10 * n_to_sample)
+        else:
+            zz = mvt.rvs(loc=np.zeros(nsta), shape=ccs.corr_rescaled,
+                         df=copula,
+                         size=10 * n_to_sample)
+        iclose = np.abs(zz[:, icond[0]] - zcond[0]) < 1e-3
+        tmp = zz[iclose]
+        tmp = tmp[:min(len(tmp), n_to_sample)]
+
+        ok = to_sample[:len(tmp)]
+        zz_cond[ok] = tmp[:, itarget]
+        zz_target[ok] = tmp[:, icond[0]]
+        iok[ok] = 1
+        nok = (iok == 1).sum()
+        niter += 1
+
+    cov = np.cov(z.T)
+    expected = np.cov(zz_cond.T)
+    assert np.allclose(cov, expected, atol=1e-2)
+
+    # Check independence of clusters
     for ipart in range(ccs.partitions.nsubsets):
         z = [ccs.conditional_sample_given_ipart(ipart, icond, zcond, itarget)
              for i in range(nrepeat)]

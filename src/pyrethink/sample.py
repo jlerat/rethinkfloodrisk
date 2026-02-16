@@ -511,35 +511,25 @@ class CopulaSampling():
 
         if len(ijoin) > 0:
             # Conditional covariance matrices
+            S11 = corr_rescaled[icond][:, icond]
+            S11i = 1./S11  # Because we only allow zcond of dim 1
             S22 = np.ascontiguousarray(corr_rescaled[ijoin][:, ijoin])
             S21 = np.ascontiguousarray(corr_rescaled[ijoin][:, icond])
 
-            # Full matrices formula:
-            # muc = S21 @ S11i @ zcond
-            # Sc = S22 - S21 @ S11i @ S21.T
-
-            # .. because S11 is a single number:
-            muc = S21 @ zcond
-            Sc = S22 - S21 @ S21.T
+            muc = S21 @ S11i @ zcond
+            Sc = S22 - S21 @ S11i @ S21.T
 
             if copula > 0:
                 # See https://en.wikipedia.org/wiki/Multivariate_t-distribution
                 #    #Conditional_Distribution
                 nu = copula
 
-                # Full matrices
-                # p1 = len(zcond)
-                # d1 = zcond.T @ S11i @ zcond
-
-                # .. because S11i and zcond are single numbers
-                # ..
-                p1 = 1
-                d1 = zcond**2
+                p1 = 1  # Because we only allow zcond of dim 1
+                d1 = zcond.T @ S11i @ zcond
 
                 a = (nu + d1) / (nu + p1)
                 df = nu + p1
                 z[idx_join] = mvt.rvs(loc=muc, shape=a*Sc, df=df)
-
             else:
                 z[idx_join] = mvn.rvs(mean=muc, cov=Sc)
 
