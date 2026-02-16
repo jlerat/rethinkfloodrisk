@@ -39,21 +39,19 @@ parser = argparse.ArgumentParser(description="Plot FFA spatial variability",
                                  argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-v", "--version", help="version",
                     type=int, required=True)
-parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
-                    action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                     type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
 parser.add_argument("-cp", "--copula", help="Copula parameter",
-                    type=float, default=2.01)
+                    type=str, default="^0|2.01")
 args = parser.parse_args()
 
 version = args.version
 pcensor = args.pcensor
 rho_min = args.rho_min
 copula = args.copula
-has_clusters = not args.no_clusters
+has_clusters = False
 
 awidth = 7
 aheight = 5
@@ -95,54 +93,65 @@ stations = datahub.get_stations()
 fopm = fout / "copulafit_options.json"
 opm = hyruns.OptionManager.from_file(fopm)
 
-taskid = opm.search(pcensor=f"{pcensor:0.1f}",
-                    exclude=exclude,
-                    copula=copula,
-                    has_clusters=has_clusters,
-                    rho_min=f"{rho_min:0.1f}")[0]
-mess = f"Load report TASK {taskid} exclude={exclude}"\
-       + f" pcensor={pcensor} rho_min={rho_min}"
-LOGGER.info(mess)
+taskids = opm.search(pcensor=f"{pcensor:0.1f}",
+                     exclude=exclude,
+                     copula=copula,
+                     has_clusters=has_clusters,
+                     rho_min=f"{rho_min:0.1f}")
+data = {}
+for taskid in taskids:
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        diag = json.load(fo)
 
-# Select fit task with
-fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
-with fd.open("r") as fo:
-    diag = json.load(fo)
+    pc = diag["task_pcensor"]
+    ex = diag["task_exclude"]
+    rm = diag["task_rho_min"]
+    cop = diag["task_copula"]
+    hc = diag["task_has_clusters"]
+    config = (pc, ex, rm, cop, hc)
+    otxt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}"
+    mess = f"Load report TASK {taskid} {otxt}"
+    LOGGER.info(mess, nret=1)
 
-for vn in SDV:
-    LOGGER.info(f"{vn}: {diag[vn][:50]}", ntab=1)
-
-fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-mvnproc, comment = csv.read_csv(fs)
+    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
+    mvnproc, comment = csv.read_csv(fs)
+    data[config] = mvnproc
 
 # ----------------------------------------------------------------------
 # @Process
 # ----------------------------------------------------------------------
-aep_targets = mvnproc.columns.to_series()\
-        .filter(regex="GALL_log10pall_aeptarget")\
-        .str.replace(".*get_p", "", regex=True)\
-        .str.replace("_", ".").astype(float).values
+for config, mvnproc in data.items():
+    pcensor, exclude, rho_min, copula, has_clusters = config
+    otxt = f"PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}"
+    LOGGER.info(f"Plotting {otxt}", nret=1)
 
-for aep_target in aep_targets:
-    LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
+    #aep_targets = mvnproc.columns.to_series()\
+    #        .filter(regex="GALL_log10pall_aeptarget")\
+    #        .str.replace(".*get_p", "", regex=True)\
+    #        .str.replace("_", ".").astype(float).values
+    aep_targets = [0.99]
 
-    plt.close("all")
-    fig, ax = plt.subplots(figsize=(awidth, aheight),
-                           layout="constrained")
+    for aep_target in aep_targets:
+        LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
 
-    etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
-    aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
-    cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
-    aep.columns = cols
+        plt.close("all")
+        fig, ax = plt.subplots(figsize=(awidth, aheight),
+                               layout="constrained")
 
-    vm = violinplot.Violin(aep, number_format="0.1f")
-    vm.draw()
+        etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
+        aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
+        cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
+        aep.columns = cols
 
-    ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
+        vm = violinplot.Violin(aep, number_format="0.1f")
+        vm.draw()
 
-    fn = f"{basename}_PC{pcensor}_RM{rho_min}_HC{has_clusters}"\
-         + f"_AEP{aep_target}_v{version}.png"
-    fp = fimg / fn
-    fig.savefig(fp)
+        ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
+
+        fn = f"{basename}_PC{pcensor}_RM{rho_min}_C{copula}"\
+             + f"_HC{has_clusters}_AEP{aep_target}_v{version}.png"
+        fp = fimg / fn
+        fig.savefig(fp)
 
 LOGGER.completed()

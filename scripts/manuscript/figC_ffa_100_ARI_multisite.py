@@ -49,21 +49,20 @@ parser = argparse.ArgumentParser(description="Plot FFA 100 ARI",
                                  argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument("-v", "--version", help="version",
                     type=int, required=True)
-parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
-                    action="store_true", default=False)
 parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                     type=float, default=0.3)
 parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                     type=float, default=-1.)
 parser.add_argument("-cp", "--copula", help="Copula parameter",
-                    type=float, default=2.01)
+                    type=str, default="^0$|2.01")
 args = parser.parse_args()
 
 version = args.version
 pcensor = args.pcensor
 rho_min = args.rho_min
 copula = args.copula
-has_clusters = not args.no_clusters
+
+has_clusters = False
 
 awidth = 6
 aheight = 5
@@ -250,7 +249,7 @@ for config, dd in data.items():
                          foreground="w")
 
     for iax, (aname, ax) in enumerate(axs.items()):
-        LOGGER.info(f"Plot {aname}")
+        LOGGER.info(f"Plot {aname}", ntab=1)
         evtype = "or" if re.search("any", aname) else "and"
 
         if aname.startswith("diagram"):
@@ -349,6 +348,7 @@ for config, dd in data.items():
                 etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
                 cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
                 sel = mvnproc.loc[:, cn]
+
                 # value -> %
                 se = 10**(sel + 2)
                 plot_means[gname] = se.mean()
@@ -396,7 +396,7 @@ for config, dd in data.items():
                      transform=ax.transAxes, fontweight="bold",
                      path_effects=[paef])
 
-    LOGGER.info("Saving to disk")
+    LOGGER.info("Saving to disk", ntab=1)
     fp = f"{basename}_PC{pcensor}_RM{rho_min}_C{copula}"\
          + f"_HC{has_clusters}_v{version}.png"
     fp = fimg / fp

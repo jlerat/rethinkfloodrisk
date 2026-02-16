@@ -110,9 +110,10 @@ if debug:
     batch = 0
     pcensor = 0.3
     exclude = "NONE"
-    copula = 3.
-    has_clusters = True
+    copula = 0.
+    has_clusters = False
     rho_min = -1
+    dirichlet_alpha = 1.
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -124,7 +125,7 @@ fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
                             rho_min=f"{rho_min:0.1f}",
-                            copula=copula,
+                            copula="^" + re.sub("\\.0$", "", str(copula)),
                             has_clusters=has_clusters,
                             exclude=exclude)
 fit_taskid = next(tid for tid in fit_taskid
