@@ -9,6 +9,8 @@
 ## ------------------------------
 
 import sys
+from collections import namedtuple
+from itertools import product as prod
 import re
 import argparse
 import json
@@ -21,137 +23,141 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
 import matplotlib.pyplot as plt
 
 from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils, violinplot
 
-from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
-
 from pyrethink import datahub
 
-# ----------------------------------------------------------------------
-# @Config
-# ----------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Plot FFA spatial variability",
-                                 formatter_class=
-                                 argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-v", "--version", help="version",
-                    type=int, required=True)
-parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                    type=float, default=0.3)
-parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                    type=float, default=-1.)
-parser.add_argument("-cp", "--copula", help="Copula parameter",
-                    type=str, default="^0|2.01")
-args = parser.parse_args()
+from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 
-version = args.version
-pcensor = args.pcensor
-rho_min = args.rho_min
-copula = args.copula
-has_clusters = False
 
-awidth = 7
-aheight = 5
-fdpi = 300
+def get_script_paths(config):
+    source_file = Path(__file__).resolve()
+    froot = source_file.parent.parent.parent
+    fdata = froot / "data"
+    fout = froot / "outputs" / f"copulafit_v{config.version}"
 
-stationid_target = "203002"
+    basename = source_file.stem
+    fimg = froot / "images" / "manuscript" / basename
 
-exclude = "NONE"
+    SP = namedtuple("ScriptPaths",
+                    ["source_file", "basename",
+                     "froot", "fdata", "fout", "fimg"])
+    script_paths = SP(source_file, basename, froot, fdata, fout, fimg)
 
-# ----------------------------------------------------------------------
-# @Folders
-# ----------------------------------------------------------------------
-source_file = Path(__file__).resolve()
-froot = source_file.parent.parent.parent
-fdata = froot / "data"
+    for pa in script_paths:
+        if isinstance(pa, str):
+            continue
+        if pa.is_file():
+            continue
+        pa.mkdir(exist_ok=True)
 
-fout = froot / "outputs" / f"copulafit_v{version}"
-
-basename = source_file.stem
-fimg = froot / "images" / "manuscript" / basename
-fimg.mkdir(exist_ok=True, parents=True)
-clear = True
-if clear:
     for f in fimg.glob("*.png"):
         f.unlink()
+    for f in fimg.glob("*/*.png"):
+        f.unlink()
 
-# ----------------------------------------------------------------------
-# @Logging
-# ----------------------------------------------------------------------
-LOGGER = iutils.get_logger(basename)
+    return script_paths
 
-# ----------------------------------------------------------------------
-# @Get data
-# ----------------------------------------------------------------------
-LOGGER.info("Load data")
 
-stations = datahub.get_stations()
+def process(config, script_paths, logger, data):
 
-fopm = fout / "copulafit_options.json"
-opm = hyruns.OptionManager.from_file(fopm)
+    pcensors = data.options["pcensors"]
+    rho_mins = data.options["rho_mins"]
+    has_clusters = data.options["has_clusters"]
+    copulas = data.options["copulas"]
 
-taskids = opm.search(pcensor=f"{pcensor:0.1f}",
-                     exclude=exclude,
-                     copula=copula,
-                     has_clusters=has_clusters,
-                     rho_min=f"{rho_min:0.1f}")
-data = {}
-for taskid in taskids:
-    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
-    with fd.open("r") as fo:
-        diag = json.load(fo)
+    for pcensor, rho_min, has_cluster, copula in \
+            prod(pcensors, rho_mins, has_clusters, copulas):
 
-    pc = diag["task_pcensor"]
-    ex = diag["task_exclude"]
-    rm = diag["task_rho_min"]
-    cop = diag["task_copula"]
-    hc = diag["task_has_clusters"]
-    config = (pc, ex, rm, cop, hc)
-    otxt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}"
-    mess = f"Load report TASK {taskid} {otxt}"
-    LOGGER.info(mess, nret=1)
+        # Select data
+        mvnproc = {}
+        selected = set()
+        for rn in data.mvnproc.keys():
+            if rn.pcensor == pcensor and rn.rho_min == rho_min \
+                    and rn.has_cluster == has_cluster\
+                    and rn.copula == copula:
+                selected.add(rn)
+                mvnproc[rn] = data.mvnproc[rn]
 
-    fs = fout / f"copulafit_TASK{taskid}" / f"copulafit_mvnprocess_TASK{taskid}.zip"
-    mvnproc, comment = csv.read_csv(fs)
-    data[config] = mvnproc
+        assert len(selected) == 1
 
-# ----------------------------------------------------------------------
-# @Process
-# ----------------------------------------------------------------------
-for config, mvnproc in data.items():
-    pcensor, exclude, rho_min, copula, has_clusters = config
-    otxt = f"PC{pcensor}_RM{rho_min}_C{copula}_HC{has_clusters}"
-    LOGGER.info(f"Plotting {otxt}", nret=1)
+        rn = next(iter(selected))
+        logger.info(f"-- Plotting {rn.text} --", nret=1)
 
-    #aep_targets = mvnproc.columns.to_series()\
-    #        .filter(regex="GALL_log10pall_aeptarget")\
-    #        .str.replace(".*get_p", "", regex=True)\
-    #        .str.replace("_", ".").astype(float).values
-    aep_targets = [0.99]
+        mvnproc = mvnproc[rn]
+        aep_targets = [0.9, 0.99]
 
-    for aep_target in aep_targets:
-        LOGGER.info(f"Plot violin rho_min={rho_min} p={aep_target}")
+        for aep_target in aep_targets:
+            logger.info(f"Plot violin {aep_target}", ntab=1)
 
-        plt.close("all")
-        fig, ax = plt.subplots(figsize=(awidth, aheight),
-                               layout="constrained")
+            plt.close("all")
+            fig, ax = plt.subplots(figsize=(config.awidth, config.aheight),
+                                   layout="constrained")
 
-        etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
-        aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
-        cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
-        aep.columns = cols
+            etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
+            aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
+            cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
+            aep.columns = cols
 
-        vm = violinplot.Violin(aep, number_format="0.1f")
-        vm.draw()
+            vm = violinplot.Violin(aep, number_format="0.1f")
+            vm.draw()
 
-        ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
+            ax.set(xlabel="Station", ylabel="Annual Exceedance Probability [%]")
 
-        fn = f"{basename}_PC{pcensor}_RM{rho_min}_C{copula}"\
-             + f"_HC{has_clusters}_AEP{aep_target}_v{version}.png"
-        fp = fimg / fn
-        fig.savefig(fp)
+            basename = script_paths.basename
+            fp = f"{basename}_AEP{aep_target}_{rn.text}_v{config.version}.png"
+            fp = script_paths.fimg / fp
+            fig.savefig(fp, dpi=config.fdpi)
 
-LOGGER.completed()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="[DESCRIPTION]",
+                                     formatter_class=
+                                     argparse.ArgumentDefaultsHelpFormatter)
+
+    parser.add_argument("-v", "--version", help="version",
+                        type=int, required=True)
+    parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                        type=float, default=0.3)
+    parser.add_argument("-d", "--diag", help="Show stan diagnostics",
+                        action="store_true", default=False)
+    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                        type=float, default=-1.)
+    args = parser.parse_args()
+
+    # Config
+    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
+                               "awidth", "aheight", "fdpi",
+                               "excludes", "diag",
+                               "load_obs_data",
+                               "load_ffa",
+                               "load_mvnproc",
+                               "load_expected_params"])
+    awidth = 6
+    aheight = 5
+    fdpi = 300
+    excludes = ["NONE"]
+    load_ffa = False
+    load_obs_data = False
+    load_mvnproc = True
+    load_expected_params = False
+    config = CF(args.version, args.pcensor, args.rho_min,
+                awidth, aheight, fdpi,
+                excludes, args.diag,
+                load_obs_data, load_ffa,
+                load_mvnproc, load_expected_params)
+
+    # Baseline
+    script_paths = get_script_paths(config)
+    logger = get_logger(config, script_paths)
+
+    # Data
+    data = get_data(config, script_paths, logger)
+
+    # Process
+    process(config, script_paths, logger, data)
+
+    logger.completed()

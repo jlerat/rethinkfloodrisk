@@ -112,6 +112,8 @@ def get_data(config, script_paths, logger):
 
     ffa = {}
     obs_data = {}
+    mvnproc = {}
+    expected_params = {}
 
     options = {
         "pcensors": set(),
@@ -132,7 +134,7 @@ def get_data(config, script_paths, logger):
         options["has_clusters"].add(rn.has_cluster)
         options["copulas"].add(rn.copula)
 
-        mess = f"Load report TASK {taskid} {rn.text}"
+        mess = f"Load data from TASK {taskid} {rn.text}"
         logger.info(mess, nret=1)
         if rn.rho_min != config.rho_min \
                 or rn.pcensor != config.pcensor:
@@ -142,22 +144,54 @@ def get_data(config, script_paths, logger):
         if config.diag:
             display_stan_diagnostics(diag, logger)
 
-        fr = ftask / f"postprocess_report_TASK{taskid}.csv"
-        df, _ = csv.read_csv(fr, index_col=0)
-        ffa[rn] = df
+        if config.load_ffa:
+            fr = ftask / f"postprocess_report_TASK{taskid}.csv"
+            df, _ = csv.read_csv(fr, index_col=0)
+            ffa[rn] = df
 
-        fd = ftask / f"copulafit_data_TASK{taskid}.json"
-        with fd.open("r") as fo:
-            d = json.load(fo)
-            y = pd.DataFrame(d["y"], columns=d["stationids"])
-            cn = "WATER_YEAR"
-            y.loc[:, cn] = d["ams_time"]
-            y.loc[:, cn] += 1 # adds 1 because starts in Oct
-            obs_data[rn] = y
+        if config.load_mvnproc:
+            fs = ftask / f"copulafit_mvnprocess_TASK{taskid}.zip"
+            mvnproc[rn], _ = csv.read_csv(fs)
+
+        if config.load_expected_params:
+            fe = ftask / f"expected_parameters_TASK{taskid}.json"
+            if not fe.exists():
+                fs = ftask / f"copulafit_samples_TASK{taskid}.zip"
+                samples = pd.read_csv(fs, skiprows=15)
+                ylocs = samples.filter(regex="ylocn", axis=1).mean()
+                ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
+                yshape1 = samples.filter(regex="yshape1", axis=1).mean()
+                cor = samples.filter(regex="corr_IW", axis=1).mean()
+                expected = {
+                    "ylocs": ylocs.to_dict(),
+                    "ylogscales": ylogscales.to_dict(),
+                    "yshape1": yshape1.to_dict(),
+                    "corr_IW": cor.to_dict()
+                    }
+                with fe.open("w") as fo:
+                    json.dump(expected, fo, indent=4)
+
+            else:
+                with fe.open("r") as fo:
+                    expected = json.load(fo)
+
+            expected_params[rn] = expected
+
+        if config.load_obs_data:
+            fd = ftask / f"copulafit_data_TASK{taskid}.json"
+            with fd.open("r") as fo:
+                d = json.load(fo)
+                y = pd.DataFrame(d["y"], columns=d["stationids"])
+                cn = "WATER_YEAR"
+                y.loc[:, cn] = d["ams_time"]
+                y.loc[:, cn] += 1 # adds 1 because starts in Oct
+                obs_data[rn] = y
 
     DT = namedtuple("Data", ["stations", "ffa", "obs_data",
+                             "mvnproc", "expected_params",
                              "options"])
-    return DT(stations, ffa, obs_data, options)
+    return DT(stations, ffa, obs_data, mvnproc,
+              expected_params, options)
 
 
 def process(config, script_paths, logger, data):
@@ -192,7 +226,8 @@ def process(config, script_paths, logger, data):
             mosaic = [[per for per in obs_data.keys()]]
             nrows = len(mosaic)
             ncols = len(mosaic[0])
-            fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+            figsize = (ncols * config.awidth, nrows * config.aheight)
+            fig = plt.figure(figsize=figsize,
                              layout="constrained")
             axs = fig.subplot_mosaic(mosaic, sharey=True)
 
@@ -295,7 +330,7 @@ def process(config, script_paths, logger, data):
             fp = f"{basename}_{stationid}_{rtxt}_v{config.version}.png"
             fp = script_paths.fimg / rtxt / fp
             fp.parent.mkdir(exist_ok=True)
-            fig.savefig(fp, dpi=fdpi)
+            fig.savefig(fp, dpi=config.fdpi)
 
 
 if __name__ == "__main__":
@@ -317,16 +352,26 @@ if __name__ == "__main__":
     CF = namedtuple("Config", ["version", "pcensor", "rho_min",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "diag"])
+                               "diag",
+                               "load_obs_data",
+                               "load_ffa",
+                               "load_mvnproc",
+                               "load_expected_params"])
     awidth = 6
     aheight = 5
     fdpi = 300
     ptype = "gumbel"
     ari_max = 500
     excludes = ["NONE", "2021"]
+    load_ffa = True
+    load_obs_data = True
+    load_mvnproc = False
+    load_expected_params = False
     config = CF(args.version, args.pcensor, args.rho_min,
                 awidth, aheight, fdpi, ptype, ari_max,
-                excludes, args.diag)
+                excludes, args.diag,
+                load_obs_data, load_ffa,
+                load_mvnproc, load_expected_params)
 
     # Baseline
     script_paths = get_script_paths(config)
