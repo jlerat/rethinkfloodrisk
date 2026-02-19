@@ -408,7 +408,7 @@ def test_copula_cdf(copula, allclose):
     for ipart in range(ccs.partitions.nsubsets):
         z = ccs.sample_z_given_ipart(ipart, nsamples)
         p0 = (z<0).all(axis=1).sum() / nsamples
-        c0 = ccs.cdf_given_ipart(ipart, np.zeros(nsta))
+        _, c0 = ccs.pdf_and_cdf_given_ipart(ipart, np.zeros(nsta))
         assert allclose(p0, c0, atol=5e-2)
 
 

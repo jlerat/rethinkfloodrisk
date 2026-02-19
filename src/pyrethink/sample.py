@@ -547,7 +547,7 @@ class CopulaSampling():
 
         return z
 
-    def cdf_given_ipart(self, ipart, z, iselect=None):
+    def pdf_and_cdf_given_ipart(self, ipart, z, iselect=None):
         nsta = self.nstations
         if len(z) != nsta:
             errmsg = f"Expected z of length {nsta}."
@@ -565,7 +565,7 @@ class CopulaSampling():
         mu = self.mean
         corr_rescaled = self.corr_rescaled
 
-        value = 1.
+        pdf, cdf = 1., 1.
         for iset in np.unique(sets_selected):
             idx = (iset == sets) & isin
             scorr = np.ascontiguousarray(corr_rescaled[idx][:, idx])
@@ -575,9 +575,10 @@ class CopulaSampling():
             else:
                 rv = mvn(mean=mu[idx], cov=scorr)
 
-            value *= rv.cdf(z[idx])
+            pdf *= rv.pdf(z[idx])
+            cdf *= rv.cdf(z[idx])
 
-        return value
+        return pdf, cdf
 
     def sample_z_given_ipart(self, ipart, nsamples):
         sets = self.partitions.ipart2sets(ipart)
