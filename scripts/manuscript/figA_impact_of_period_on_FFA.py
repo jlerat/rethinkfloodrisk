@@ -33,8 +33,7 @@ from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 from pyrethink import datahub
 
 
-def get_script_paths(config):
-    source_file = Path(__file__).resolve()
+def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
     fdata = froot / "data"
     fout = froot / "outputs" / f"copulafit_v{config.version}"
@@ -114,6 +113,7 @@ def get_data(config, script_paths, logger):
     obs_data = {}
     mvnproc = {}
     expected_params = {}
+    postpred_checks = {}
 
     options = {
         "pcensors": set(),
@@ -122,6 +122,7 @@ def get_data(config, script_paths, logger):
         "copulas": set()
     }
 
+    run_configs = []
     for taskid in taskids:
         ftask = script_paths.fout / f"copulafit_TASK{taskid}"
         fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
@@ -133,6 +134,7 @@ def get_data(config, script_paths, logger):
         options["rho_mins"].add(rn.rho_min)
         options["has_clusters"].add(rn.has_cluster)
         options["copulas"].add(rn.copula)
+        run_configs.append(rn)
 
         mess = f"Load data from TASK {taskid} {rn.text}"
         logger.info(mess, nret=1)
@@ -152,6 +154,19 @@ def get_data(config, script_paths, logger):
         if config.load_mvnproc:
             fs = ftask / f"copulafit_mvnprocess_TASK{taskid}.zip"
             mvnproc[rn], _ = csv.read_csv(fs)
+
+        if config.load_postpred_checks:
+            pp = {}
+            for ppt in ["univ", "biv"]:
+                fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
+                fp = ftask / fp
+                if not fp.exists():
+                    continue
+                df = pd.read_csv(fp, skiprows=15)
+                df.columns = ["VARIABLE"] + df.columns[1:].tolist()
+                pp[ppt] = df
+
+            postpred_checks[rn] = pp
 
         if config.load_expected_params:
             fe = ftask / f"expected_parameters_TASK{taskid}.json"
@@ -187,43 +202,81 @@ def get_data(config, script_paths, logger):
                 y.loc[:, cn] += 1 # adds 1 because starts in Oct
                 obs_data[rn] = y
 
-    DT = namedtuple("Data", ["stations", "ffa", "obs_data",
-                             "mvnproc", "expected_params",
+    DT = namedtuple("Data", ["stations", "run_configs", "ffa", "obs_data",
+                             "mvnproc", "expected_params", "postpred_checks",
                              "options"])
-    return DT(stations, ffa, obs_data, mvnproc,
-              expected_params, options)
+    return DT(stations, run_configs, ffa, obs_data, mvnproc,
+              expected_params, postpred_checks, options)
 
-
-def process(config, script_paths, logger, data):
-
+def get_iter_options(data):
     pcensors = data.options["pcensors"]
     rho_mins = data.options["rho_mins"]
     has_clusters = data.options["has_clusters"]
     copulas = data.options["copulas"]
+    return prod(pcensors, rho_mins, has_clusters, copulas)
 
-    for pcensor, rho_min, has_cluster, copula in \
-            prod(pcensors, rho_mins, has_clusters, copulas):
-        # Select data
-        ffa = {}
-        obs_data = {}
-        selected = set()
-        for rn in data.ffa.keys():
-            if rn.pcensor == pcensor and rn.rho_min == rho_min \
-                    and rn.has_cluster == has_cluster\
-                    and rn.copula == copula:
-                selected.add(rn)
-                ffa[rn.exclude] = data.ffa[rn]
-                obs_data[rn.exclude] = data.obs_data[rn]
 
-        assert len(selected) == 2
-        rtxt = re.sub("_EX.*", "", next(iter(selected)).text)
+def select_data(data, **kwargs):
+    selected = []
+    ffa = {}
+    obs_data = {}
+    mvnproc = {}
+    expected_params = {}
+    postpred_checks = {}
+    for rn in data.run_configs:
+        isin = True
+        if "pcensor" in kwargs:
+            isin &= rn.pcensor == kwargs["pcensor"]
+
+        if "rho_min" in kwargs:
+            isin &= rn.rho_min == kwargs["rho_min"]
+
+        if "has_cluster" in kwargs:
+            isin &= rn.has_cluster == kwargs["has_cluster"]
+
+        if "copula" in kwargs:
+            isin &= rn.copula == kwargs["copula"]
+
+        if isin:
+            selected.append(rn)
+            if rn in data.ffa:
+                ffa[rn] = data.ffa[rn]
+
+            if rn in data.obs_data:
+                obs_data[rn] = data.obs_data[rn]
+
+            if rn in data.mvnproc:
+                mvnproc[rn] = data.mvnproc[rn]
+
+            if rn in data.expected_params:
+                expected_params[rn] = data.expected_params[rn]
+
+            if rn in data.postpred_checks:
+                postpred_checks[rn] = data.postpred_checks[rn]
+
+    return ffa, obs_data, mvnproc, expected_params, postpred_checks
+
+
+def process(config, script_paths, logger, data):
+
+    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+        ffa, obs_data, _, _, _ = select_data(data,
+                                             pcensor=pcensor,
+                                             rho_min=rho_min,
+                                             has_cluster=has_cluster,
+                                             copula=copula)
+        assert len(ffa) == 2
+        rn_isin = next(rn for rn in ffa if rn.exclude == "NONE")
+        rn_isout = next(rn for rn in ffa if rn.exclude != "NONE")
+
+        rtxt = re.sub("_EX.*", "", rn_isin.text)
         logger.info(f"-- Plotting {rtxt} --", nret=1)
 
         for stationid, sinfo in data.stations.iterrows():
             logger.info(f"Plotting {stationid}", ntab=1)
 
             plt.close("all")
-            mosaic = [[per for per in obs_data.keys()]]
+            mosaic = [["isin", "isout"]]
             nrows = len(mosaic)
             ncols = len(mosaic[0])
             figsize = (ncols * config.awidth, nrows * config.aheight)
@@ -241,15 +294,15 @@ def process(config, script_paths, logger, data):
 
             # Plot ffa
             for iax, (aname, ax) in enumerate(axs.items()):
-                exclude = aname
+                rn = rn_isin if aname == "isin" else rn_isout
 
                 # Plot data
-                peaks = obs_data[exclude].loc[:, str(stationid)]
+                peaks = obs_data[rn].loc[:, str(stationid)]
 
                 x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
                 same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
                 _, same = np.where(same)
-                time = obs_data[exclude].WATER_YEAR.iloc[same]
+                time = obs_data[rn].WATER_YEAR.iloc[same]
 
                 ythresh = y[-3]
                 arrowprops = {
@@ -269,8 +322,8 @@ def process(config, script_paths, logger, data):
                                 zorder=5)
 
                 # Plot FFA
-                df = ffa[exclude]
-                istation = obs_data[exclude].columns.tolist().index(str(stationid))
+                df = ffa[rn]
+                istation = obs_data[rn].columns.tolist().index(str(stationid))
                 quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
                 aris = quantiles.index.to_series().str\
                         .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
@@ -293,10 +346,10 @@ def process(config, script_paths, logger, data):
                 retp = [10, 100, 500]
                 aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
 
-                if exclude == "NONE":
+                if aname == "isin":
                     exctxt = "All data"
                 else:
-                    ev = int(re.sub("-.*", "", exclude)) + 1
+                    ev = int(re.sub("-.*", "", rn.exclude)) + 1
                     exctxt = f"Without {ev} flood"
 
                 title = f"({letters[iax]}) {exctxt}"
@@ -356,7 +409,8 @@ if __name__ == "__main__":
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
-                               "load_expected_params"])
+                               "load_expected_params",
+                               "load_postpred_checks"])
     awidth = 6
     aheight = 5
     fdpi = 300
@@ -367,14 +421,17 @@ if __name__ == "__main__":
     load_obs_data = True
     load_mvnproc = False
     load_expected_params = False
+    load_postpred_checks = False
     config = CF(args.version, args.pcensor, args.rho_min,
                 awidth, aheight, fdpi, ptype, ari_max,
                 excludes, args.diag,
                 load_obs_data, load_ffa,
-                load_mvnproc, load_expected_params)
+                load_mvnproc, load_expected_params,
+                load_postpred_checks)
 
     # Baseline
-    script_paths = get_script_paths(config)
+    source_file = Path(__file__).resolve()
+    script_paths = get_script_paths(config, source_file)
     logger = get_logger(config, script_paths)
 
     # Data

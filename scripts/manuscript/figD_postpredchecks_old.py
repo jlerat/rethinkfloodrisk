@@ -1,0 +1,244 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+## -- Script Meta Data --
+## Author  : ler015
+## Created : 2025-10-21 13:01:43.360895
+## Comment : Fit mvt copula model via max likelihood
+##
+## ------------------------------
+
+import sys
+import re
+import argparse
+import json
+from string import ascii_letters as letters
+from collections import namedtuple
+
+import warnings
+warnings.simplefilter("ignore")
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy.stats import norm
+import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+
+from hydrodiy.io import csv, iutils, hyruns
+from hydrodiy.plot import putils
+
+from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
+from pyrethink import datahub
+
+# ----------------------------------------------------------------------
+# @Config
+# ----------------------------------------------------------------------
+parser = argparse.ArgumentParser(description="Plot posterior predictive checks",
+                                 formatter_class=
+                                 argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("-v", "--version", help="version",
+                    type=int, required=True)
+parser.add_argument("-nc", "--no_clusters", help="Model with no clusters",
+                    action="store_true", default=False)
+parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
+                    type=float, default=0.3)
+parser.add_argument("-r", "--rho_min", help="Minimum rho value",
+                    type=float, default=-1.)
+parser.add_argument("-cp", "--copula", help="Copula parameter",
+                    type=str, default="^0|2.01|4")
+args = parser.parse_args()
+
+version = args.version
+pcensor = args.pcensor
+rho_min = args.rho_min
+copula = args.copula
+has_clusters = not args.no_clusters
+
+awidth = 6
+aheight = 5
+fdpi = 300
+
+# Define list of postpred checks to plot
+variables = {
+    "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
+    "biv": ["kendalltau_high", "taildep_q75", "taildep_q90"]
+    }
+
+exclude = "NONE"
+
+# ----------------------------------------------------------------------
+# @Folders
+# ----------------------------------------------------------------------
+source_file = Path(__file__).resolve()
+froot = source_file.parent.parent.parent
+fdata = froot / "data"
+
+fout = froot / "outputs" / f"copulafit_v{version}"
+
+basename = source_file.stem
+fimg = froot / "images" / "manuscript" / basename
+fimg.mkdir(exist_ok=True, parents=True)
+clear = True
+if clear:
+    for f in fimg.glob("*.png"):
+        f.unlink()
+
+# ----------------------------------------------------------------------
+# @Logging
+# ----------------------------------------------------------------------
+LOGGER = iutils.get_logger(basename)
+
+# ----------------------------------------------------------------------
+# @Get data
+# ----------------------------------------------------------------------
+LOGGER.info("Load data")
+
+fopm = fout / "copulafit_options.json"
+opm = hyruns.OptionManager.from_file(fopm)
+taskids = opm.search(pcensor=f"{pcensor:0.1f}",
+                     rho_min=f"{rho_min:0.1f}",
+                     copula=copula,
+                     has_clusters=has_clusters,
+                     exclude=exclude)
+
+_, _, _, stations = datahub.get_ams_concat()
+
+Config = namedtuple("Config",
+                    ["copula", "pcensor", "exclude",
+                     "rho_min", "has_clusters"])
+
+def diag2config(diag):
+    return Config(diag["task_copula"], diag["task_pcensor"],
+                  diag["task_exclude"], diag["task_rho_min"],
+                  diag["task_has_clusters"])
+
+# Select fit task with
+postpred = {}
+for taskid in taskids:
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_diagnostic_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        diag = json.load(fo)
+
+    config = diag2config(diag)
+
+    LOGGER.info(f"Load data from TASK {taskid}", nret=1)
+    for k, v in config._asdict().items():
+        LOGGER.info(f"{k:8>} = {v}", ntab=1)
+
+    for vn in SDV:
+        LOGGER.info(f"{vn}: {diag[vn][:20]}", ntab=1)
+
+    fd = fout / f"copulafit_TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
+    with fd.open("r") as fo:
+        data = json.load(fo)
+
+    stationids = data["stationids"]
+
+    pp = {}
+    for ppt in ["univ", "biv"]:
+        fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
+        fp = fout / f"copulafit_TASK{taskid}" / fp
+        if not fp.exists():
+            continue
+        df = pd.read_csv(fp, skiprows=15)
+        df.columns = ["VARIABLE"] + df.columns[1:].tolist()
+        pp[ppt] = df
+
+    if len(pp) == 2:
+        postpred[config] = pp
+
+# ----------------------------------------------------------------------
+# @Process
+# ----------------------------------------------------------------------
+ncols = 3
+varnames = [f"{ppt}/{vn}" for ppt in variables for vn in variables[ppt]]
+nv = len(varnames)
+nrows = nv // ncols + int(nv % ncols > 0)
+mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
+          for ic in range(ncols)] for ir in range(nrows)]
+
+arrowprops = dict(arrowstyle="wedge", facecolor="0.6", edgecolor="none")
+paeff = pe.withStroke(linewidth=4, foreground="w")
+
+for config, pp in postpred.items():
+    otxt = f"PC{config.pcensor}_RM{config.rho_min}"\
+           + f"_C{config.copula}_HC{config.has_clusters}"
+    LOGGER.info(f"Plotting {otxt}", nret=1)
+
+    plt.close("all")
+    fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+                     layout="constrained")
+    axs = fig.subplot_mosaic(mosaic)
+
+    for aname, ax in axs.items():
+        ppt, varname = aname.split("/")
+        df = pp[ppt]
+        df = df.loc[df.VARIABLE == varname].filter(regex="pvalue\\[", axis=1)
+
+        if ppt == "univ":
+            df.columns = stationids
+            df.squeeze().plot(ax=ax, kind="barh")
+
+            m = (df - 0.5).abs().mean().mean()
+            ax.text(0.5, 0.5, f"mean diff\n{m:0.2f}",
+                    transform=ax.transAxes,
+                    va="center", ha="center",
+                    fontweight="bold", fontsize="x-large",
+                    path_effects=[paeff])
+        else:
+            #bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
+            #df.squeeze().plot(ax=ax, kind="hist", bins=bins,
+            #                  edgecolor="0.2", facecolor="0.8")
+            obj = putils.ecdfplot(ax, df.T)
+            obj = obj[df.index[0]]
+
+            idx = obj["index"]
+            x = obj["values"]
+            y = obj["position"]
+            out = {
+                "low": x < 0.05,
+                "high": x > 0.95
+                }
+
+            for name, ipb in out.items():
+                npb = ipb.sum()
+                if npb == 0:
+                    continue
+
+                xpb, ypb, idxp = x[ipb], y[ipb], idx[ipb]
+                col = "tab:red"
+                for cnt, (xx, yy, ii) in enumerate(zip(xpb, ypb, idxp)):
+                    ax.plot(xx, yy, "o", color=col)
+                    i1 = int(re.sub(".*\\[|,.*", "", ii)) - 1
+                    sta1 = stationids[i1]
+                    i2 = int(re.sub(".*,|\\].*", "", ii)) - 1
+                    sta2 = stationids[i2]
+                    txt = f"{sta1}\n{sta2}"
+
+                    xt = 0.2 if name == "low" else 0.8
+                    ha = "left" if name == "low" else "right"
+                    yt = np.linspace(0, 1,  2 * npb)[1 + cnt]
+                    ax.annotate(txt, xy=(xx, yy),
+                                xytext=(xt, yt),
+                                textcoords="axes fraction",
+                                va="bottom", ha=ha,
+                                arrowprops=arrowprops)
+
+        for x in [0.05, 0.95]:
+            putils.line(ax, 0, 1, x, 0, "r--")
+
+        putils.line(ax, 0, 1, 0.5, 0, "k-", lw=2)
+
+        title = f"{ppt} post pred checks / {varname}"
+        xlab = "check pvalue [-]"
+        ax.set(title=title, xlabel=xlab, xlim=(0, 1))
+
+    fig.suptitle(otxt, fontweight="bold")
+
+    fp = f"{basename}_{otxt}.png"
+    fp = fimg / fp
+    fig.savefig(fp)
+
+LOGGER.completed()

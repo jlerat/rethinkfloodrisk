@@ -30,61 +30,20 @@ from hydrodiy.plot import putils, violinplot
 
 from pyrethink import datahub
 
+from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
-
-
-def get_script_paths(config):
-    source_file = Path(__file__).resolve()
-    froot = source_file.parent.parent.parent
-    fdata = froot / "data"
-    fout = froot / "outputs" / f"copulafit_v{config.version}"
-
-    basename = source_file.stem
-    fimg = froot / "images" / "manuscript" / basename
-
-    SP = namedtuple("ScriptPaths",
-                    ["source_file", "basename",
-                     "froot", "fdata", "fout", "fimg"])
-    script_paths = SP(source_file, basename, froot, fdata, fout, fimg)
-
-    for pa in script_paths:
-        if isinstance(pa, str):
-            continue
-        if pa.is_file():
-            continue
-        pa.mkdir(exist_ok=True)
-
-    for f in fimg.glob("*.png"):
-        f.unlink()
-    for f in fimg.glob("*/*.png"):
-        f.unlink()
-
-    return script_paths
-
+from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
 def process(config, script_paths, logger, data):
+    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+        _, _, mvnproc, _, _ = select_data(data,
+                                          pcensor=pcensor,
+                                          rho_min=rho_min,
+                                          has_cluster=has_cluster,
+                                          copula=copula)
+        assert len(mvnproc) == 1
 
-    pcensors = data.options["pcensors"]
-    rho_mins = data.options["rho_mins"]
-    has_clusters = data.options["has_clusters"]
-    copulas = data.options["copulas"]
-
-    for pcensor, rho_min, has_cluster, copula in \
-            prod(pcensors, rho_mins, has_clusters, copulas):
-
-        # Select data
-        mvnproc = {}
-        selected = set()
-        for rn in data.mvnproc.keys():
-            if rn.pcensor == pcensor and rn.rho_min == rho_min \
-                    and rn.has_cluster == has_cluster\
-                    and rn.copula == copula:
-                selected.add(rn)
-                mvnproc[rn] = data.mvnproc[rn]
-
-        assert len(selected) == 1
-
-        rn = next(iter(selected))
+        rn = next(iter(mvnproc))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
 
         mvnproc = mvnproc[rn]
@@ -135,7 +94,8 @@ if __name__ == "__main__":
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
-                               "load_expected_params"])
+                               "load_expected_params",
+                               "load_postpred_checks"])
     awidth = 6
     aheight = 5
     fdpi = 300
@@ -144,14 +104,18 @@ if __name__ == "__main__":
     load_obs_data = False
     load_mvnproc = True
     load_expected_params = False
+    load_postpred_checks = False
+
     config = CF(args.version, args.pcensor, args.rho_min,
                 awidth, aheight, fdpi,
                 excludes, args.diag,
                 load_obs_data, load_ffa,
-                load_mvnproc, load_expected_params)
+                load_mvnproc, load_expected_params,
+                load_postpred_checks)
 
     # Baseline
-    script_paths = get_script_paths(config)
+    source_file = Path(__file__).resolve()
+    script_paths = get_script_paths(config, source_file)
     logger = get_logger(config, script_paths)
 
     # Data
