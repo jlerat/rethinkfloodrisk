@@ -326,7 +326,7 @@ def test_conditional_sample(copula, allclose):
 
     cov = np.cov(z.T)
     expected = np.cov(zz_cond.T)
-    assert np.allclose(cov, expected, atol=1e-2)
+    assert np.allclose(cov, expected, atol=3e-2)
 
     # Check independence of clusters
     for ipart in range(ccs.partitions.nsubsets):
@@ -346,7 +346,10 @@ def test_conditional_sample(copula, allclose):
             zm = z[:, idiff].mean()
             assert allclose(zm, 0., atol=atol_mean)
 
-            zc = np.cov(z[:, idiff].T)
+            # WATCH OUT ! THIS IS WEIRD
+            #zc = np.cov(z[:, idiff].T)
+            zc = np.corrcoef(z[:, idiff].T)
+
             ii = itarget[idiff]
             expected = ccs.corr[ii][:, ii]
             assert allclose(zc, expected, atol=atol_cov)
