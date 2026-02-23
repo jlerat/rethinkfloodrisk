@@ -27,6 +27,24 @@ def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
     return pd.Series(stats, index=idx)
 
 
+def multivariate_dependence_statistics(data,
+                                       qtails=[50, 75, 90, 95]):
+    data = np.array(data)
+    data = data[np.all(~np.isnan(data), axis=1)]
+    N, P = data.shape
+    names = [f"taildep_q{q}" for q in qtails]
+    stats = pd.Series(np.nan, index=names)
+
+    # Tail dependence
+    qt = np.nanpercentile(data, qtails, axis=0).T
+    is_greater = data[:, :, None] - qt[None, :, :] >= 0
+    cnt = is_greater.all(axis=1).sum(axis=0)
+    for iq, q in enumerate(qtails):
+        stats[f"taildep_q{q}"] = cnt[iq] / N
+
+    return stats
+
+
 def bivariate_dependence_statistics(data,
                                     qtails=[50, 75, 90, 95]):
     data = np.array(data)
@@ -39,8 +57,7 @@ def bivariate_dependence_statistics(data,
         errmsg = "Expected 2 columns in data, got P={P}."
         raise ValueError(errmsg)
 
-    names = ["kendalltau", "kendalltau_high"]\
-        + [f"taildep_q{q}" for q in qtails]
+    names = ["kendalltau", "kendalltau_high"]
     stats = pd.Series(np.nan, index=names)
 
     # Kendall tau
@@ -53,11 +70,8 @@ def bivariate_dependence_statistics(data,
     stats[n] = kendalltau(x[ihigh], y[ihigh]).statistic
 
     # Tail dependence
-    qt = np.nanpercentile(data, qtails, axis=0).T
-    is_greater = data[:, :, None] - qt[None, :, :] >= 0
-    cnt = is_greater.all(axis=1).sum(axis=0)
-    for iq, q in enumerate(qtails):
-        stats[f"taildep_q{q}"] = cnt[iq] / N
+    tailstats = multivariate_dependence_statistics(data, qtails)
+    stats = pd.concat([stats, tailstats])
 
     return stats
 
@@ -114,12 +128,15 @@ def posterior_predictive_checks(yobs, params,
 
     biv_obs = pd.DataFrame(biv_obs).T
 
+    multi_obs = multivariate_dependence_statistics(yobs)
+
     # Marginal
     gev = GEV()
 
     # Loop over params
     univ_sim = {ivar: [] for ivar in range(nsta)}
     biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nsta), 2)}
+    multi_sim = []
 
     for isample, param in params.iterrows():
         if logger is not None and isample % iterlog == 0:
@@ -145,6 +162,9 @@ def posterior_predictive_checks(yobs, params,
         for i1, i2 in combs(range(nsta), 2):
             bi = bivariate_dependence_statistics(ysim[:, [i1, i2]])
             biv_sim[(i1, i2)].append(bi)
+
+        mult = multivariate_dependence_statistics(ysim)
+        multi_sim.append(pd.DataFrame(mult).T)
 
     # Compute predictiive checks
     # .. univariate
@@ -180,10 +200,18 @@ def posterior_predictive_checks(yobs, params,
         pcheck_biv.append(pc)
 
     pcheck_biv = pd.concat(pcheck_biv, axis=1)
+
+    # ... multivariate
+    multi_sim = pd.concat(multi_sim)
+    pcheck_multi = compute_predictive_checks(multi_obs, multi_sim)
+
     data = {
         "univ_obs": univ_obs,
         "univ_sim": univ_sim,
         "biv_obs": biv_obs,
-        "biv_sim": biv_sim
+        "biv_sim": biv_sim,
+        "multi_obs": multi_obs,
+        "multi_sim": multi_sim
         }
-    return pcheck_univ, pcheck_biv, data
+
+    return pcheck_univ, pcheck_biv, pcheck_multi, data
