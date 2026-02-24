@@ -202,7 +202,7 @@ def posterior_predictive_checks(yobs, params,
     pcheck_biv = pd.concat(pcheck_biv, axis=1)
 
     # ... multivariate
-    multi_sim = pd.concat(multi_sim)
+    multi_sim = pd.concat(multi_sim, ignore_index=True)
     pcheck_multi = compute_predictive_checks(multi_obs, multi_sim)
 
     data = {

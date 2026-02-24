@@ -85,11 +85,8 @@ dirichlet_alpha = task.dirichlet_alpha
 
 copula = opm_fit.get_task(fit_taskid).copula
 
-fout = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
-
-if debug:
-    fit_taskid = -1
-    fout = froot / "logs" / "copulafit" / f"copulafit_v{version}"
+ftask = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
+fout = ftask
 
 # ----------------------------------------------------------------------
 # @Logging
@@ -102,16 +99,23 @@ LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
 LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
+if debug:
+    fout = flog.parent / f"copulafit_TASK{fit_taskid}"
+    fout.mkdir(exist_ok=True)
+
 # ----------------------------------------------------------------------
 # @Get data
 # ----------------------------------------------------------------------
 LOGGER.info("Load data")
 
-fsmp = fout / f"copulafit_samples_TASK{fit_taskid}.zip"
+fsmp = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
 tsmp = fsmp.stat().st_mtime
 samples = pd.read_csv(fsmp, skiprows=15)
 
-fd = fout / f"copulafit_data_TASK{fit_taskid}.json"
+if debug:
+    samples = samples.iloc[:200]
+
+fd = ftask / f"copulafit_data_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
     stan_data = json.load(fo)
 
@@ -149,16 +153,16 @@ elif jobid == 1:
     compute = True
     if funiv.exists():
         tuniv = funiv.stat().st_mtime
-        if tuniv > tsmp:
+        if tuniv > tsmp and not debug:
             compute = False
 
     if compute:
         LOGGER.info("Computing posterior predictive checks")
-        ppu, ppb, data = ppc.posterior_predictive_checks(yobs, samples,
-                                                         copula,
-                                                         partitions_id,
-                                                         dirichlet_alpha,
-                                                         logger=LOGGER)
+        ppu, ppb, ppm, data = ppc.posterior_predictive_checks(yobs, samples,
+                                                              copula,
+                                                              partitions_id,
+                                                              dirichlet_alpha,
+                                                              logger=LOGGER)
 
         LOGGER.info("Store posterior predictive checks")
         csv.write_csv(ppu, funiv, "Univariate post pred checks",
@@ -169,6 +173,21 @@ elif jobid == 1:
         csv.write_csv(ppb, fbiv, "Bivariate post pred checks",
                       source_file, write_index=True,
                       compress=False, lineterminator="\n")
+
+        fmult = fout / f"{basename}_postpredchecks_multi_TASK{fit_taskid}.csv"
+        csv.write_csv(ppm, fmult, "Multivariate post pred checks",
+                      source_file, write_index=True,
+                      compress=False, lineterminator="\n")
+
+        fmult_dt = fout / f"{basename}_postpredchecks_multi_data_TASK{fit_taskid}.csv"
+        comments = {"comment": "Multivariate post pred checks"}
+        for m, v in data["multi_obs"].items():
+            comments[f"obs_{m}"] = v
+        csv.write_csv(data["multi_sim"], fmult_dt,
+                      comments,
+                      source_file, write_index=True,
+                      compress=False, lineterminator="\n")
+
     else:
         LOGGER.info("Posterior predictive checks already available. Skip.")
 
