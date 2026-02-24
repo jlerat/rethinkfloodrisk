@@ -269,13 +269,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         for aep_target in aep_targets:
             zcdf = sample.copula_marginal_ppf(copula, aep_target)
             z = -zcdf * np.ones(ccs.nstations)
-            pall = ccs.cdf_given_ipart(ipartition, z, grp_idx)
+            pall = ccs.pdf_and_cdf_given_ipart(ipartition, z, grp_idx)[1]
             lpall = math.log10(pall) if pall > 0 else np.nan
             res.loc[i, f"{gname}_log10pall_aeptarget_p{aep_target:0.02f}"] = lpall
 
             # Any above threshold
             z = zcdf * np.ones(ccs.nstations)
-            pany = 1 - ccs.cdf_given_ipart(ipartition, z, grp_idx)
+            pany = 1 - ccs.pdf_and_cdf_given_ipart(ipartition, z, grp_idx)[1]
             lpany = math.log10(pany) if pany > 0 else np.nan
             res.loc[i, f"{gname}_log10pany_aeptarget_p{aep_target:0.02f}"] = lpany
 
@@ -305,7 +305,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
                     zev[isid - 1] = sample.copula_marginal_ppf(copula, cdf)
 
-            pevent = ccs.cdf_given_ipart(ipartition, zev, grp_idx)
+            pevent = ccs.pdf_and_cdf_given_ipart(ipartition, zev, grp_idx)[1]
             lpev = math.log10(pevent) if pevent > 0 else np.nan
             res.loc[i, f"{gname}_obs_log10aep_{event}"] = lpev
 
