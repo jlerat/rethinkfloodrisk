@@ -157,7 +157,7 @@ def get_data(config, script_paths, logger):
 
         if config.load_postpred_checks:
             pp = {}
-            for ppt in ["univ", "biv"]:
+            for ppt in ["univ", "biv", "multi"]:
                 fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
                 fp = ftask / fp
                 if not fp.exists():

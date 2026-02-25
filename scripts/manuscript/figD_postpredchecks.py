@@ -56,12 +56,12 @@ def process(config, script_paths, logger, data):
                                                   has_cluster=has_cluster,
                                                   copula=copula)
         assert len(postpred) == 1
-
         rn = next(iter(postpred))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
 
         postpred = postpred[rn]
         obs_data = obs_data[rn]
+
         stationids = [cn for cn in obs_data.columns if not cn.startswith("WATER")]
         ncols = 3
         variables = config.variables
@@ -82,7 +82,9 @@ def process(config, script_paths, logger, data):
         for aname, ax in axs.items():
             ppt, varname = aname.split("/")
             df = postpred[ppt]
-            df = df.loc[df.VARIABLE == varname].filter(regex="pvalue\\[", axis=1)
+            if ppt != "multi":
+                df = df.loc[df.VARIABLE == varname]
+                df = df.filter(regex="pvalue\\[", axis=1)
 
             if ppt == "univ":
                 df.columns = stationids
@@ -94,7 +96,7 @@ def process(config, script_paths, logger, data):
                         va="center", ha="center",
                         fontweight="bold", fontsize="x-large",
                         path_effects=[paeff])
-            else:
+            elif ppt == "biv":
                 #bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
                 #df.squeeze().plot(ax=ax, kind="hist", bins=bins,
                 #                  edgecolor="0.2", facecolor="0.8")
@@ -132,6 +134,9 @@ def process(config, script_paths, logger, data):
                                     textcoords="axes fraction",
                                     va="bottom", ha=ha,
                                     arrowprops=arrowprops)
+            else:
+                se = pd.Series(df.pvalue.values, index=df.VARIABLE)
+                se.plot(ax=ax, kind="barh")
 
             for x in [0.05, 0.95]:
                 putils.line(ax, 0, 1, x, 0, "r--")
@@ -189,7 +194,8 @@ if __name__ == "__main__":
     # Post pred checks to plot
     variables = {
         "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
-        "biv": ["kendalltau_high", "taildep_q75", "taildep_q90"]
+        "biv": ["taildep_q75", "taildep_q90"],
+        "multi": ["taildep_q75"]
     }
 
     config = CF(args.version, args.pcensor, args.rho_min,
