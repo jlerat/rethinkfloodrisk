@@ -123,7 +123,7 @@ def get_data(config, script_paths, logger):
     }
 
     run_configs = []
-    for taskid in taskids:
+    for itask, taskid in enumerate(taskids):
         ftask = script_paths.fout / f"copulafit_TASK{taskid}"
         fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
         with fd.open("r") as fo:
@@ -202,6 +202,9 @@ def get_data(config, script_paths, logger):
                 y.loc[:, cn] += 1 # adds 1 because starts in Oct
                 obs_data[rn] = y
 
+        if config.debug and itask > 1:
+            break
+
     DT = namedtuple("Data", ["stations", "run_configs", "ffa", "obs_data",
                              "mvnproc", "expected_params", "postpred_checks",
                              "options"])
@@ -265,7 +268,11 @@ def process(config, script_paths, logger, data):
                                              rho_min=rho_min,
                                              has_cluster=has_cluster,
                                              copula=copula)
+
+        if len(ffa) == 0:
+            continue
         assert len(ffa) == 2
+
         rn_isin = next(rn for rn in ffa if rn.exclude == "NONE")
         rn_isout = next(rn for rn in ffa if rn.exclude != "NONE")
 
@@ -395,17 +402,20 @@ if __name__ == "__main__":
                         type=int, required=True)
     parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                         type=float, default=0.3)
-    parser.add_argument("-d", "--diag", help="Show stan diagnostics",
+    parser.add_argument("-di", "--diag", help="Show stan diagnostics",
+                        action="store_true", default=False)
+    parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
     parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                         type=float, default=-1.)
     args = parser.parse_args()
+    assert not args.debug
 
     # Config
     CF = namedtuple("Config", ["version", "pcensor", "rho_min",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "diag",
+                               "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -424,7 +434,7 @@ if __name__ == "__main__":
     load_postpred_checks = False
     config = CF(args.version, args.pcensor, args.rho_min,
                 awidth, aheight, fdpi, ptype, ari_max,
-                excludes, args.diag,
+                excludes, args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks)

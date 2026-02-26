@@ -55,6 +55,8 @@ def process(config, script_paths, logger, data):
                                                   rho_min=rho_min,
                                                   has_cluster=has_cluster,
                                                   copula=copula)
+        if len(postpred) == 0:
+            continue
         assert len(postpred) == 1
         rn = next(iter(postpred))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
@@ -164,7 +166,9 @@ if __name__ == "__main__":
                         type=int, required=True)
     parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                         type=float, default=0.3)
-    parser.add_argument("-d", "--diag", help="Show stan diagnostics",
+    parser.add_argument("-di", "--diag", help="Show stan diagnostics",
+                        action="store_true", default=False)
+    parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
     parser.add_argument("-r", "--rho_min", help="Minimum rho value",
                         type=float, default=-1.)
@@ -173,7 +177,7 @@ if __name__ == "__main__":
     # Config
     CF = namedtuple("Config", ["version", "pcensor", "rho_min",
                                "awidth", "aheight", "fdpi",
-                               "excludes", "diag",
+                               "excludes", "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -200,7 +204,7 @@ if __name__ == "__main__":
 
     config = CF(args.version, args.pcensor, args.rho_min,
                 awidth, aheight, fdpi,
-                excludes, args.diag,
+                excludes, args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, variables,
