@@ -305,7 +305,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
                     zev[isid - 1] = sample.copula_marginal_ppf(copula, cdf)
 
-            pevent = ccs.pdf_and_cdf_given_ipart(ipartition, zev, grp_idx)[1]
+            pevent = 1 - ccs.pdf_and_cdf_given_ipart(ipartition, zev, grp_idx)[1]
             lpev = math.log10(pevent) if pevent > 0 else np.nan
             res.loc[i, f"{gname}_obs_log10aep_{event}"] = lpev
 
