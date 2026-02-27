@@ -72,16 +72,16 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
                            stan_nchains=stan_nchains,
                            stan_nsamples=stan_nsamples)
 
-pcensors = [0., 0.3]
+pcensors = [0.3]
 
-copulas = [0, 2.01, 2.1, 3., 4.]
+copulas = [0, 2.1, 4.]
 
 excludes = ["NONE",
             "2021",
             "2007",
             "2016"]
 
-rho_mins = [-1.]
+rho_mins = [-1., 0]
 
 has_clusters_all = [False, True]
 
