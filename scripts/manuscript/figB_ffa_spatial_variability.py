@@ -30,6 +30,10 @@ from hydrodiy.plot import putils, violinplot
 
 from pyrethink import datahub
 
+import importlib
+import figA_impact_of_period_on_FFA
+importlib.reload(figA_impact_of_period_on_FFA)
+
 from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data

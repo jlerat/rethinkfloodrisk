@@ -88,6 +88,7 @@ def display_stan_diagnostics(diag, logger):
 def get_taskids(config, script_paths):
     fopm = script_paths.fout / "copulafit_options.json"
     opm = hyruns.OptionManager.from_file(fopm)
+
     kw = {}
 
     if hasattr(config, "pcensor"):
@@ -97,7 +98,7 @@ def get_taskids(config, script_paths):
         kw["exclude"] = "|".join(config.excludes)
 
     if hasattr(config, "rho_min"):
-        kw["rho_min"] = f"{config.rho_min:0.1f}"
+        kw["rho_min"] = re.sub("\.0$", "", f"{config.rho_min:0.1f}")
 
     if hasattr(config, "copula"):
         kw["copula"] = config.copula
