@@ -124,13 +124,12 @@ froot = source_file.parent.parent.parent
 fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
-                            rho_min=f"{rho_min:0.1f}",
+                            rho_min="^" + re.sub("\\.0+$", "", f"{rho_min:0.1f}"),
                             copula="^" + re.sub("\\.0$", "", str(copula)),
                             has_clusters=has_clusters,
                             exclude=exclude)
-fit_taskid = next(tid for tid in fit_taskid
-                  if opm_fit.get_task(tid)["copula"] == copula)
-
+assert len(fit_taskid) == 1
+fit_taskid = fit_taskid[0]
 ftask = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
 
 fwrite = ftask / "mvnprocess"
@@ -148,7 +147,8 @@ LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
 LOGGER.info("Fit task:")
-opm_fit.get_task(fit_taskid).log(LOGGER)
+fit_task = opm_fit.get_task(fit_taskid)
+fit_task.log(LOGGER)
 
 if debug:
     fwrite = froot / "logs" / basename / f"copulafit_v{version}" \
