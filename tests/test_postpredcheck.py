@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pandas as pd
 from scipy.stats import kstest, norm
+from scipy.stats import multivariate_normal as mvn
 from scipy.stats import t as student_t
 
 from pyrethink import datahub
@@ -29,10 +30,10 @@ SAMPLES.columns = [re.sub("^cor", "corr", cn) for cn in SAMPLES.columns]
 MARGINAL = GEV()
 
 
-def test_exceedance_probabilities(allclose):
+def test_joint_exceedance_probabilities(allclose):
     potpeaks, _, _ = datahub.get_potpeaks()
-    qt = ppc.QTAILS_DEFAULT
-    plj, phj = ppc.exceedance_probabilities(potpeaks, qt)
+    qt = ppc.PERC_TAILS_DEFAULT
+    plj, phj = ppc.joint_exceedance_probabilities(potpeaks, qt)
     nq = len(qt)
 
     assert len(plj) == nq
@@ -59,15 +60,30 @@ def test_univariate_statistics(station):
 
     un = ppc.univariate_statistics(data)
     assert un.notnull().all()
+    assert len(un) == 9
 
 
-def test_multivariate_statistics():
+@pytest.mark.parametrize("rho", [0.5, 0.7, 0.9, 0.95])
+@pytest.mark.parametrize("nsta", [3, 6])
+def test_multivariate_statistics(rho, nsta, allclose):
     potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks
     mv = ppc.multivariate_dependence_statistics(data)
-    import pdb; pdb.set_trace()
+    assert mv.shape == (25, 3)
+    assert mv.notnull().all().all()
 
-    assert mv.notnull().all()
+    # Test routine for multivariate normal
+    mean = np.zeros(nsta)
+    cov = (1 - rho) * np.eye(nsta) + rho * np.ones((nsta, nsta))
+    rv = mvn(mean=mean, cov=cov)
+    data = rv.rvs(size=100000)
+    qt = np.arange(50, 96)
+    mv = ppc.multivariate_dependence_statistics(data, qt)
+
+    x = np.repeat(mv.index.values[:, None] / 100, nsta, axis=1)
+    z = norm.ppf(x)
+    expected = 2 - rv.logcdf(z) / np.log(x[:, 0])
+    assert allclose(mv.xi, expected, atol=5e-2, rtol=2e-2)
 
 
 @pytest.mark.parametrize("station", np.arange(NSTATIONS - 1).tolist())

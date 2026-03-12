@@ -10,29 +10,29 @@ from floodstan.marginals import GEV
 
 from pyrethink.copula import Copula
 
-QTAILS_DEFAULT = np.arange(50, 100, 2)
+PERC_TAILS_DEFAULT = np.arange(50, 100, 2)
 
 
-def univariate_statistics(data, eta=2, qtails=QTAILS_DEFAULT):
-    stats = np.zeros(3 + len(qtails))
+def univariate_statistics(data, eta=2, perc_tails=np.arange(50, 110, 10)):
+    stats = np.zeros(3 + len(perc_tails))
 
     lmom = lh_moments(data, eta, True)
     stats[0] = lmom[1] / lmom[0]
     stats[1] = lmom[2] / lmom[1]
     stats[2] = lmom[3] / lmom[1]
 
-    stats[3:] = np.nanpercentile(data, qtails)
+    stats[3:] = np.nanpercentile(data, perc_tails)
 
     idx = [f"l{m}{eta}"
            for m in ["coeffvar", "skewness", "kurtosis"]]\
-        + [f"percentile_q{q}" for q in qtails]
+        + [f"percentile_q{q}" for q in perc_tails]
 
     return pd.Series(stats, index=idx)
 
 
-def exceedance_probabilities(data, qtails):
+def joint_exceedance_probabilities(data, perc_tails):
     data = np.array(data)
-    qt = np.nanpercentile(data, qtails, axis=0).T
+    qt = np.nanpercentile(data, perc_tails, axis=0).T
 
     is_lower = data[:, :, None] - qt[None, :, :] <= 0
     N = len(data)
@@ -45,8 +45,13 @@ def exceedance_probabilities(data, qtails):
 
 
 def multivariate_dependence_statistics(data,
-                                       qtails=QTAILS_DEFAULT):
+                                       perc_tails=PERC_TAILS_DEFAULT):
     """
+    See Coles, S., Heffernan, J., & Tawn, J. (1999).
+    Dependence Measures for Extreme Value Analyses.
+    Extremes, 2(4), 339–365.
+    https://doi.org/10.1023/A:1009963131610
+
     Joe, H. (2014). Dependence Modeling with Copulas (0 ed.).
     Chapman and Hall/CRC.
     https://doi.org/10.1201/b17116
@@ -56,25 +61,21 @@ def multivariate_dependence_statistics(data,
     data = data[np.all(~np.isnan(data), axis=1)]
     N, P = data.shape
 
-    p0, p1 = extreme_probabilities(data, qtails)
-    u = qtails / 100
-    tau = p1 / (1 - qtails / 100)
-    xi = 2 - np.log(p0) / np.log(u)
-    xibar  = 2 * np.log(u) / np.log(p1) - 1
+    p0, p1 = joint_exceedance_probabilities(data, perc_tails)
+    u = perc_tails / 100
 
-    return pd.DataFrame([tau, xi, xibar], index=qtails,
-                        columns=["tau", "xi", "xibar"])
+    tau = p1 / (1 - u)
+    xi = 2 - np.log(p0) / np.log(u)
+    xibar  = 2 * np.log(1 - u) / np.log(p1) - 1
+
+    df = pd.DataFrame({"tau": tau, "xi": xi, "xibar": xibar},
+                      index=perc_tails)
+    df.index.name = "percentile"
+    return df
 
 
 def bivariate_dependence_statistics(data,
-                                    qtails=QTAILS_DEFAULT):
-    """
-    See Coles, S., Heffernan, J., & Tawn, J. (1999).
-    Dependence Measures for Extreme Value Analyses.
-    Extremes, 2(4), 339–365.
-    https://doi.org/10.1023/A:1009963131610
-    """
-
+                                    perc_tails=PERC_TAILS_DEFAULT):
     data = np.array(data)
     data = data[np.all(~np.isnan(data), axis=1)]
     N, P = data.shape
@@ -86,9 +87,9 @@ def bivariate_dependence_statistics(data,
         raise ValueError(errmsg)
 
     names = ["kendalltau", "kendalltau_high"] \
-        + [f"xi_q{q}" for q in qtails] \
-        + [f"xibar_q{q}" for q in qtails] \
-        + [f"tau_q{q}" for q in qtails]
+        + [f"xi_q{q}" for q in perc_tails] \
+        + [f"xibar_q{q}" for q in perc_tails] \
+        + [f"tau_q{q}" for q in perc_tails]
     stats = pd.Series(np.nan, index=names)
 
     # Kendall tau
@@ -101,7 +102,7 @@ def bivariate_dependence_statistics(data,
     stats[n] = kendalltau(x[ihigh], y[ihigh]).statistic
 
     # Tail dependence
-    stats["dependence"] = multivariate_dependence_statistics(data, qtails)
+    stats["dependence"] = multivariate_dependence_statistics(data, perc_tails)
 
     return stats
 
