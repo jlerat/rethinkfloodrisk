@@ -112,7 +112,7 @@ if debug:
     exclude = "NONE"
     copula = 0.
     has_clusters = False
-    rho_min = -1
+    rho_min = 0
     dirichlet_alpha = 1.
 
 # ----------------------------------------------------------------------
@@ -254,7 +254,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
     # Sample conditional
     for aep_target in aep_targets:
         zcond = sample.copula_marginal_ppf(copula, [aep_target])
-        z = ccs.conditional_sample_given_ipart(ipartition, icond, zcond,
+        z = ccs.conditional_sample_given_partition(ipartition, icond, zcond,
                                                itarget)
         u = sample.copula_marginal_cdf(copula, z)
         sid = stationid_cond
@@ -268,14 +268,14 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
         for aep_target in aep_targets:
             zcdf = sample.copula_marginal_ppf(copula, aep_target)
-            z = -zcdf * np.ones(ccs.nstations)
-            pall = ccs.pdf_and_cdf_given_ipart(ipartition, z, grp_idx)[1]
+            z = zcdf * np.ones(ccs.nstations)
+            pall = ccs.survival_given_partition(ipartition, z, grp_idx)[1]
             lpall = math.log10(pall) if pall > 0 else np.nan
             res.loc[i, f"{gname}_log10pall_aeptarget_p{aep_target:0.02f}"] = lpall
 
             # Any above threshold
             z = zcdf * np.ones(ccs.nstations)
-            pany = 1 - ccs.pdf_and_cdf_given_ipart(ipartition, z, grp_idx)[1]
+            pany = ccs.survival_given_partition(ipartition, z, grp_idx)[1]
             lpany = math.log10(pany) if pany > 0 else np.nan
             res.loc[i, f"{gname}_log10pany_aeptarget_p{aep_target:0.02f}"] = lpany
 
@@ -305,7 +305,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
                     zev[isid - 1] = sample.copula_marginal_ppf(copula, cdf)
 
-            pevent = 1 - ccs.pdf_and_cdf_given_ipart(ipartition, zev, grp_idx)[1]
+            pevent = ccs.survival_given_partition(ipartition, zev, grp_idx)[1]
             lpev = math.log10(pevent) if pevent > 0 else np.nan
             res.loc[i, f"{gname}_obs_log10aep_{event}"] = lpev
 
@@ -322,9 +322,10 @@ comments = {
     "aep_targets": aep_targets
 
     }
-csv.write_csv(res, fr, comments,
-              source_file,
-              write_index=True,
-              compress=False)
+if not debug:
+    csv.write_csv(res, fr, comments,
+                  source_file,
+                  write_index=True,
+                  compress=False)
 
 LOGGER.completed()
