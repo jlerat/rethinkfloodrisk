@@ -32,9 +32,10 @@ data {
   array[N] int<lower=0, upper=P> clusters_counts;
 
   // Copula model
-  // 0 : Gaussian
-  // >2 : Student-t df=copula
-  real copula; 
+  // 0: Gaussian  1: Student
+  int copula_type; 
+  // If student, degrees of freedom
+  real copula_shape; 
 
   // Prior parameters
   vector[2] ylocn_prior;
@@ -58,11 +59,11 @@ data {
 transformed data {
   // Check copula
   real copula_low;
-  if (copula > 0)
+  if (copula_type == 1)
     copula_low = 2.01;
   else
     copula_low = 0;
-  real<lower=copula_low, upper=100> copula_test = copula;
+  real<lower=copula_low, upper=100> copula_test = copula_shape;
 
   // Check number of data in each category adds up 
   int Ntest = N * P - Nobs - Ncens;
@@ -142,24 +143,32 @@ model {
     real kappa = yshape1[ivar];
 
     real obs = y[ival][ivar];
-    real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), copula);
+    real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), 
+                                         copula_type,
+                                         copula_shape);
     z[ival][ivar] = zval;
 
     // log-Jacobian of z = inv_Phi(gev_cdf(obs))
     // dz/dobs = gev_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
-    target += gev_lpdf(obs | tau, alpha, kappa) + copula_marginal_quantile_log_jac(zval, copula);
+    target += gev_lpdf(obs | tau, alpha, kappa) + copula_marginal_quantile_log_jac(zval, 
+                                                                                   copula_type,
+                                                                                   copula_shape);
   }
 
   // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
-    real zcens = copula_marginal_quantile(ulat_cens[i], copula);
+    real zcens = copula_marginal_quantile(ulat_cens[i], 
+                                          copula_type,
+                                          copula_shape);
     z[ival][ivar] = zcens;
     
     // log-Jacobian of censored latent variable transform
-    target += log(ucensors[ivar]) + copula_marginal_quantile_log_jac(zcens, copula);
+    target += log(ucensors[ivar]) + copula_marginal_quantile_log_jac(zcens,
+                                                                     copula_type, 
+                                                                     copula_shape);
   }
 
   // --- Likelihood computed separately for each year ---
@@ -176,7 +185,7 @@ model {
         array[nsta] int idxm = clusters_indexes[i, icl, 2:nsta + 1];
 
         // Compute likelihood within cluster
-        target += copula_log_pdf(z[i, idxm], copula, corr_IW[idxm, idxm]);
+        target += copula_log_pdf(z[i, idxm], copula_type, copula_shape, corr_IW[idxm, idxm]);
     }
 
   }

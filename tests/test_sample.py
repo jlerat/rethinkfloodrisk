@@ -31,6 +31,8 @@ from pyrethink import sample
 from pyrethink import datahub
 from pyrethink import mv_censored_no_missing_sampling
 
+from test_copulas import get_type
+
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
@@ -61,96 +63,18 @@ STAN_NSAMPLES_DEFAULT = 6000
 
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
-@pytest.mark.parametrize("nelems", [1, 2, 3, 4, 5, 9])
-def test_partitions_size(nelems, allclose):
-    parts = sample.Partitions(nelems)
-    print(f"N subsets = {parts.nsubsets:6,d}")
-
-    if nelems == 1:
-        assert parts.nsubsets == 1
-    elif nelems == 2:
-        assert parts.nsubsets == 2
-    elif nelems == 3:
-        assert parts.nsubsets == 5
-    elif nelems == 4:
-        assert parts.nsubsets == 15
-    elif nelems == 5:
-        assert parts.nsubsets == 52
-    elif nelems == 9:
-        assert parts.nsubsets == 21147
-    elif nelems == 10:
-        assert parts.nsubsets == 115975
-
-    if nelems == 1:
-        return
-
-    for itest in range(5):
-        k = np.random.randint(0, parts.nsubsets)
-        pair_in_same = parts.pair_in_same_cluster[k]
-        subs = parts.find_subset(pair_in_same)
-        assert len(subs) == 1
-
-
-def test_partitions_sets(allclose):
-    nelems = 6
-    parts = sample.Partitions(nelems)
-    for ipart in range(parts.nsubsets):
-        sets = parts.ipart2sets(ipart)
-
-        part = parts.subsets[ipart]
-        part = part[part.sum(axis=1) > 0]
-        expected = [np.where(p == 1)[0][0] for p in part.T]
-        assert allclose(sets, expected)
-
-
-@pytest.mark.parametrize("nelems", [4, 5])
-def test_partitions_probabilities(nelems, allclose):
-    parts = sample.Partitions(nelems)
-    ns = parts.nsubsets
-
-    # Sample random partition ids
-    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.8, 0)
-    pp /= pp.sum()
-    pids = np.random.choice(np.arange(ns), p=pp, size=50)
-
-    dalpha = 2.
-    probs = parts.compute_probabilities(pids, dalpha)
-    assert len(probs) == ns
-
-    cnt = pd.Series(pids).value_counts()
-    total = (cnt + dalpha - 1).sum()
-    for ipart in np.unique(pids):
-        n = (pids == ipart).sum()
-        assert probs[ipart] == (n + dalpha - 1) / total
-
-
-@pytest.mark.parametrize("nelems", [3, 4, 5])
-def test_partitions_sample(nelems, allclose):
-    parts = sample.Partitions(nelems)
-    ns = parts.nsubsets
-
-    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.2, 0)
-    pp /= pp.sum()
-    pids = np.random.choice(np.arange(ns), p=pp, size=50)
-    dalpha = 2.
-    probs = parts.compute_probabilities(pids, dalpha)
-
-    iparts = parts.sample(probs, 1000000)
-    pp = pd.Series(iparts).value_counts().sort_index() / len(iparts)
-    expected = [probs[i] for i in pp.index]
-    assert allclose(pp, expected, atol=1e-2)
-
-
 @pytest.mark.parametrize("pcensor", [0., 0.3])
 @pytest.mark.parametrize("no_missing", [False, True])
 def test_sample_data(pcensor, no_missing, allclose):
 
     data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
-    copula = 2.5
+    copula_type = 1
+    copula_shape = 2.5
 
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula=copula,
+                                         copula_type=copula_type,
+                                         copula_shape=copula_shape,
                                          censors=censors)
 
     pisc = sv.pair_in_same_cluster
@@ -170,7 +94,7 @@ def test_sample_data(pcensor, no_missing, allclose):
             assert same == expected
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 25
+    assert len(stan_data) == 26
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -204,240 +128,28 @@ def test_sample_data(pcensor, no_missing, allclose):
 
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
-        sv = sample.StanSamplingMultivariate(data, dows, copula)
+        sv = sample.StanSamplingMultivariate(data, dows,
+                                             copula_type,
+                                             copula_shape)
 
 
 def test_inits(allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    copula = 0.
+    copula_type = 0.
+    copula_shape = 0.
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula,
+                                         copula_type,
+                                         copula_shape,
                                          censors=censors)
     inits = sv.initial_parameters
-
-
-@pytest.mark.parametrize("copula", [0., 2.5, 5., 10.])
-def test_copula_marginals(copula, allclose):
-    n = 10000
-    u1 = np.linspace(1./n, 1 - 1./n, n)
-    z1 = sample.copula_marginal_ppf(copula, u1)
-
-    u2 = sample.copula_marginal_cdf(copula, z1)
-    assert allclose(u1, u2)
-
-    z2 = sample.copula_marginal_ppf(copula, u2)
-    assert allclose(z1, z2)
-
-    n = 1000000
-    u = np.random.uniform(size=n)
-    z = sample.copula_marginal_ppf(copula, u)
-    assert allclose(z.mean(), 0, atol=5e-3)
-    assert allclose(z.std(), 1, atol=5e-2)
-
-
-@pytest.mark.parametrize("repeat", range(10))
-def test_cov2corr(repeat, allclose):
-    nsta = 6
-    cov = invwishart.rvs(df=nsta+1, scale=np.eye(nsta))
-    corr = sample.cov2corr(cov)
-    d = np.diag(1./np.sqrt(np.diag(cov)))
-    assert allclose(corr, d @ cov @ d)
-
-
-@pytest.mark.parametrize("repeat", range(10))
-def test_random_corr(repeat, allclose):
-    nsta = 6
-    z1 = []
-
-    z2 = []
-    rho0, rho1 = 0.2, 0.8
-    c0 = sample.corr_ref(nsta, rho0)
-    c1 = sample.corr_ref(nsta, rho1)
-
-    nrepeat = 100
-    for i in range(nrepeat):
-        idx = np.triu_indices(nsta, 1)
-        x = sample.random_corr(nsta)[idx]
-        z1.append(x)
-
-        x = sample.random_corr(nsta, c0, c1)[idx]
-        z2.append(x)
-
-    z1 = (np.array(z1) + 1) / 2
-    pv1 = np.array([kstest(zi, "uniform").pvalue for zi in z1.T])
-    assert np.percentile(pv1, 10) > 1e-3
-
-    z2 = (np.array(z2) - rho0) / (rho1 - rho0)
-    pv2 = np.array([kstest(zi, "uniform").pvalue for zi in z2.T])
-    assert np.percentile(pv2, 10) > 1e-3
-
-
-@pytest.mark.parametrize("copula", [0., 3., 4.])
-def test_conditional_sample(copula, allclose):
-    nsta = 4
-    ccs = sample.CopulaSampling(copula, nsta)
-
-    rho0, rho1 = 0.8, 0.99
-    c0 = sample.corr_ref(nsta, rho0)
-    c1 = sample.corr_ref(nsta, rho1)
-    ccs.corr = sample.random_corr(nsta, c0, c1)
-
-    icond = np.array([0])
-    itarget = np.array([1, 2, 3])
-
-    ucond = np.array([0.6])
-
-    zcond = sample.copula_marginal_ppf(copula, ucond)
-    nrepeat = 5000
-
-    atol_mean = 5./math.sqrt(nrepeat)
-    atol_cov = 10./math.sqrt(nrepeat)
-
-    # Check conditional on full cluster
-    z = np.array([ccs.conditional_sample_given_partition(0, icond, zcond, itarget)
-                  for i in range(nrepeat)])
-
-    zz_cond = np.empty(z.shape)
-    zz_target = np.empty(z.shape[0])
-    iok = np.zeros(nrepeat)
-    nok, niter = 0, 0
-
-    while nok < nrepeat:
-        to_sample = np.where(iok == 0)[0]
-        n_to_sample = len(to_sample)
-        if copula == 0:
-            zz = mvn.rvs(mean=np.zeros(nsta), cov=ccs.corr_rescaled,
-                         size=10 * n_to_sample)
-        else:
-            zz = mvt.rvs(loc=np.zeros(nsta), shape=ccs.corr_rescaled,
-                         df=copula,
-                         size=10 * n_to_sample)
-        iclose = np.abs(zz[:, icond[0]] - zcond[0]) < 1e-3
-        tmp = zz[iclose]
-        tmp = tmp[:min(len(tmp), n_to_sample)]
-
-        ok = to_sample[:len(tmp)]
-        zz_cond[ok] = tmp[:, itarget]
-        zz_target[ok] = tmp[:, icond[0]]
-        iok[ok] = 1
-        nok = (iok == 1).sum()
-        niter += 1
-
-    cov = np.cov(z.T)
-    expected = np.cov(zz_cond.T)
-    assert np.allclose(cov, expected, atol=3e-2)
-
-    # Check independence of clusters
-    for ipart in range(ccs.partitions.nsubsets):
-        z = [ccs.conditional_sample_given_partition(ipart, icond, zcond, itarget)
-             for i in range(nrepeat)]
-        z = np.array(z)
-
-        sets = ccs.partitions.ipart2sets(ipart)
-        sets_cond = sets[icond]
-        sets_target = sets[itarget]
-
-        # If samples are in different sets, the mean should be 0
-        # and covariance should equal to the corresponding elements in corr
-        # (i.e. indepent from zcond)
-        idiff = sets_target != sets_cond
-        if idiff.sum() > 0:
-            zm = z[:, idiff].mean()
-            assert allclose(zm, 0., atol=atol_mean)
-
-            # WATCH OUT ! THIS IS WEIRD
-            #zc = np.cov(z[:, idiff].T)
-            zc = np.corrcoef(z[:, idiff].T)
-
-            ii = itarget[idiff]
-            expected = ccs.corr[ii][:, ii]
-            assert allclose(zc, expected, atol=atol_cov)
-
-
-@pytest.mark.parametrize("copula", [0., 4.])
-def test_copula_sample(copula, allclose):
-    nsta = 4
-    ccs = sample.CopulaSampling(copula, nsta)
-    ccs.corr = sample.random_corr(nsta)
-    nsamples = 500000
-
-    # Sample given ipart
-    for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_partition(ipart, nsamples)
-
-        zm = z.mean(axis=0)
-        assert allclose(zm, 0, atol=1e-2)
-        zs = z.std(axis=0)
-        assert allclose(zs, 1, atol=1e-1)
-
-        sets = ccs.partitions.ipart2sets(ipart)
-        for iset in np.unique(sets):
-            idx = iset == sets
-            cov = np.cov(z[:, idx].T)
-            expected = ccs.corr[idx][:, idx]
-            assert allclose(cov, expected, atol=5e-2)
-
-    # Random probs
-    ns = ccs.partitions.nsubsets
-    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.2, 0)
-    pp /= pp.sum()
-    pids = np.random.choice(np.arange(ns), p=pp, size=50)
-    probs = ccs.partitions.compute_probabilities(pids, 1)
-
-    # Sample integrating ipart out
-    ns = ccs.partitions.nsubsets
-    ccs.partitions.probabilities = np.random.uniform(0, 1, ns)
-    u, iparts = ccs.sample_u(probs, nsamples)
-
-    pv = np.array([kstest(ui, "uniform").pvalue for ui in u.T])
-    assert np.median(pv) > 1e-2
-
-    pp = pd.Series(iparts).value_counts() / nsamples
-    expected = pd.Series(probs)[pp.index]
-    assert allclose(pp, expected, atol=5e-3)
-
-
-@pytest.mark.parametrize("copula", [0., 5., 10.])
-@pytest.mark.parametrize("repeat", range(10))
-def test_copula_cdf(repeat, copula, allclose):
-    nsta = 4
-    ccs = sample.CopulaSampling(copula, nsta)
-    rho0, rho1 = 0.5, 0.99
-    c0 = sample.corr_ref(nsta, rho0)
-    c1 = sample.corr_ref(nsta, rho1)
-    ccs.corr = sample.random_corr(nsta, c0, c1)
-    nsamples = 500000
-
-    z0 = np.random.uniform(-0.5, 0.5, size=nsta)
-    z0 = np.array([0.49, -0.5, 0.39, -0.1])
-    print()
-    print()
-    print(f"z0 = {z0.round(2)}")
-    print()
-
-    atol = 2e-2
-
-    for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_partition(ipart, nsamples)
-
-
-        ce = (z - z0[None, :] < 0).all(axis=1).sum() / nsamples
-        c0 = ccs.cdf_given_partition(ipart, z0)
-        assert allclose(ce, c0, atol=atol)
-
-        se = (z - z0[None, :] >= 0).all(axis=1).sum() / nsamples
-        s0 = ccs.survival_given_partition(ipart, z0)
-        passed = abs(se - s0) < atol
-
-        print(f"ipart={ipart} / s0={s0:0.3f} se={se:0.3f} passed={passed}")
-        #assert allclose(se, s0, atol=atol)
+    assert len(inits) == 6
 
 
 @pytest.mark.parametrize("config", ["censored", "uncensored"])
 @pytest.mark.parametrize("nvars", [3])
-@pytest.mark.parametrize("copula", [0., 4.])
-def test_sampler(config, nvars, copula, allclose):
+@pytest.mark.parametrize("copula_shape", [0., 4.])
+def test_sampler(config, nvars, copula_shape, allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
     dows = dows.iloc[:, :nvars]
@@ -449,7 +161,10 @@ def test_sampler(config, nvars, copula, allclose):
     else:
         censors = np.zeros(data.shape[1])
 
-    sv = sample.StanSamplingMultivariate(data, dows, copula,
+    copula_type = get_type(copula_shape)
+    sv = sample.StanSamplingMultivariate(data, dows,
+                                         copula_type,
+                                         copula_shape,
                                          censors=censors)
     stan_data = sv.to_dict()
 
@@ -460,7 +175,7 @@ def test_sampler(config, nvars, copula, allclose):
 
     stan_inits = sv.initial_parameters
 
-    fout = f"sampling_{config}_N{nvars}_C{copula:0.0f}"
+    fout = f"sampling_{config}_N{nvars}_C{copula_shape:0.0f}"
     fout = FTESTS / "sampling" / fout
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
@@ -569,7 +284,8 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     rho_max = 1.
     sv = sample.StanSamplingMultivariate(data,
                                          dows,
-                                         copula=0.,
+                                         copula_type=0.,
+                                         copula_shape=0,
                                          censors=censors,
                                          skip_clusters=True,
                                          rho_min=rho_min,

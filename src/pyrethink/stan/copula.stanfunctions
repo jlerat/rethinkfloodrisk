@@ -164,78 +164,78 @@ real student_t_quantile(real p, real ndf) {
 // needed to correct the scale of a
 // student random var so that its std
 // is equal to the scale like a normal variable.
-real get_student_std_adjust(real copula){
-    if(copula < 2.01)
+real get_student_std_adjust(real copula_shape){
+    if(copula_shape < 2.01)
         return not_a_number();
-    return sqrt((copula - 2.) / copula);
+    return sqrt((copula_shape - 2.) / copula_shape);
 }
 
-real copula_marginal_prob(real z, real copula) {
+real copula_marginal_prob(real z, int copula_type, real copula_shape) {
     real adj;
 
-    if(copula < 1e-10)
+    if(copula_type == 0)
         return normal_cdf(z | 0, 1);
     else {
-        adj = get_student_std_adjust(copula);
-        return student_t_cdf(z | copula, 0, adj);
+        adj = get_student_std_adjust(copula_shape);
+        return student_t_cdf(z | copula_shape, 0, adj);
     }    
 }
 
-real copula_marginal_quantile(real p, real copula) {
+real copula_marginal_quantile(real p, int copula_type, real copula_shape) {
     real adj;
 
-    if(copula < 1e-10)
+    if(copula_type == 0)
         return inv_Phi(p);
     else {
-        adj = get_student_std_adjust(copula);
-        return student_t_quantile(p, copula) * adj;
+        adj = get_student_std_adjust(copula_shape);
+        return student_t_quantile(p, copula_shape) * adj;
     }    
 }
 
-real copula_marginal_quantile_log_jac(real z, real copula) {
+real copula_marginal_quantile_log_jac(real z, int copula_type, real copula_shape) {
     real adj;
 
-    if(copula < 1e-10)
+    if(copula_type == 0)
         return -std_normal_lpdf(z);
     else {
-        adj = get_student_std_adjust(copula);
-        return -student_t_lpdf(z | copula, 0., adj);
+        adj = get_student_std_adjust(copula_shape);
+        return -student_t_lpdf(z | copula_shape, 0., adj);
     }    
 }
 
-real copula_log_pdf(vector z, real copula, matrix corr) {
+real copula_log_pdf(vector z, int copula_type, real copula_shape, matrix corr) {
     int P = size(z);
     row_vector[P] zero_mean = zeros_row_vector(P);
     real adj1;
     real adj2;
 
-    if(copula < 1e-10)
+    if(copula_type == 0)
         return multi_normal_lpdf(z | zero_mean, corr);
     else {
         // This is the inverse of the adjustment factor
         // to correct for the change in the 
         // inverse covariance matrix
-        adj1 = 1. / get_student_std_adjust(copula);
+        adj1 = 1. / get_student_std_adjust(copula_shape);
 
         // We also need to take into account a correction
         // on the determinant of the covariance matrix
         adj2 = P * log(adj1);
         
-        return adj2 + multi_student_t_lpdf(adj1 * z | copula, zero_mean, corr);
+        return adj2 + multi_student_t_lpdf(adj1 * z | copula_shape, zero_mean, corr);
     }    
 }
 
-vector copula_rng(real copula, matrix corr) {
+vector copula_rng(int copula_type, real copula_shape, matrix corr) {
     int P = rows(corr);
     row_vector[P] zero_mean = zeros_row_vector(P);
     real adj;
 
-    if(copula < 1e-10) {
+    if(copula_type == 0) {
         return multi_normal_rng(zero_mean, corr);
     }
     else {
-        adj = get_student_std_adjust(copula);
-        return adj * multi_student_t_rng(copula, zero_mean, corr);
+        adj = get_student_std_adjust(copula_shape);
+        return adj * multi_student_t_rng(copula_shape, zero_mean, corr);
     }
 }
 
