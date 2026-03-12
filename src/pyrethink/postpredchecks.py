@@ -86,13 +86,8 @@ def bivariate_dependence_statistics(data,
         errmsg = "Expected 2 columns in data, got P={P}."
         raise ValueError(errmsg)
 
-    names = ["kendalltau", "kendalltau_high"] \
-        + [f"xi_q{q}" for q in perc_tails] \
-        + [f"xibar_q{q}" for q in perc_tails] \
-        + [f"tau_q{q}" for q in perc_tails]
-    stats = pd.Series(np.nan, index=names)
-
     # Kendall tau
+    stats = {}
     stats["kendalltau"] = kendalltau(x, y).statistic
 
     # Kendall tau above medians

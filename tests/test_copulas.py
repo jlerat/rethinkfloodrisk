@@ -28,7 +28,7 @@ from floodstan import marginals
 from floodstan import bivariate_censored_sampling
 
 from pyrethink import datahub
-from pyrethink import copula
+from pyrethink import copulas
 
 FTESTS = Path(__file__).resolve().parent
 
@@ -36,22 +36,22 @@ def get_type(copula_shape):
     return 0 if abs(copula_shape) < 1e-10 else 1
 
 @pytest.mark.parametrize("copula_shape", [0., 2.5, 5., 10.])
-def test_copula_marginals(copula, allclose):
+def test_copula_marginals(copula_shape, allclose):
     copula_type = get_type(copula_shape)
 
     n = 10000
     u1 = np.linspace(1./n, 1 - 1./n, n)
-    z1 = copula.copula_marginal_ppf(copula_type, copula_shape, u1)
+    z1 = copulas.copula_marginal_ppf(copula_type, copula_shape, u1)
 
-    u2 = copula.copula_marginal_cdf(copula_type, copula_shape, z1)
+    u2 = copulas.copula_marginal_cdf(copula_type, copula_shape, z1)
     assert allclose(u1, u2)
 
-    z2 = copula.copula_marginal_ppf(copula_type, copula_shape, u2)
+    z2 = copulas.copula_marginal_ppf(copula_type, copula_shape, u2)
     assert allclose(z1, z2)
 
     n = 1000000
     u = np.random.uniform(size=n)
-    z = copula.copula_marginal_ppf(copula_type, copula_shape, u)
+    z = copulas.copula_marginal_ppf(copula_type, copula_shape, u)
     assert allclose(z.mean(), 0, atol=5e-3)
     assert allclose(z.std(), 1, atol=5e-2)
 
@@ -60,7 +60,7 @@ def test_copula_marginals(copula, allclose):
 def test_cov2corr(repeat, allclose):
     nsta = 6
     cov = invwishart.rvs(df=nsta+1, scale=np.eye(nsta))
-    corr = copula.cov2corr(cov)
+    corr = copulas.cov2corr(cov)
     d = np.diag(1./np.sqrt(np.diag(cov)))
     assert allclose(corr, d @ cov @ d)
 
@@ -72,16 +72,16 @@ def test_random_corr(repeat, allclose):
 
     z2 = []
     rho0, rho1 = 0.2, 0.8
-    c0 = copula.corr_ref(nsta, rho0)
-    c1 = copula.corr_ref(nsta, rho1)
+    c0 = copulas.corr_ref(nsta, rho0)
+    c1 = copulas.corr_ref(nsta, rho1)
 
     nrepeat = 100
     for i in range(nrepeat):
         idx = np.triu_indices(nsta, 1)
-        x = copula.random_corr(nsta)[idx]
+        x = copulas.random_corr(nsta)[idx]
         z1.append(x)
 
-        x = copula.random_corr(nsta, c0, c1)[idx]
+        x = copulas.random_corr(nsta, c0, c1)[idx]
         z2.append(x)
 
     z1 = (np.array(z1) + 1) / 2
@@ -97,19 +97,19 @@ def test_random_corr(repeat, allclose):
 def test_conditional_sample(copula_shape, allclose):
     copula_type = get_type(copula_shape)
     nsta = 4
-    ccs = copula.Copula(copula_type, copula_shape, nsta)
+    ccs = copulas.Copula(copula_type, copula_shape, nsta)
 
     rho0, rho1 = 0.8, 0.99
-    c0 = copula.corr_ref(nsta, rho0)
-    c1 = copula.corr_ref(nsta, rho1)
-    ccs.corr = copula.random_corr(nsta, c0, c1)
+    c0 = copulas.corr_ref(nsta, rho0)
+    c1 = copulas.corr_ref(nsta, rho1)
+    ccs.corr = copulas.random_corr(nsta, c0, c1)
 
     icond = np.array([0])
     itarget = np.array([1, 2, 3])
 
     ucond = np.array([0.6])
 
-    zcond = copula.copula_marginal_ppf(copula_type, copula_shape, ucond)
+    zcond = copulas.copula_marginal_ppf(copula_type, copula_shape, ucond)
     nrepeat = 5000
 
     atol_mean = 5./math.sqrt(nrepeat)
@@ -127,12 +127,12 @@ def test_conditional_sample(copula_shape, allclose):
     while nok < nrepeat:
         to_sample = np.where(iok == 0)[0]
         n_to_sample = len(to_sample)
-        if copula == 0:
+        if copula_type == 0:
             zz = mvn.rvs(mean=np.zeros(nsta), cov=ccs.corr_rescaled,
                          size=10 * n_to_sample)
         else:
             zz = mvt.rvs(loc=np.zeros(nsta), shape=ccs.corr_rescaled,
-                         df=copula,
+                         df=copula_shape,
                          size=10 * n_to_sample)
         iclose = np.abs(zz[:, icond[0]] - zcond[0]) < 1e-3
         tmp = zz[iclose]
@@ -180,8 +180,8 @@ def test_conditional_sample(copula_shape, allclose):
 def test_copula_sample(copula_shape, allclose):
     copula_type = get_type(copula_shape)
     nsta = 4
-    ccs = copula.Copula(copula_type, copula_shape, nsta)
-    ccs.corr = copula.random_corr(nsta)
+    ccs = copulas.Copula(copula_type, copula_shape, nsta)
+    ccs.corr = copulas.random_corr(nsta)
     nsamples = 500000
 
     # Sample given ipart
@@ -225,11 +225,11 @@ def test_copula_sample(copula_shape, allclose):
 def test_copula_cdf(repeat, copula_shape, allclose):
     copula_type = get_type(copula_shape)
     nsta = 4
-    ccs = copula.Copula(copula_type, copula_shape, nsta)
+    ccs = copulas.Copula(copula_type, copula_shape, nsta)
     rho0, rho1 = 0.5, 0.99
-    c0 = copula.corr_ref(nsta, rho0)
-    c1 = copula.corr_ref(nsta, rho1)
-    ccs.corr = copula.random_corr(nsta, c0, c1)
+    c0 = copulas.corr_ref(nsta, rho0)
+    c1 = copulas.corr_ref(nsta, rho1)
+    ccs.corr = copulas.random_corr(nsta, c0, c1)
     nsamples = 500000
 
     z0 = np.random.uniform(-0.5, 0.5, size=nsta)

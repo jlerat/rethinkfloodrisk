@@ -12,6 +12,8 @@ from scipy.stats import multivariate_t as mvt
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
+from pyrethink.partitions import Partitions
+
 COPULA_TYPES = {
         0: "gaussian",
         1: "student"
@@ -75,7 +77,7 @@ def check_copula(copula_type, copula_shape):
     if copula_shape > 0:
         mini = STUDENT_DF_MIN
         maxi = STUDENT_DF_MAX
-        if copula_shape < mini or copula > maxi:
+        if copula_shape < mini or copula_shape > maxi:
             errmsg = f"Expected 'copula_shape' in [{mini}, {maxi}]."
             raise ValueError(errmsg)
 
@@ -89,7 +91,6 @@ class Copula():
         check_copula(copula_type, copula_shape)
         self._copula_type = copula_type
         self._copula_shape = copula_shape
-        self._nstations = nstations
         self._partitions = Partitions(nstations)
         self._mean = np.zeros(nstations)
 
@@ -103,7 +104,7 @@ class Copula():
 
     @property
     def nstations(self):
-        return self._nstations
+        return self._partitions.nelements
 
     @property
     def partitions(self):
@@ -186,11 +187,12 @@ class Copula():
         idx_join = sets_cond == sets_target
         ijoin = itarget[idx_join]
         z = np.zeros(len(itarget))
+        copula_type = self.copula_type
 
         if len(ijoin) > 0:
             # Conditional covariance matrices
             S11 = corr_rescaled[icond][:, icond]
-            S11i = 1./S11  # Because we only allow zcond of dim 1
+            S11i = 1./S11  # Because we only allow zcond of length = 1
             S22 = np.ascontiguousarray(corr_rescaled[ijoin][:, ijoin])
             S21 = np.ascontiguousarray(corr_rescaled[ijoin][:, icond])
 
@@ -201,9 +203,9 @@ class Copula():
                 # MV student conditional
                 # See https://en.wikipedia.org/wiki/Multivariate_t-distribution
                 #    #Conditional_Distribution
-                nu = self.copula_type
+                nu = self.copula_shape
 
-                p1 = 1  # Because we only allow zcond of dim 1
+                p1 = 1  # Because we only allow zcond of length = 1
                 d1 = zcond.T @ S11i @ zcond
 
                 a = (nu + d1) / (nu + p1)
@@ -225,10 +227,13 @@ class Copula():
         if len(isep) > 0:
             S22 = np.ascontiguousarray(corr_rescaled[isep][:, isep])
             mu22 = self.mean[isep]
-            if copula > 0:
-                z[idx_sep] = mvt.rvs(loc=mu22, shape=S22, df=copula)
-            else:
+            if copula_type == 1:
+                z[idx_sep] = mvt.rvs(loc=mu22, shape=S22, df=self.copula_shape)
+            elif copula_type == 0:
                 z[idx_sep] = mvn.rvs(mean=mu22, cov=S22)
+            else:
+                errmsg = "Sampling not handling copula type {copula_type}."
+                raise ValueError(errmsg)
 
         return z
 
