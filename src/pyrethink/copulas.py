@@ -86,8 +86,8 @@ def check_copula(copula_type, copula_shape):
 class Copula():
     def __init__(self, copula_type, copula_shape, nstations):
         check_copula(copula_type, copula_shape)
-        self._copula_type = copula_type
-        self._copula_shape = copula_shape
+        self._copula_type = int(copula_type)
+        self._copula_shape = float(copula_shape)
         self._partitions = Partitions(nstations)
         self._mean = np.zeros(nstations)
 

@@ -37,8 +37,8 @@ class StanSamplingMultivariate():
             errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
             raise ValueError(errmsg)
 
-        self.copula_type = copula_type
-        self.copula_shape = copula_shape
+        self.copula_type = int(copula_type)
+        self.copula_shape = float(copula_shape)
         self.rho_min = rho_min
         self.rho_max = rho_max
 
@@ -207,7 +207,7 @@ class StanSamplingMultivariate():
             "clusters_counts": self.clusters_counts.astype(int),
             "partitions_id": self.partitions_id,
             "copula_type": int(self.copula_type),
-            "copula_shape": int(self.copula_shape),
+            "copula_shape": float(self.copula_shape),
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
             "yshape1_prior": MARGINAL.shape1_prior.to_list(),
