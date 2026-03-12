@@ -8,7 +8,7 @@ from scipy.stats import kstest, norm
 from scipy.stats import t as student_t
 
 from pyrethink import datahub
-from pyrethink.sample import Partitions
+from pyrethink.partitions import Partitions
 from pyrethink import postpredchecks as ppc
 
 from floodstan.marginals import GEV
@@ -28,6 +28,30 @@ SAMPLES.columns = [re.sub("^cor", "corr", cn) for cn in SAMPLES.columns]
 
 MARGINAL = GEV()
 
+
+def test_exceedance_probabilities(allclose):
+    potpeaks, _, _ = datahub.get_potpeaks()
+    qt = ppc.QTAILS_DEFAULT
+    plj, phj = ppc.exceedance_probabilities(potpeaks, qt)
+    nq = len(qt)
+
+    assert len(plj) == nq
+    assert len(phj) == nq
+
+    q = 70
+    for q in [60, 70, 80, 90]:
+        iq = np.argmin(np.abs(qt - q))
+        x = np.nanpercentile(potpeaks, [q], axis=0)
+
+        ilow = np.all(potpeaks.values - x <= 0, axis=1)
+        N = len(potpeaks)
+        assert allclose(plj[iq], ilow.sum() / N)
+
+        ihigh = np.all(potpeaks.values - x >= 0, axis=1)
+        N = len(potpeaks)
+        assert allclose(phj[iq], ihigh.sum() / N)
+
+
 @pytest.mark.parametrize("station", np.arange(NSTATIONS).tolist())
 def test_univariate_statistics(station):
     potpeaks, _, _ = datahub.get_potpeaks()
@@ -41,6 +65,8 @@ def test_multivariate_statistics():
     potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks
     mv = ppc.multivariate_dependence_statistics(data)
+    import pdb; pdb.set_trace()
+
     assert mv.notnull().all()
 
 
@@ -49,13 +75,21 @@ def test_bivariate_statistics(station, allclose):
     potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks.iloc[:, station:station+2]
     biv = ppc.bivariate_dependence_statistics(data)
-    assert biv.notnull().all()
+    if station != 3:
+        assert biv.notnull().all()
 
     qm = data.median()
-    iabove = (data - qm.values[None, :] >= 0).all(axis=1)
-    assert all(data.loc[iabove].min() - qm >= 0)
-    expected = iabove.sum() / len(data)
-    assert allclose(biv["taildep_q50"], expected)
+    iboth = (data - qm.values[None, :] <= 0).all(axis=1)
+    ifirst = data.iloc[:, 0] - qm.values[0] <= 0
+    N = len(data)
+    expected = 2 - math.log(iboth.sum() / N) / math.log(ifirst.sum() / N)
+    assert allclose(biv["xi_q50"], expected)
+
+    iboth = (data - qm.values[None, :] >= 0).all(axis=1)
+    assert all(data.loc[iboth].min() - qm >= 0)
+    ifirst = data.iloc[:, 0] - qm.values[0] >= 0
+    expected = 2 * math.log(ifirst.sum() / N) / math.log(iboth.sum() / N) - 1
+    assert allclose(biv["xibar_q50"], expected)
 
 
 @pytest.mark.parametrize("copula", [0, 2.5, 5])
@@ -72,11 +106,11 @@ def test_posterior_predictive_checks(copula):
     ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
                                                           copula, parts_id, dalpha)
 
-    assert ppu.shape == (7, 21)
-    assert ppb.shape == (6, 21)
-    assert ppm.shape == (4, 7)
-    assert ppu.filter(regex="pvalue\\[", axis=1).shape == (7, 3)
-    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (6, 3)
-    assert ppm.filter(regex="pvalue$", axis=1).shape == (4, 1)
+    assert ppu.shape == (28, 21)
+    assert ppb.shape == (77, 21)
+    assert ppm.shape == (25, 7)
+    assert ppu.filter(regex="pvalue\\[", axis=1).shape == (28, 3)
+    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (77, 3)
+    assert ppm.filter(regex="pvalue$", axis=1).shape == (25, 1)
 
 

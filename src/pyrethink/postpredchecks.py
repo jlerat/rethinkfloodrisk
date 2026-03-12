@@ -1,3 +1,4 @@
+import math
 from itertools import combinations as combs
 import numpy as np
 import pandas as pd
@@ -7,10 +8,12 @@ from scipy.stats import kendalltau
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
-from pyrethink.sample import CopulaSampling
+from pyrethink.copula import Copula
+
+QTAILS_DEFAULT = np.arange(50, 100, 2)
 
 
-def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
+def univariate_statistics(data, eta=2, qtails=QTAILS_DEFAULT):
     stats = np.zeros(3 + len(qtails))
 
     lmom = lh_moments(data, eta, True)
@@ -27,26 +30,51 @@ def univariate_statistics(data, eta=2, qtails=[50, 75, 90, 95]):
     return pd.Series(stats, index=idx)
 
 
+def exceedance_probabilities(data, qtails):
+    data = np.array(data)
+    qt = np.nanpercentile(data, qtails, axis=0).T
+
+    is_lower = data[:, :, None] - qt[None, :, :] <= 0
+    N = len(data)
+    plow_joint = is_lower.all(axis=1).sum(axis=0) / N
+
+    is_greater = data[:, :, None] - qt[None, :, :] >= 0
+    phigh_joint = is_greater.all(axis=1).sum(axis=0) / N
+
+    return plow_joint, phigh_joint
+
+
 def multivariate_dependence_statistics(data,
-                                       qtails=[50, 75, 90, 95]):
+                                       qtails=QTAILS_DEFAULT):
+    """
+    Joe, H. (2014). Dependence Modeling with Copulas (0 ed.).
+    Chapman and Hall/CRC.
+    https://doi.org/10.1201/b17116
+    Section 2.13
+    """
     data = np.array(data)
     data = data[np.all(~np.isnan(data), axis=1)]
     N, P = data.shape
-    names = [f"taildep_q{q}" for q in qtails]
-    stats = pd.Series(np.nan, index=names)
 
-    # Tail dependence
-    qt = np.nanpercentile(data, qtails, axis=0).T
-    is_greater = data[:, :, None] - qt[None, :, :] >= 0
-    cnt = is_greater.all(axis=1).sum(axis=0)
-    for iq, q in enumerate(qtails):
-        stats[f"taildep_q{q}"] = cnt[iq] / N
+    p0, p1 = extreme_probabilities(data, qtails)
+    u = qtails / 100
+    tau = p1 / (1 - qtails / 100)
+    xi = 2 - np.log(p0) / np.log(u)
+    xibar  = 2 * np.log(u) / np.log(p1) - 1
 
-    return stats
+    return pd.DataFrame([tau, xi, xibar], index=qtails,
+                        columns=["tau", "xi", "xibar"])
 
 
 def bivariate_dependence_statistics(data,
-                                    qtails=[50, 75, 90, 95]):
+                                    qtails=QTAILS_DEFAULT):
+    """
+    See Coles, S., Heffernan, J., & Tawn, J. (1999).
+    Dependence Measures for Extreme Value Analyses.
+    Extremes, 2(4), 339–365.
+    https://doi.org/10.1023/A:1009963131610
+    """
+
     data = np.array(data)
     data = data[np.all(~np.isnan(data), axis=1)]
     N, P = data.shape
@@ -57,7 +85,10 @@ def bivariate_dependence_statistics(data,
         errmsg = "Expected 2 columns in data, got P={P}."
         raise ValueError(errmsg)
 
-    names = ["kendalltau", "kendalltau_high"]
+    names = ["kendalltau", "kendalltau_high"] \
+        + [f"xi_q{q}" for q in qtails] \
+        + [f"xibar_q{q}" for q in qtails] \
+        + [f"tau_q{q}" for q in qtails]
     stats = pd.Series(np.nan, index=names)
 
     # Kendall tau
@@ -70,8 +101,7 @@ def bivariate_dependence_statistics(data,
     stats[n] = kendalltau(x[ihigh], y[ihigh]).statistic
 
     # Tail dependence
-    tailstats = multivariate_dependence_statistics(data, qtails)
-    stats = pd.concat([stats, tailstats])
+    stats["dependence"] = multivariate_dependence_statistics(data, qtails)
 
     return stats
 
@@ -100,7 +130,8 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 
 def posterior_predictive_checks(yobs, params,
-                                copula,
+                                copula_type,
+                                copula_shape,
                                 partitions_id,
                                 dirichlet_alpha,
                                 logger=None,
@@ -112,7 +143,7 @@ def posterior_predictive_checks(yobs, params,
     nsamples = len(params)
 
     # copula sampling tools
-    copsamp = CopulaSampling(copula, nsta)
+    copsamp = Copula(copula_type, copula_shape, nsta)
     probs = copsamp.partitions.compute_probabilities(partitions_id,
                                                      dirichlet_alpha)
     # Compute obs

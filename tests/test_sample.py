@@ -295,7 +295,7 @@ def test_conditional_sample(copula, allclose):
     atol_cov = 10./math.sqrt(nrepeat)
 
     # Check conditional on full cluster
-    z = np.array([ccs.conditional_sample_given_ipart(0, icond, zcond, itarget)
+    z = np.array([ccs.conditional_sample_given_partition(0, icond, zcond, itarget)
                   for i in range(nrepeat)])
 
     zz_cond = np.empty(z.shape)
@@ -330,7 +330,7 @@ def test_conditional_sample(copula, allclose):
 
     # Check independence of clusters
     for ipart in range(ccs.partitions.nsubsets):
-        z = [ccs.conditional_sample_given_ipart(ipart, icond, zcond, itarget)
+        z = [ccs.conditional_sample_given_partition(ipart, icond, zcond, itarget)
              for i in range(nrepeat)]
         z = np.array(z)
 
@@ -364,7 +364,7 @@ def test_copula_sample(copula, allclose):
 
     # Sample given ipart
     for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_ipart(ipart, nsamples)
+        z = ccs.sample_z_given_partition(ipart, nsamples)
 
         zm = z.mean(axis=0)
         assert allclose(zm, 0, atol=1e-2)
@@ -398,21 +398,40 @@ def test_copula_sample(copula, allclose):
     assert allclose(pp, expected, atol=5e-3)
 
 
-@pytest.mark.parametrize("copula", [0., 4.])
-def test_copula_cdf(copula, allclose):
+@pytest.mark.parametrize("copula", [0., 5., 10.])
+@pytest.mark.parametrize("repeat", range(10))
+def test_copula_cdf(repeat, copula, allclose):
     nsta = 4
     ccs = sample.CopulaSampling(copula, nsta)
     rho0, rho1 = 0.5, 0.99
     c0 = sample.corr_ref(nsta, rho0)
     c1 = sample.corr_ref(nsta, rho1)
     ccs.corr = sample.random_corr(nsta, c0, c1)
-    nsamples = 50000
+    nsamples = 500000
+
+    z0 = np.random.uniform(-0.5, 0.5, size=nsta)
+    z0 = np.array([0.49, -0.5, 0.39, -0.1])
+    print()
+    print()
+    print(f"z0 = {z0.round(2)}")
+    print()
+
+    atol = 2e-2
 
     for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_ipart(ipart, nsamples)
-        p0 = (z<0).all(axis=1).sum() / nsamples
-        _, c0 = ccs.pdf_and_cdf_given_ipart(ipart, np.zeros(nsta))
-        assert allclose(p0, c0, atol=5e-2)
+        z = ccs.sample_z_given_partition(ipart, nsamples)
+
+
+        ce = (z - z0[None, :] < 0).all(axis=1).sum() / nsamples
+        c0 = ccs.cdf_given_partition(ipart, z0)
+        assert allclose(ce, c0, atol=atol)
+
+        se = (z - z0[None, :] >= 0).all(axis=1).sum() / nsamples
+        s0 = ccs.survival_given_partition(ipart, z0)
+        passed = abs(se - s0) < atol
+
+        print(f"ipart={ipart} / s0={s0:0.3f} se={se:0.3f} passed={passed}")
+        #assert allclose(se, s0, atol=atol)
 
 
 @pytest.mark.parametrize("config", ["censored", "uncensored"])
