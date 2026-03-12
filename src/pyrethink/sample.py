@@ -1,16 +1,12 @@
-import math
 from itertools import combinations
 
 import numpy as np
 
-from scipy.stats import norm
-from scipy.stats import invwishart
-from scipy.stats import t as student_t
-from scipy.stats import multivariate_normal as mvn
-from scipy.stats import multivariate_t as mvt
-
 from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
+
+from pyrethink import copulas
+from pyrethink.partitions import Partitions
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.
@@ -21,7 +17,9 @@ DELTA_DAYS_MAX_DEFAULT = 10
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data, day_of_year, copula,
+    def __init__(self, data, day_of_year,
+                 copula_type,
+                 copula_shape,
                  censors=None,
                  skip_clusters=False,
                  rho_min=RHO_MIN_DEFAULT,
@@ -29,7 +27,7 @@ class StanSamplingMultivariate():
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
         # Check data
-        check_copula(copula)
+        copulas.check_copula(copula_type, copula_shape)
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -39,7 +37,8 @@ class StanSamplingMultivariate():
             errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
             raise ValueError(errmsg)
 
-        self.copula = copula
+        self.copula_type = copula_type
+        self.copula_shape = copula_shape
         self.rho_min = rho_min
         self.rho_max = rho_max
 
@@ -222,4 +221,3 @@ class StanSamplingMultivariate():
             "rho_max": self.rho_max
         }
         return dd
-

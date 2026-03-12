@@ -1,4 +1,3 @@
-import math
 from itertools import combinations as combs
 import numpy as np
 import pandas as pd
@@ -66,7 +65,7 @@ def multivariate_dependence_statistics(data,
 
     tau = p1 / (1 - u)
     xi = 2 - np.log(p0) / np.log(u)
-    xibar  = 2 * np.log(1 - u) / np.log(p1) - 1
+    xibar = 2 * np.log(1 - u) / np.log(p1) - 1
 
     df = pd.DataFrame({"tau": tau, "xi": xi, "xibar": xibar},
                       index=perc_tails)

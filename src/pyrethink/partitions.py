@@ -2,6 +2,7 @@ from itertools import combinations
 
 import numpy as np
 
+
 class Partitions():
     def __init__(self, nelements):
         if nelements > 10:
@@ -135,4 +136,3 @@ class Partitions():
         k = np.arange(self.nsubsets)
         return np.random.choice(k, p=probs,
                                 size=nsamples)
-

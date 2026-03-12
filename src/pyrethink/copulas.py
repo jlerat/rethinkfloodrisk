@@ -9,9 +9,6 @@ from scipy.stats import t as student_t
 from scipy.stats import multivariate_normal as mvn
 from scipy.stats import multivariate_t as mvt
 
-from floodstan.data_processing import univariate2cases
-from floodstan.marginals import GEV
-
 from pyrethink.partitions import Partitions
 
 COPULA_TYPES = {
@@ -70,7 +67,7 @@ def copula_marginal_cdf(copula_type, copula_shape, z):
 
 def check_copula(copula_type, copula_shape):
     if copula_type not in COPULA_TYPES:
-        txt = f"/".join([str(t) for t in COPULA_TYPES])
+        txt = "/".join([str(t) for t in COPULA_TYPES])
         errmsg = f"Expected 'copula_type' in {txt}, got {copula_type}."
         raise ValueError(errmsg)
 
@@ -239,7 +236,8 @@ class Copula():
 
     def get_rv(self, iselected):
         copula_type = self.copula_type
-        scorr = np.ascontiguousarray(self.corr_rescaled[iselected][:, iselected])
+        scorr = self.corr_rescaled[iselected][:, iselected]
+        scorr = np.ascontiguousarray(scorr)
         mu = np.zeros(self.nstations)
 
         if copula_type == 1:
@@ -264,7 +262,6 @@ class Copula():
         for iset in np.unique(sets_selected):
             idx = (iset == sets) & isin
             yield idx
-
 
     def pdf_given_partition(self, ipart, z, iselect=None):
         nsta = self.nstations
@@ -298,7 +295,6 @@ class Copula():
             errmsg = f"Expected z of length {nsta}."
             raise ValueError(errmsg)
 
-        kk = np.arange(nsta)
         surv = 1. - norm.cdf(z).sum()
         sets = self.partitions.ipart2sets(ipart)
 
@@ -350,7 +346,7 @@ class Copula():
         copula_shape = self.copula_shape
         if copula_type == 1:
             adj = math.sqrt(self.corr_rescaled[0, 0])
-            u = student_t.cdf(z, df=copula, loc=0, scale=adj)
+            u = student_t.cdf(z, df=copula_shape, loc=0, scale=adj)
         elif copula_type == 0:
             u = norm.cdf(z)
         else:
@@ -376,10 +372,11 @@ class Copula():
         copula_shape = self.copula_shape
         if copula_type == 1:
             adj = math.sqrt(self.corr_rescaled[0, 0])
-            u = student_t.cdf(z, df=copula, loc=0, scale=adj)
+            u = student_t.cdf(z, df=copula_shape, loc=0, scale=adj)
         elif copula_type == 0:
             u = norm.cdf(z)
         else:
             errmsg = "Sampling not handling copula type {copula_type}."
+            raise ValueError(errmsg)
 
         return u, iparts
