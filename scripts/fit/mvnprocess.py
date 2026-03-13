@@ -127,7 +127,7 @@ fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
                             rho_min="^" + re.sub("\\.0+$", "", f"{rho_min:0.1f}"),
-                            copula="^" + re.sub("\\.0$", "", str(copula_shape)),
+                            copula_shape="^" + re.sub("\\.0$", "", str(copula_shape)),
                             has_clusters=has_clusters,
                             exclude=exclude)
 assert len(fit_taskid) == 1
