@@ -69,12 +69,13 @@ def get_logger(config, script_paths):
 
 def diag2run_config(diag):
     RN = namedtuple("Run",
-                    ["exclude", "pcensor", "rho_min", "copula",
+                    ["exclude", "pcensor", "rho_min",
+                     "copula_shape",
                      "has_cluster", "text"])
     ex = diag["task_exclude"]
     pc = diag["task_pcensor"]
     rm = diag["task_rho_min"]
-    cop = diag["task_copula"]
+    cop = diag["task_copula_shape"]
     hc = diag["task_has_clusters"]
     txt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}_EX{ex}"
     return RN(ex, pc, rm, cop, hc, txt)
@@ -92,16 +93,16 @@ def get_taskids(config, script_paths):
     kw = {}
 
     if hasattr(config, "pcensor"):
-        kw["pcensor"] = f"{config.pcensor:0.1f}"
+        kw["pcensor"] = config.pcensor
 
     if hasattr(config, "excludes"):
         kw["exclude"] = "|".join(config.excludes)
 
     if hasattr(config, "rho_min"):
-        kw["rho_min"] = re.sub("\.0$", "", f"{config.rho_min:0.1f}")
+        kw["rho_min"] = config.rho_min
 
-    if hasattr(config, "copula"):
-        kw["copula"] = config.copula
+    if hasattr(config, "copula_shape"):
+        kw["copula_shape"] = config.copula_shape
 
     return opm.find(**kw)
 
@@ -120,7 +121,7 @@ def get_data(config, script_paths, logger):
         "pcensors": set(),
         "rho_mins": set(),
         "has_clusters": set(),
-        "copulas": set()
+        "copula_shapes": set()
     }
 
     run_configs = []
@@ -134,7 +135,7 @@ def get_data(config, script_paths, logger):
         options["pcensors"].add(rn.pcensor)
         options["rho_mins"].add(rn.rho_min)
         options["has_clusters"].add(rn.has_cluster)
-        options["copulas"].add(rn.copula)
+        options["copula_shapes"].add(rn.copula_shape)
         run_configs.append(rn)
 
         mess = f"Load data from TASK {taskid} {rn.text}"
@@ -216,8 +217,8 @@ def get_iter_options(data):
     pcensors = data.options["pcensors"]
     rho_mins = data.options["rho_mins"]
     has_clusters = data.options["has_clusters"]
-    copulas = data.options["copulas"]
-    return prod(pcensors, rho_mins, has_clusters, copulas)
+    copula_shapes = data.options["copula_shapes"]
+    return prod(pcensors, rho_mins, has_clusters, copula_shapes)
 
 
 def select_data(data, **kwargs):
@@ -238,8 +239,8 @@ def select_data(data, **kwargs):
         if "has_cluster" in kwargs:
             isin &= rn.has_cluster == kwargs["has_cluster"]
 
-        if "copula" in kwargs:
-            isin &= rn.copula == kwargs["copula"]
+        if "copula_shape" in kwargs:
+            isin &= rn.copula_shape == kwargs["copula_shape"]
 
         if isin:
             selected.append(rn)
@@ -263,15 +264,15 @@ def select_data(data, **kwargs):
 
 def process(config, script_paths, logger, data):
 
-    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
         ffa, obs_data, _, _, _ = select_data(data,
                                              pcensor=pcensor,
                                              rho_min=rho_min,
                                              has_cluster=has_cluster,
-                                             copula=copula)
-
+                                             copula_shape=copula_shape)
         if len(ffa) == 0:
             continue
+
         assert len(ffa) == 2
 
         rn_isin = next(rn for rn in ffa if rn.exclude == "NONE")

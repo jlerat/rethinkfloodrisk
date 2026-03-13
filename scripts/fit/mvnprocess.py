@@ -79,9 +79,9 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 
 # Select certain fit tasks
 pcensors = [0.3]
-copula_shapes = [0, 3., 5.]
+copula_shapes = [0, 3, 5]
 excludes = ["NONE"]
-rho_mins = [-1., 0]
+rho_mins = [-1, 0]
 has_clusters_all = [True, False]
 dirichlet_alphas = [1., 1.5]
 
@@ -125,9 +125,9 @@ froot = source_file.parent.parent.parent
 
 fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
-fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
-                            rho_min="^" + re.sub("\\.0+$", "", f"{rho_min:0.1f}"),
-                            copula_shape="^" + re.sub("\\.0$", "", str(copula_shape)),
+fit_taskid = opm_fit.search(pcensor=pcensor,
+                            rho_min=rho_min,
+                            copula_shape=copula_shape,
                             has_clusters=has_clusters,
                             exclude=exclude)
 assert len(fit_taskid) == 1
