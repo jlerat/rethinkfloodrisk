@@ -200,12 +200,13 @@ def test_sampler(config, nvars, copula_shape, allclose):
 
     kw["data"]["Ncens"] -= 1
 
-    # Test copula error : =0 (normal) or >2 (student)
-    kw["data"]["copula"] = 1.9
-    with pytest.raises(RuntimeError):
-        mv_censored_no_missing_sampling(**kw)
+    # Test copula shape error
+    if copula_type == 1:
+        kw["data"]["copula_shape"] = 1.9
+        with pytest.raises(RuntimeError):
+            mv_censored_no_missing_sampling(**kw)
 
-    kw["data"]["copula"] = copula
+    kw["data"]["copula_shape"] = copula_shape
 
     # Run sampler
     smp = mv_censored_no_missing_sampling(**kw)

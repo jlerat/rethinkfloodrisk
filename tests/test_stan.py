@@ -31,7 +31,10 @@ SEED = 5446
 def test_stan_indexing():
     data, _, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    sv = sample.StanSamplingMultivariate(data, dows, copula=0., censors=censors)
+    sv = sample.StanSamplingMultivariate(data, dows,
+                                         copula_type=0,
+                                         copula_shape=0.,
+                                         censors=censors)
     stan_data = sv.to_dict()
     df = stan_test_indexing(data=stan_data)
 
@@ -173,7 +176,8 @@ def test_stan_clusters(allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.3)
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula=0,
+                                         copula_type=0,
+                                         copula_shape=0.,
                                          censors=censors)
     stan_data = sv.to_dict()
     N = stan_data["N"]

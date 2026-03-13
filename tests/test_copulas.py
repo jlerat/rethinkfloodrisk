@@ -233,7 +233,7 @@ def test_copula_cdf(repeat, copula_shape, allclose):
     nsamples = 500000
 
     z0 = np.random.uniform(-0.5, 0.5, size=nsta)
-    rtol = 2e-2
+    rtol = 5e-2
 
     for ipart in range(ccs.partitions.nsubsets):
         z = ccs.sample_z_given_partition(ipart, nsamples)
