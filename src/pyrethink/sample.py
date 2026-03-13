@@ -39,8 +39,8 @@ class StanSamplingMultivariate():
 
         self.copula_type = int(copula_type)
         self.copula_shape = float(copula_shape)
-        self.rho_min = rho_min
-        self.rho_max = rho_max
+        self.rho_min = float(rho_min)
+        self.rho_max = float(rho_max)
 
         self.set_data(data, day_of_year, censors)
 
@@ -218,7 +218,7 @@ class StanSamplingMultivariate():
             "shape1_lower": float(MARGINAL.shape1_prior.lower),
             "shape1_upper": float(MARGINAL.shape1_prior.upper),
             "censors": self.censors,
-            "rho_min": self.rho_min,
-            "rho_max": self.rho_max
+            "rho_min": float(self.rho_min),
+            "rho_max": float(self.rho_max)
         }
         return dd
