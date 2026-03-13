@@ -71,7 +71,7 @@ def test_multivariate_statistics(rho, nsta, allclose):
     potpeaks, _, _ = datahub.get_potpeaks()
     data = potpeaks
     mv = ppc.multivariate_dependence_statistics(data)
-    assert mv.shape == (25, 3)
+    assert mv.shape == (10, 3)
     assert mv.notnull().all().all()
 
     # Test routine for multivariate normal
@@ -126,11 +126,10 @@ def test_posterior_predictive_checks(copula_shape):
                                                           copula_shape,
                                                           parts_id,
                                                           dalpha)
-    assert ppu.shape == (28, 21)
-    assert ppb.shape == (77, 21)
-    assert ppm.shape == (25, 7)
-    assert ppu.filter(regex="pvalue\\[", axis=1).shape == (28, 3)
-    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (77, 3)
-    assert ppm.filter(regex="pvalue$", axis=1).shape == (25, 1)
-
+    assert ppu.shape == (9, 21)
+    assert ppb.shape == (32, 21)
+    assert ppm.shape == (30, 7)
+    assert ppu.filter(regex="pvalue\\[", axis=1).shape == (9, 3)
+    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (32, 3)
+    assert ppm.filter(regex="pvalue$", axis=1).shape == (30, 1)
 

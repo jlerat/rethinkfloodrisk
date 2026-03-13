@@ -1,5 +1,4 @@
 import math
-from itertools import combinations
 
 import numpy as np
 
@@ -234,25 +233,30 @@ class Copula():
 
         return z
 
-    def get_rv(self, iselected):
+    def get_iselect(self, iselect=None):
+        nsta = self.nstations
+        return np.arange(nsta) if iselect is None \
+            else iselect
+
+    def get_rv(self, iselect=None):
+        iselect = self.get_iselect(iselect)
         copula_type = self.copula_type
-        scorr = self.corr_rescaled[iselected][:, iselected]
+        scorr = self.corr_rescaled[iselect][:, iselect]
         scorr = np.ascontiguousarray(scorr)
         mu = np.zeros(self.nstations)
 
         if copula_type == 1:
             df = self.copula_shape
-            return mvt(loc=mu[iselected], shape=scorr, df=df)
+            return mvt(loc=mu[iselect], shape=scorr, df=df)
         elif copula_type == 0:
-            return mvn(mean=mu[iselected], cov=scorr)
+            return mvn(mean=mu[iselect], cov=scorr)
         else:
             errmsg = "Cannot get rv for copula type {copula_type}."
             raise ValueError(errmsg)
 
     def get_sets_iterator(self, ipart, iselect):
+        iselect = self.get_iselect(iselect)
         nsta = self.nstations
-        iselect = np.arange(nsta) if iselect is None \
-            else iselect
         isin = np.zeros(nsta).astype(bool)
         isin[iselect] = True
 
@@ -289,27 +293,17 @@ class Copula():
 
         return cdf
 
-    def survival_given_partition(self, ipart, z):
+    def survival_given_partition(self, ipart, z, iselect=None):
+        iselect = self.get_iselect(iselect)
         nsta = self.nstations
         if len(z) != nsta:
             errmsg = f"Expected z of length {nsta}."
             raise ValueError(errmsg)
 
-        surv = 1. - norm.cdf(z).sum()
-        sets = self.partitions.ipart2sets(ipart)
-
-        for nv in range(2, nsta + 1):
-            f = (-1)**nv
-            for ix in combinations(np.arange(nsta), nv):
-                # Compute cdf for each combination
-                ix = np.array(ix)
-                cdf = 1.
-                for s in np.unique(sets[ix]):
-                    ixs = ix[sets[ix] == s]
-                    rvs = self.get_rv(ixs)
-                    cdf *= rvs.cdf(z[ixs])
-
-                surv += f * cdf
+        surv = 1.
+        for idx in self.get_sets_iterator(ipart, iselect):
+            rv = self.get_rv(idx)
+            surv *= rv.cdf(-z[idx])
 
         return surv
 

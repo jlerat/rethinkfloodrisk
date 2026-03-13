@@ -35,7 +35,7 @@ FTESTS = Path(__file__).resolve().parent
 def get_type(copula_shape):
     return 0 if abs(copula_shape) < 1e-10 else 1
 
-@pytest.mark.parametrize("copula_shape", [0., 2.5, 5., 10.])
+@pytest.mark.parametrize("copula_shape", [0., 3., 6., 10.])
 def test_copula_marginals(copula_shape, allclose):
     copula_type = get_type(copula_shape)
 
@@ -220,7 +220,7 @@ def test_copula_sample(copula_shape, allclose):
     assert allclose(pp, expected, atol=5e-3)
 
 
-@pytest.mark.parametrize("copula_shape", [0., 5., 10.])
+@pytest.mark.parametrize("copula_shape", [0., 3., 5., 7., 10.])
 @pytest.mark.parametrize("repeat", range(10))
 def test_copula_cdf(repeat, copula_shape, allclose):
     copula_type = get_type(copula_shape)
@@ -233,25 +233,17 @@ def test_copula_cdf(repeat, copula_shape, allclose):
     nsamples = 500000
 
     z0 = np.random.uniform(-0.5, 0.5, size=nsta)
-    z0 = np.array([0.49, -0.5, 0.39, -0.1])
-    print()
-    print()
-    print(f"z0 = {z0.round(2)}")
-    print()
-
-    atol = 2e-2
+    rtol = 2e-2
 
     for ipart in range(ccs.partitions.nsubsets):
         z = ccs.sample_z_given_partition(ipart, nsamples)
 
         ce = (z - z0[None, :] < 0).all(axis=1).sum() / nsamples
         c0 = ccs.cdf_given_partition(ipart, z0)
-        assert allclose(ce, c0, atol=atol)
+        rerr = abs(math.log(ce) - math.log(c0))
+        assert rerr < rtol
 
         se = (z - z0[None, :] >= 0).all(axis=1).sum() / nsamples
         s0 = ccs.survival_given_partition(ipart, z0)
-        passed = abs(se - s0) < atol
-
-        print(f"ipart={ipart} / s0={s0:0.3f} se={se:0.3f} passed={passed}")
-        #assert allclose(se, s0, atol=atol)
-
+        rerr = abs(math.log(se) - math.log(s0))
+        assert rerr < rtol

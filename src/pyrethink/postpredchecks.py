@@ -7,9 +7,9 @@ from scipy.stats import kendalltau
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
-from pyrethink.copula import Copula
+from pyrethink.copulas import Copula
 
-PERC_TAILS_DEFAULT = np.arange(50, 100, 2)
+PERC_TAILS_DEFAULT = np.arange(50, 100, 5)
 
 
 def univariate_statistics(data, eta=2, perc_tails=np.arange(50, 110, 10)):
@@ -73,6 +73,12 @@ def multivariate_dependence_statistics(data,
     return df
 
 
+def dependence2series(dep):
+    se = pd.melt(dep.reset_index(), id_vars="percentile")
+    se.loc[:, "stat"] = se.variable + "_q" + se.percentile.astype(str)
+    return se.set_index("stat").loc[:, "value"]
+
+
 def bivariate_dependence_statistics(data,
                                     perc_tails=PERC_TAILS_DEFAULT):
     data = np.array(data)
@@ -107,7 +113,6 @@ def compute_predictive_checks(metric_obs, metric_sim):
     sim_std = metric_sim.std()
 
     pvalue = (metric_sim - metric_obs >= 0).sum(axis=0) / (nparams + 1)
-
     diff = (metric_sim < metric_obs) | (metric_sim > metric_obs)
     ndiff = diff.sum()
     pvalue_discr = (metric_sim - metric_obs > 0).sum(axis=0) / (ndiff + 1)
@@ -149,12 +154,16 @@ def posterior_predictive_checks(yobs, params,
     biv_obs = []
     for i1, i2 in combs(range(nsta), 2):
         m = bivariate_dependence_statistics(yobs[:, [i1, i2]])
-        m.name = f"bivariate[{i1 + 1},{i2 + 1}]"
-        biv_obs.append(m)
+        se = dependence2series(m["dependence"])
+        for cn in ["kendalltau", "kendalltau_high"]:
+            se[cn] = m[cn]
+        se.name = f"bivariate[{i1 + 1},{i2 + 1}]"
+        biv_obs.append(se)
 
     biv_obs = pd.DataFrame(biv_obs).T
 
     multi_obs = multivariate_dependence_statistics(yobs)
+    multi_obs = dependence2series(multi_obs)
 
     # Marginal
     gev = GEV()
@@ -187,9 +196,14 @@ def posterior_predictive_checks(yobs, params,
 
         for i1, i2 in combs(range(nsta), 2):
             bi = bivariate_dependence_statistics(ysim[:, [i1, i2]])
-            biv_sim[(i1, i2)].append(bi)
+            se = dependence2series(bi["dependence"])
+            for cn in ["kendalltau", "kendalltau_high"]:
+                se[cn] = bi[cn]
+            se.name = f"bivariate[{i1 + 1},{i2 + 1}]"
+            biv_sim[(i1, i2)].append(se)
 
         mult = multivariate_dependence_statistics(ysim)
+        mult = dependence2series(mult)
         multi_sim.append(pd.DataFrame(mult).T)
 
     # Compute predictiive checks
