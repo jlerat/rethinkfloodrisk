@@ -28,10 +28,10 @@ from hydrodiy.io import csv, iutils, hyruns
 from floodstan.marginals import GEV
 
 from pyrethink import datahub
-from pyrethink import sample
+from pyrethink import copulas
 
 import importlib
-importlib.reload(sample)
+importlib.reload(copulas)
 
 np.random.seed(5446)
 
@@ -79,7 +79,7 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 
 # Select certain fit tasks
 pcensors = [0.3]
-copulas = [0, 2.1, 4.]
+copula_shapes = [0, 3., 5.]
 excludes = ["NONE"]
 rho_mins = [-1., 0]
 has_clusters_all = [True, False]
@@ -88,7 +88,7 @@ dirichlet_alphas = [1., 1.5]
 opm.from_cartesian_product(batch=np.arange(nbatch),
                            pcensor=pcensors,
                            rho_min=rho_mins,
-                           copula=copulas,
+                           copula_shape=copula_shapes,
                            has_clusters=has_clusters_all,
                            dirichlet_alpha=dirichlet_alphas,
                            exclude=excludes)
@@ -99,7 +99,7 @@ batch = task.batch
 pcensor = task.pcensor
 exclude = task.exclude
 rho_min = task.rho_min
-copula = task.copula
+copula_shape = task.copula_shape
 has_clusters = task.has_clusters
 dirichlet_alpha = task.dirichlet_alpha
 
@@ -110,10 +110,12 @@ if debug:
     batch = 0
     pcensor = 0.3
     exclude = "NONE"
-    copula = 0.
+    copula_shape = 0.
     has_clusters = False
     rho_min = 0
     dirichlet_alpha = 1.
+
+copula_type = 1 if copula_shape > 0 else 0
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -125,7 +127,7 @@ fopm = froot / "outputs" / f"copulafit_v{version}" / "copulafit_options.json"
 opm_fit = hyruns.OptionManager.from_file(fopm)
 fit_taskid = opm_fit.search(pcensor=f"{pcensor:0.1f}",
                             rho_min="^" + re.sub("\\.0+$", "", f"{rho_min:0.1f}"),
-                            copula="^" + re.sub("\\.0$", "", str(copula)),
+                            copula="^" + re.sub("\\.0$", "", str(copula_shape)),
                             has_clusters=has_clusters,
                             exclude=exclude)
 assert len(fit_taskid) == 1
@@ -190,7 +192,7 @@ icond = np.where(stationids == stationid_cond)[0]
 itarget = np.where(stationids != stationid_cond)[0]
 
 # Sampler
-ccs = sample.CopulaSampling(copula, nvar)
+ccs = copulas.Copula(copula_type, copula_shape, nvar)
 pids = np.array(data["partitions_id"])
 probs = ccs.partitions.compute_probabilities(pids,
                                              dirichlet_alpha)
@@ -218,18 +220,18 @@ nsamples = len(samples)
 cols_cond = {}
 cols_cond_all = []
 sidc = stationid_cond
-for st, p in prod(["smp_cdf"], aep_targets):
-    cc = [f"mv_cond{sidc}_p{p:0.02f}_{sid}_{st}"
+for st, p in prod(["smp"], aep_targets):
+    cc = [f"mv_cond{sidc}_surv{p:0.02f}_{sid}_{st}"
           for sid in stationids if sid != sidc]
     cols_cond[(st, p)] = cc
     cols_cond_all.extend(cc)
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_log10aep_{event}" for event in obs
+cols_obs = [f"{g}_obs_log10aep_{event}_surv" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
-stats = [f"{st}_p{p:0.02f}"
-         for st in ["log10pall_aeptarget", "log10pany_aeptarget"]
+stats = [f"{st}_surv{p:0.02f}"
+         for st in ["log10all_aeptarget", "log10any_aeptarget"]
          for p in aep_targets]
 
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
@@ -253,31 +255,33 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
     # Sample conditional
     for aep_target in aep_targets:
-        zcond = sample.copula_marginal_ppf(copula, [aep_target])
+        zcond = copulas.copula_marginal_ppf(copula_type,
+                                            copula_shape,
+                                            [aep_target])
         z = ccs.conditional_sample_given_partition(ipartition, icond, zcond,
                                                itarget)
-        u = sample.copula_marginal_cdf(copula, z)
+        u = copulas.copula_marginal_cdf(copula_type, copula_shape, z)
         sid = stationid_cond
-        cc = [f"mv_cond{sidc}_p{aep_target:0.02f}_{sid}_smp_cdf"
+        cc = [f"mv_cond{sidc}_surv{aep_target:0.02f}_{sid}_smp"
               for sid in stationids if sid != sidc]
-        res.loc[i, cc] = u
+        res.loc[i, cc] = 1 - u
 
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
         grp_idx = [get_station_index(sid) for sid in grp_stationids]
 
         for aep_target in aep_targets:
-            zcdf = sample.copula_marginal_ppf(copula, aep_target)
+            zcdf = copulas.copula_marginal_ppf(copula_type, copula_shape, aep_target)
             z = zcdf * np.ones(ccs.nstations)
-            pall = ccs.survival_given_partition(ipartition, z, grp_idx)[1]
-            lpall = math.log10(pall) if pall > 0 else np.nan
-            res.loc[i, f"{gname}_log10pall_aeptarget_p{aep_target:0.02f}"] = lpall
+            sall = ccs.survival_given_partition(ipartition, z, grp_idx)
+            lsall = math.log10(sall) if sall > 0 else np.nan
+            res.loc[i, f"{gname}_log10all_aeptarget_surv{aep_target:0.02f}"] = lsall
 
             # Any above threshold
             z = zcdf * np.ones(ccs.nstations)
-            pany = ccs.survival_given_partition(ipartition, z, grp_idx)[1]
-            lpany = math.log10(pany) if pany > 0 else np.nan
-            res.loc[i, f"{gname}_log10pany_aeptarget_p{aep_target:0.02f}"] = lpany
+            sany = ccs.survival_given_partition(ipartition, z, grp_idx)
+            lsany = math.log10(sany) if sany > 0 else np.nan
+            res.loc[i, f"{gname}_log10any_aeptarget_surv{aep_target:0.02f}"] = lsany
 
         # Obs aep
         for event in obs:
@@ -303,11 +307,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                         lc = math.log10(1 - cdf)
                         res.loc[i, f"G{sid}_obs_log10aep_{event}"] = lc
 
-                    zev[isid - 1] = sample.copula_marginal_ppf(copula, cdf)
+                    zev[isid - 1] = copulas.copula_marginal_ppf(copula_type,
+                                                                copula_shape,
+                                                                cdf)
 
-            pevent = ccs.survival_given_partition(ipartition, zev, grp_idx)[1]
-            lpev = math.log10(pevent) if pevent > 0 else np.nan
-            res.loc[i, f"{gname}_obs_log10aep_{event}"] = lpev
+            sevent = ccs.survival_given_partition(ipartition, zev, grp_idx)
+            lsev = math.log10(sevent) if sevent > 0 else np.nan
+            res.loc[i, f"{gname}_obs_log10aep_{event}_surv"] = lsev
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

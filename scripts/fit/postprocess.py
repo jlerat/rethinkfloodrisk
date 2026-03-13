@@ -83,7 +83,8 @@ fit_taskid = task.fit_taskid
 jobid = task.jobid
 dirichlet_alpha = task.dirichlet_alpha
 
-copula = opm_fit.get_task(fit_taskid).copula
+copula_shape = opm_fit.get_task(fit_taskid).copula_shape
+copula_type = 1 if copula_shape > 0 else 0
 
 ftask = froot / "outputs" / f"copulafit_v{version}" / f"copulafit_TASK{fit_taskid}"
 fout = ftask
@@ -159,7 +160,8 @@ elif jobid == 1:
     if compute:
         LOGGER.info("Computing posterior predictive checks")
         ppu, ppb, ppm, data = ppc.posterior_predictive_checks(yobs, samples,
-                                                              copula,
+                                                              copula_type,
+                                                              copula_shape,
                                                               partitions_id,
                                                               dirichlet_alpha,
                                                               logger=LOGGER)

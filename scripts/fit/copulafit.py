@@ -74,7 +74,7 @@ opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
 
 pcensors = [0.3]
 
-copulas = [0, 2.1, 4.]
+copula_shapes = [0, 3., 5.]
 
 excludes = ["NONE",
             "2021",
@@ -87,7 +87,7 @@ has_clusters_all = [False, True]
 
 opm.from_cartesian_product(pcensor=pcensors,
                            exclude=excludes,
-                           copula=copulas,
+                           copula_shape=copula_shapes,
                            has_clusters=has_clusters_all,
                            rho_min=rho_mins)
 
@@ -96,7 +96,7 @@ task = opm.get_task(max(0, taskid))
 pcensor = task.pcensor
 exclude = task.exclude
 rho_min = task.rho_min
-copula = task.copula
+copula_shape = task.copula_shape
 
 has_clusters = task.has_clusters
 if has_clusters:
@@ -107,8 +107,10 @@ else:
 if debug:
     pcensor = 0.3
     exclude = "2007"
-    copula = 2.5
+    copula_shape = 2.5
     has_clusters = False
+
+copula_type = 1 if copula_shape > 0 else 0
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -164,7 +166,8 @@ LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
 LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
 
 sv = sample.StanSamplingMultivariate(ams, dows,
-                                     copula=copula,
+                                     copula_type=copula_type,
+                                     copula_shape=copula_shape,
                                      censors=censors,
                                      skip_clusters=not has_clusters,
                                      rho_min=rho_min,
