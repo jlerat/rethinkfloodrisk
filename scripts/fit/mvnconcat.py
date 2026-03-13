@@ -70,7 +70,12 @@ for ftask in fout.glob("*TASK*"):
 
     concat = []
     for f in lf:
-        df, comments = csv.read_csv(f)
+        try:
+            df, comments = csv.read_csv(f)
+        except Exception as err:
+            LOGGER.error(f"Pb reading csv {f.stem}")
+            continue
+
         concat.append(df)
 
     cc = ["comment", "period", "pcensor", "fit_taskid",
