@@ -9,6 +9,7 @@ from floodstan.marginals import GEV
 
 from pyrethink.copulas import Copula
 
+
 PERC_TAILS_DEFAULT = np.arange(50, 100, 5)
 
 
