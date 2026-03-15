@@ -56,7 +56,7 @@ debug = args.debug
 
 # Configure mvn conditional
 stationid_cond = "203002"
-aep_targets = [1 - 1e-1, 1 - 1e-2]
+aep_targets = [1, 10]
 
 # Configure mvn cdf
 
@@ -110,7 +110,7 @@ if debug:
     batch = 0
     pcensor = 0.3
     exclude = "NONE"
-    copula_shape = 0.
+    copula_shape = 0
     has_clusters = False
     rho_min = 0
     dirichlet_alpha = 1.
@@ -220,19 +220,19 @@ nsamples = len(samples)
 cols_cond = {}
 cols_cond_all = []
 sidc = stationid_cond
-for st, p in prod(["smp"], aep_targets):
-    cc = [f"mv_cond{sidc}_surv{p:0.02f}_{sid}_{st}"
+for aep in aep_targets:
+    cc = [f"mv_cond{sidc}_aep{aep:02d}_{sid}_smp"
           for sid in stationids if sid != sidc]
-    cols_cond[(st, p)] = cc
+    cols_cond[aep] = cc
     cols_cond_all.extend(cc)
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_log10aep_{event}_surv" for event in obs
+cols_obs = [f"{g}_obs_{event}_log10aep" for event in obs
             for g in list(groups_mvn_cdf.keys()) + gsta]
 
-stats = [f"{st}_surv{p:0.02f}"
-         for st in ["log10all_aeptarget", "log10any_aeptarget"]
-         for p in aep_targets]
+stats = [f"{st}_log10aep{aep:02d}"
+         for st in ["all", "any"]
+         for aep in aep_targets]
 
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
     + cols_cond_all
@@ -255,33 +255,36 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
     # Sample conditional
     for aep_target in aep_targets:
+        prob = 1 - aep_target / 100
         zcond = copulas.copula_marginal_ppf(copula_type,
                                             copula_shape,
-                                            [aep_target])
+                                            [prob])
         z = ccs.conditional_sample_given_partition(ipartition, icond, zcond,
-                                               itarget)
-        u = copulas.copula_marginal_cdf(copula_type, copula_shape, z)
+                                                   itarget)
+        s = copulas.copula_marginal_survival(copula_type, copula_shape, z)
         sid = stationid_cond
-        cc = [f"mv_cond{sidc}_surv{aep_target:0.02f}_{sid}_smp"
+        cc = [f"mv_cond{sidc}_aep{aep_target:02d}_{sid}_smp"
               for sid in stationids if sid != sidc]
-        res.loc[i, cc] = 1 - u
+        res.loc[i, cc] = s
 
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
         grp_idx = [get_station_index(sid) for sid in grp_stationids]
 
         for aep_target in aep_targets:
-            zcdf = copulas.copula_marginal_ppf(copula_type, copula_shape, aep_target)
+            # All above threshold, hence survival copula
+            prob = 1 - aep_target / 100
+            zcdf = copulas.copula_marginal_ppf(copula_type, copula_shape, prob)
             z = zcdf * np.ones(ccs.nstations)
             sall = ccs.survival_given_partition(ipartition, z, grp_idx)
             lsall = math.log10(sall) if sall > 0 else np.nan
-            res.loc[i, f"{gname}_log10all_aeptarget_surv{aep_target:0.02f}"] = lsall
+            res.loc[i, f"{gname}_all_log10aep{aep_target:02d}"] = lsall
 
-            # Any above threshold
+            # Any above threshold, hence 1 - cdf
             z = zcdf * np.ones(ccs.nstations)
-            sany = ccs.survival_given_partition(ipartition, z, grp_idx)
+            sany = 1 - ccs.cdf_given_partition(ipartition, z, grp_idx)
             lsany = math.log10(sany) if sany > 0 else np.nan
-            res.loc[i, f"{gname}_log10any_aeptarget_surv{aep_target:0.02f}"] = lsany
+            res.loc[i, f"{gname}_any_log10aep{aep_target:02d}"] = lsany
 
         # Obs aep
         for event in obs:
@@ -304,8 +307,8 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                     cdf = gev.cdf(qo)
                     # Store individual estimate of event
                     if gname == "GALL":
-                        lc = math.log10(1 - cdf)
-                        res.loc[i, f"G{sid}_obs_log10aep_{event}"] = lc
+                        lc = math.log10(1 - cdf) if 1 - cdf > 0 else np.nan
+                        res.loc[i, f"G{sid}_obs_{event}_log10aep"] = lc
 
                     zev[isid - 1] = copulas.copula_marginal_ppf(copula_type,
                                                                 copula_shape,
@@ -313,7 +316,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
             sevent = ccs.survival_given_partition(ipartition, zev, grp_idx)
             lsev = math.log10(sevent) if sevent > 0 else np.nan
-            res.loc[i, f"{gname}_obs_log10aep_{event}_surv"] = lsev
+            res.loc[i, f"{gname}_obs_{event}_log10aep"] = lsev
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

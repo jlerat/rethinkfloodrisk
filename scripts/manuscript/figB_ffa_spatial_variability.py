@@ -39,21 +39,22 @@ from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
 def process(config, script_paths, logger, data):
-    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
         _, _, mvnproc, _, _ = select_data(data,
                                           pcensor=pcensor,
                                           rho_min=rho_min,
                                           has_cluster=has_cluster,
-                                          copula=copula)
+                                          copula_shape=copula_shape)
         if len(mvnproc) == 0:
             continue
+
         assert len(mvnproc) == 1
 
         rn = next(iter(mvnproc))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
 
         mvnproc = mvnproc[rn]
-        aep_targets = [0.9, 0.99]
+        aep_targets = [1, 10]
 
         for aep_target in aep_targets:
             logger.info(f"Plot violin {aep_target}", ntab=1)
@@ -62,9 +63,9 @@ def process(config, script_paths, logger, data):
             fig, ax = plt.subplots(figsize=(config.awidth, config.aheight),
                                    layout="constrained")
 
-            etxt = re.sub("\\.", "_", f"{aep_target:0.02f}")
-            aep = (1 - mvnproc.filter(regex=f".*p{etxt}_.*_smp", axis=1)) * 100
-            cols = aep.columns.to_series().str.replace(f".*_p{etxt}_|_smp_cdf", "", regex=True)
+            aep = mvnproc.filter(regex=f".*aep{aep_target:02d}_.*_smp", axis=1) * 100
+            cols = aep.columns.to_series().str.replace(f".*_aep{aep_target:02d}_|_smp",
+                                                       "", regex=True)
             aep.columns = cols
 
             vm = violinplot.Violin(aep, number_format="0.1f")
@@ -91,14 +92,17 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                        type=float, default=-1.)
+    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
+                        type=str, default="-1|0")
+    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
+                        type=str, default="0|3")
     args = parser.parse_args()
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
+    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
                                "awidth", "aheight", "fdpi",
-                               "excludes", "diag", "debug",
+                               "excludes", "copula_shapes",
+                               "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -114,9 +118,11 @@ if __name__ == "__main__":
     load_expected_params = False
     load_postpred_checks = False
 
-    config = CF(args.version, args.pcensor, args.rho_min,
+    config = CF(args.version, args.pcensor,
+                args.rho_mins.split("|"),
                 awidth, aheight, fdpi,
-                excludes, args.diag, args.debug,
+                excludes, args.copula_shapes.split("|"),
+                args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks)

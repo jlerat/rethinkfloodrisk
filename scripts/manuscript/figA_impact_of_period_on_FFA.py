@@ -53,10 +53,13 @@ def get_script_paths(config, source_file):
             continue
         pa.mkdir(exist_ok=True)
 
-    for f in fimg.glob("*.png"):
-        f.unlink()
-    for f in fimg.glob("*/*.png"):
-        f.unlink()
+    for f in fimg.glob("*"):
+        for ff in f.glob("*.*"):
+            ff.unlink()
+        if f.is_dir():
+            f.rmdir()
+        else:
+            f.unlink()
 
     return script_paths
 
@@ -98,11 +101,11 @@ def get_taskids(config, script_paths):
     if hasattr(config, "excludes"):
         kw["exclude"] = "|".join(config.excludes)
 
-    if hasattr(config, "rho_min"):
-        kw["rho_min"] = config.rho_min
+    if hasattr(config, "rho_mins"):
+        kw["rho_min"] = "|".join(config.rho_mins)
 
-    if hasattr(config, "copula_shape"):
-        kw["copula_shape"] = config.copula_shape
+    if hasattr(config, "copula_shapes"):
+        kw["copula_shape"] = "|".join([str(s) for s in config.copula_shapes])
 
     return opm.find(**kw)
 
@@ -140,8 +143,7 @@ def get_data(config, script_paths, logger):
 
         mess = f"Load data from TASK {taskid} {rn.text}"
         logger.info(mess, nret=1)
-        if rn.rho_min != config.rho_min \
-                or rn.pcensor != config.pcensor:
+        if rn.pcensor != config.pcensor:
             errmsg = "Pb with run config"
             raise ValueError(errmsg)
 
@@ -408,16 +410,18 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                        type=float, default=-1.)
+    parser.add_argument("-r", "--rho_mins", help="Minimum rho values",
+                        type=str, default="-1|0")
+    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
+                        type=str, default="0|3")
     args = parser.parse_args()
     assert not args.debug
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
+    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "diag", "debug",
+                               "copula_shapes", "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -434,9 +438,12 @@ if __name__ == "__main__":
     load_mvnproc = False
     load_expected_params = False
     load_postpred_checks = False
-    config = CF(args.version, args.pcensor, args.rho_min,
+    config = CF(args.version, args.pcensor,
+                args.rho_mins.split("|"),
                 awidth, aheight, fdpi, ptype, ari_max,
-                excludes, args.diag, args.debug,
+                excludes,
+                args.copula_shapes.split("|"),
+                args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks)

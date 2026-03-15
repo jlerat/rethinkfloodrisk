@@ -49,14 +49,15 @@ from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
 
 def process(config, script_paths, logger, data):
-    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
         _, obs_data, _, _, postpred = select_data(data,
                                                   pcensor=pcensor,
                                                   rho_min=rho_min,
                                                   has_cluster=has_cluster,
-                                                  copula=copula)
+                                                  copula_shape=copula_shape)
         if len(postpred) == 0:
             continue
+
         assert len(postpred) == 1
         rn = next(iter(postpred))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
@@ -64,8 +65,9 @@ def process(config, script_paths, logger, data):
         postpred = postpred[rn]
         obs_data = obs_data[rn]
 
+        # Generic postpredictive checks
         stationids = [cn for cn in obs_data.columns if not cn.startswith("WATER")]
-        ncols = 3
+        ncols = config.ncols
         variables = config.variables
         varnames = [f"{ppt}/{vn}" for ppt in variables for vn in variables[ppt]]
         nv = len(varnames)
@@ -84,26 +86,24 @@ def process(config, script_paths, logger, data):
         for aname, ax in axs.items():
             ppt, varname = aname.split("/")
             df = postpred[ppt]
-            if ppt != "multi":
-                df = df.loc[df.VARIABLE == varname]
-                df = df.filter(regex="pvalue\\[", axis=1)
 
             if ppt == "univ":
+                df = df.loc[df.VARIABLE == varname]
+                df = df.filter(regex="pvalue\\[", axis=1)
                 df.columns = stationids
                 df.squeeze().plot(ax=ax, kind="barh")
 
-                m = (df - 0.5).abs().mean().mean()
-                ax.text(0.5, 0.5, f"mean diff\n{m:0.2f}",
-                        transform=ax.transAxes,
-                        va="center", ha="center",
-                        fontweight="bold", fontsize="x-large",
-                        path_effects=[paeff])
             elif ppt == "biv":
-                #bins = np.concatenate([[0], np.linspace(0.05, 0.95, 5), [1]])
-                #df.squeeze().plot(ax=ax, kind="hist", bins=bins,
-                #                  edgecolor="0.2", facecolor="0.8")
+                idx = df.VARIABLE.str.startswith(varname + "_")
+                q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
+                df = df.loc[idx].filter(regex="pvalue\\[", axis=1)
+                df = df.set_index(q)
+
                 obj = putils.ecdfplot(ax, df.T)
                 obj = obj[df.index[0]]
+
+                ax.legend(loc=2, fontsize="small",
+                          framealpha=0.)
 
                 idx = obj["index"]
                 x = obj["values"]
@@ -137,8 +137,18 @@ def process(config, script_paths, logger, data):
                                     va="bottom", ha=ha,
                                     arrowprops=arrowprops)
             else:
-                se = pd.Series(df.pvalue.values, index=df.VARIABLE)
+                idx = df.VARIABLE.str.startswith(varname + "_")
+                q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
+                df = df.loc[idx].filter(regex="pvalue$", axis=1)
+                se = df.set_index(q).squeeze()
                 se.plot(ax=ax, kind="barh")
+
+            m = (df - 0.5).abs().mean().mean()
+            ax.text(0.5, 0.5, f"mean diff\n{m:0.2f}",
+                    transform=ax.transAxes,
+                    va="center", ha="center",
+                    fontweight="bold", fontsize="x-large",
+                    path_effects=[paeff])
 
             for x in [0.05, 0.95]:
                 putils.line(ax, 0, 1, x, 0, "r--")
@@ -156,6 +166,58 @@ def process(config, script_paths, logger, data):
         fp = script_paths.fimg / fp
         fig.savefig(fp, dpi=config.fdpi)
 
+        # Bivariate xi functions
+        df = postpred["biv"]
+        pairs = df.filter(regex="obs\\[", axis=1)\
+            .columns\
+            .to_series()\
+            .str.replace("obs\\[|\\]", "", regex=True)\
+            .values
+
+        fd = script_paths.fimg / f"xifunctions_{rn.text}"
+        fd.mkdir(exist_ok=True)
+        for pair in pairs:
+            mosaic = [["xi", "xibar", "tau"]]
+            ncols, nrows = len(mosaic[0]), len(mosaic)
+            plt.close("all")
+            fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+                             layout="constrained")
+            axs = fig.subplot_mosaic(mosaic)
+
+            ls = dict(xi="--", xibar=":", tau="-")
+            cols = dict(xi="tab:blue", xibar="tab:red",
+                        tau="tab:green")
+
+            sid1 = stationids[int(pair[0]) - 1]
+            sid2 = stationids[int(pair[-1]) - 1]
+            logger.info(f"xi fun plots for pair {sid1}/{sid2}", ntab=1)
+
+            for varname, ax in axs.items():
+                idx = df.VARIABLE.str.startswith(varname + "_")
+                q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
+                dd = df.loc[idx]\
+                        .filter(regex=pair, axis=1)\
+                        .set_index(q)
+                dd.columns = [re.sub("\\[.*", "", cn) for cn in dd.columns]
+
+                ax.plot(dd.index, dd.obs, "k", ls=ls[varname],
+                        label=f"{varname} obs")
+
+                col = cols[varname]
+                ax.plot(dd.index, dd.simmean, "-", color=col,
+                        label=f"{varname} sim")
+                ax.fill_between(dd.index, dd.simmean - dd.simstd / 2,
+                                dd.simmean + dd.simstd / 2,
+                                fc=col, alpha=0.5,
+                                ec="none")
+                ax.legend(loc=2)
+
+                title = f"{varname} functions for {sid1} / {sid2}"
+                ax.set(title=title)
+
+            fp = f"{basename}_{rn.text}_xi_{sid1}_{sid2}_v{config.version}.png"
+            fp = fd / fp
+            fig.savefig(fp, dpi=config.fdpi)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="[DESCRIPTION]",
@@ -170,14 +232,17 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                        type=float, default=-1.)
+    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
+                        type=str, default="-1|0")
+    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
+                        type=str, default="0|3")
     args = parser.parse_args()
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
-                               "awidth", "aheight", "fdpi",
-                               "excludes", "diag", "debug",
+    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
+                               "awidth", "aheight", "fdpi", "ncols",
+                               "excludes", "copula_shapes",
+                               "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -186,6 +251,7 @@ if __name__ == "__main__":
                                "variables", "exclude"])
     awidth = 6
     aheight = 5
+    ncols = 2
     fdpi = 300
     excludes = ["NONE"]
     load_ffa = False
@@ -197,14 +263,17 @@ if __name__ == "__main__":
 
     # Post pred checks to plot
     variables = {
-        "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
-        "biv": ["taildep_q75", "taildep_q90"],
-        "multi": ["taildep_q75"]
+        "univ": ["lskewness2", "lkurtosis2"],
+        "biv": ["xi", "xibar"],
+        "multi": ["xi", "xibar"]
     }
 
-    config = CF(args.version, args.pcensor, args.rho_min,
-                awidth, aheight, fdpi,
-                excludes, args.diag, args.debug,
+    config = CF(args.version, args.pcensor,
+                args.rho_mins.split("|"),
+                awidth, aheight, fdpi, ncols,
+                excludes,
+                args.copula_shapes.split("|"),
+                args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, variables,

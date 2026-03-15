@@ -35,7 +35,7 @@ from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
 
 from pyrethink import datahub
-from pyrethink import sample
+from pyrethink import copulas
 
 from floodstan import marginals
 
@@ -66,12 +66,14 @@ def annotate3D(ax, s, *args, **kwargs):
 
 
 def process(config, script_paths, logger, data):
-    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
+        copula_type = 1 if copula_shape > 0 else 0
+
         _, obs_data, mvnproc, expected, _ = select_data(data,
                                                         pcensor=pcensor,
                                                         rho_min=rho_min,
                                                         has_cluster=has_cluster,
-                                                        copula=copula)
+                                                        copula_shape=copula_shape)
         if len(mvnproc) == 0:
             continue
         assert len(mvnproc) == 1
@@ -106,10 +108,10 @@ def process(config, script_paths, logger, data):
         fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
                          layout="tight")
         axs = {
-            "diagram_pall": fig.add_subplot(2, 2, 1, projection="3d"),
-            "diagram_pany": fig.add_subplot(2, 2, 3, projection="3d"),
-            "pall": fig.add_subplot(2, 2, 2),
-            "pany": fig.add_subplot(2, 2, 4),
+            "diagram_all": fig.add_subplot(2, 2, 1, projection="3d"),
+            "diagram_any": fig.add_subplot(2, 2, 3, projection="3d"),
+            "all": fig.add_subplot(2, 2, 2),
+            "any": fig.add_subplot(2, 2, 4),
             }
 
         cols = ["tab:blue", "tab:orange", "tab:green"]
@@ -135,7 +137,9 @@ def process(config, script_paths, logger, data):
                     xa = max(xa, 0.)
                     xlims[ista] = (xa, xb)
                     xx[ista] = np.linspace(xa, xb, config.ngrid)
-                    zz[ista] = sample.copula_marginal_ppf(copula, gev.cdf(xx[ista]))
+                    zz[ista] =copulas.copula_marginal_ppf(copula_type,
+                                                          copula_shape,
+                                                          gev.cdf(xx[ista]))
                     marg[ista] = gev.pdf(xx[ista])
                     xthresh[ista] = gev.ppf(config.aep_target_plot)
 
@@ -145,13 +149,13 @@ def process(config, script_paths, logger, data):
 
                 ii = [ista1, ista2]
 
-                ccs = sample.CopulaSampling(copula, 2)
+                ccs = copulas.Copula(copula_type, copula_shape, 2)
                 ccs.corr = cor[ii][:, ii]
                 PP = np.zeros((ZZ.shape[0], ZZ.shape[1]))
                 for i1 in range(ZZ.shape[0]):
                     for i2 in range(ZZ.shape[1]):
                         zz = ZZ[i1, i2]
-                        PP[i1, i2] = ccs.pdf_and_cdf_given_ipart(0, zz)[0]
+                        PP[i1, i2] = ccs.pdf_given_partition(0, zz)
 
                 ppmax = np.nanmax(PP)
 
@@ -208,7 +212,7 @@ def process(config, script_paths, logger, data):
                 stat = aname
 
                 # Adjust bounds
-                if stat == "pall":
+                if stat == "all":
                     x0, x1 = (-5.2, -2.) if rho_min == -1 else (-5., -2.)
                 else:
                     x0, x1 = -2.0, -1.3
@@ -223,8 +227,7 @@ def process(config, script_paths, logger, data):
 
                 plot_means = {}
                 for ig, gname in enumerate(groups):
-                    etxt = re.sub("\\.", "_", f"{config.aep_target:0.02f}")
-                    cn = f"{gname}_log10{stat}_aeptarget_p{etxt}"
+                    cn = f"{gname}_{stat}_log10aep{aep_target:02d}"
                     sel = mvnproc.loc[:, cn]
 
                     # value -> %
@@ -281,7 +284,7 @@ def process(config, script_paths, logger, data):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="[DESCRIPTION]",
+    parser = argparse.ArgumentParser(description="Flood frequency plots",
                                      formatter_class=
                                      argparse.ArgumentDefaultsHelpFormatter)
 
@@ -293,14 +296,17 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                        type=float, default=-1.)
+    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
+                        type=str, default="-1|0")
+    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
+                        type=str, default="0|3")
     args = parser.parse_args()
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
+    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
                                "awidth", "aheight", "fdpi",
-                               "excludes", "diag", "debug",
+                               "excludes", "copula_shapes",
+                               "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -323,14 +329,17 @@ if __name__ == "__main__":
     sta2 = "203014"
 
     ngrid = 40
-    aep_target = 0.99
+    aep_target = 1
     # aep used for the right-hand side plot (0.99 is too extreme, can't see it)
     aep_target_plot = 0.95
 
 
-    config = CF(args.version, args.pcensor, args.rho_min,
+    config = CF(args.version, args.pcensor,
+                args.rho_mins.split("|"),
                 awidth, aheight, fdpi,
-                excludes, args.diag, args.debug,
+                excludes,
+                args.copula_shapes.split("|"),
+                args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks,
