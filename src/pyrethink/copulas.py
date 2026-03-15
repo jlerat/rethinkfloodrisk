@@ -64,6 +64,10 @@ def copula_marginal_cdf(copula_type, copula_shape, z):
         raise ValueError(errmsg)
 
 
+def copula_marginal_survival(copula_type, copula_shape, z):
+    return 1 - copula_marginal_cdf(copula_type, copula_shape, z)
+
+
 def check_copula(copula_type, copula_shape):
     if copula_type not in COPULA_TYPES:
         txt = "/".join([str(t) for t in COPULA_TYPES])
