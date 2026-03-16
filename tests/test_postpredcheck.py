@@ -179,9 +179,9 @@ def test_posterior_predictive_checks(copula_shape):
                                                           parts_id,
                                                           dalpha)
     assert ppu.shape == (9, 21)
-    assert ppb.shape == (29, 21)
+    assert ppb.shape == (32, 21)
     assert ppm.shape == (27, 7)
     assert ppu.filter(regex="pvalue\\[", axis=1).shape == (9, 3)
-    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (29, 3)
+    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (32, 3)
     assert ppm.filter(regex="pvalue$", axis=1).shape == (27, 1)
 

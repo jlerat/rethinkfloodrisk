@@ -190,8 +190,9 @@ def posterior_predictive_checks(yobs, params,
     for i1, i2 in combs(range(nsta), 2):
         m = bivariate_dependence_statistics(yobs[:, [i1, i2]])
         se = dependence2series(m["dependence"])
-        for cn in ["kendalltau", "kendalltau_high"]:
-            se[cn] = m[cn]
+        for cn in m:
+            if cn != "dependence":
+                se[cn] = m[cn]
         se.name = f"bivariate[{i1 + 1},{i2 + 1}]"
         biv_obs.append(se)
 
@@ -232,8 +233,9 @@ def posterior_predictive_checks(yobs, params,
         for i1, i2 in combs(range(nsta), 2):
             bi = bivariate_dependence_statistics(ysim[:, [i1, i2]])
             se = dependence2series(bi["dependence"])
-            for cn in ["kendalltau", "kendalltau_high"]:
-                se[cn] = bi[cn]
+            for cn in bi:
+                if cn != "dependence":
+                    se[cn] = bi[cn]
             se.name = f"bivariate[{i1 + 1},{i2 + 1}]"
             biv_sim[(i1, i2)].append(se)
 
