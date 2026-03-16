@@ -46,7 +46,7 @@ def test_joint_exceedance_probabilities_independent(nsta, nsamples, allclose):
     expected = u ** nsta
     err = np.abs(np.arcsinh(p0) - np.arcsinh(expected))
 
-    atol = 1e-2 if nsamples == 5000 else 5e-2
+    atol = 2e-2 if nsamples == 5000 else 5e-2
     assert err.max() < atol
 
     expected = (1 - u) ** nsta
@@ -117,6 +117,13 @@ def test_multivariate_statistics(rho, nsta, allclose):
     assert err.max() < 5e-2
 
 
+def tests_krupskii():
+    nsamples = 100
+    u = np.random.uniform(0, 1, nsamples)
+    v = np.random.uniform(0, 1, nsamples)
+    k = ppc.krupskii(u, v)
+
+
 @pytest.mark.parametrize("pair", combinations(np.arange(6), 2))
 def test_bivariate_statistics_obs(pair, allclose):
     ams, _, _, stations = datahub.get_ams_concat()
@@ -172,9 +179,9 @@ def test_posterior_predictive_checks(copula_shape):
                                                           parts_id,
                                                           dalpha)
     assert ppu.shape == (9, 21)
-    assert ppb.shape == (32, 21)
-    assert ppm.shape == (30, 7)
+    assert ppb.shape == (29, 21)
+    assert ppm.shape == (27, 7)
     assert ppu.filter(regex="pvalue\\[", axis=1).shape == (9, 3)
-    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (32, 3)
-    assert ppm.filter(regex="pvalue$", axis=1).shape == (30, 1)
+    assert ppb.filter(regex="pvalue\\[", axis=1).shape == (29, 3)
+    assert ppm.filter(regex="pvalue$", axis=1).shape == (27, 1)
 

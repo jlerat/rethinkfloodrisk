@@ -96,6 +96,17 @@ def dependence2series(dep):
     return se.set_index("stat").loc[:, "value"]
 
 
+def krupskii(ux, uy, power=5):
+    """ See
+    Joe, H. (2014). Dependence Modeling with Copulas
+    Chapman and Hall/CRC. https://doi.org/10.1201/b17116
+    See Section 5.12.1
+    """
+    ii = (ux > 0.5) & (uy > 0.5)
+    return np.corrcoef((2 * ux[ii] - 1)**power,
+                       (2 * uy[ii] - 1)**power)[0, 1]
+
+
 def bivariate_dependence_statistics(data,
                                     perc_tails=PERC_TAILS_DEFAULT):
     data = np.array(data)
@@ -117,6 +128,13 @@ def bivariate_dependence_statistics(data,
     ihigh = (x >= medians[0]) & (y >= medians[1])
     n = "kendalltau_high"
     stats[n] = kendalltau(x[ihigh], y[ihigh]).statistic
+
+    # Krupskii factors
+    ux = np.argsort(np.argsort(x))
+    uy = np.argsort(np.argsort(y))
+    stats["krupskii5"] = krupskii(ux, uy, 5)
+    stats["krupskii6"] = krupskii(ux, uy, 6)
+    stats["krupskii7"] = krupskii(ux, uy, 7)
 
     # Tail dependence
     stats["dependence"] = multivariate_dependence_statistics(data, perc_tails)
