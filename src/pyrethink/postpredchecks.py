@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 
 from scipy.stats import kendalltau
+from scipy.interpolate import RBFInterpolator
 
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
@@ -10,7 +11,7 @@ from floodstan.marginals import GEV
 from pyrethink.copulas import Copula
 
 
-PERC_TAILS_DEFAULT = np.arange(50, 100, 5)
+PERC_TAILS_DEFAULT = np.arange(50, 95, 5)
 
 
 def univariate_statistics(data, eta=2, perc_tails=np.arange(50, 110, 10)):
@@ -30,18 +31,33 @@ def univariate_statistics(data, eta=2, perc_tails=np.arange(50, 110, 10)):
     return pd.Series(stats, index=idx)
 
 
-def joint_exceedance_probabilities(data, perc_tails):
+def joint_exceedance_probabilities(data, perc_tails, alpha=0.):
     data = np.array(data)
-    qt = np.nanpercentile(data, perc_tails, axis=0).T
+    N, P = data.shape
+    rk = np.argsort(np.argsort(data, axis=0), axis=0)
+    denom = N + 1 - 2 * alpha
+    marginal = (rk + 1 - alpha) / denom
 
-    is_lower = data[:, :, None] - qt[None, :, :] <= 0
-    N = len(data)
-    plow_joint = is_lower.all(axis=1).sum(axis=0) / N
+    diff = rk[:, None, :] - rk[None, :, :]
+    cdf = (np.all(diff >= 0, axis=-1).sum(axis=1) - alpha) / denom
+    surv = (np.all(diff <= 0, axis=-1).sum(axis=1) - alpha) / denom
 
-    is_greater = data[:, :, None] - qt[None, :, :] >= 0
-    phigh_joint = is_greater.all(axis=1).sum(axis=0) / N
+    prob = np.array(perc_tails) * 1e-2
+    if P > 1:
+        x = np.repeat(prob[:, None], P, axis=1)
+        plow_joint = RBFInterpolator(marginal, cdf)(x)
+        phigh_joint = RBFInterpolator(marginal, surv)(x)
+    else:
+        plow_joint = prob
+        phigh_joint = 1 - prob
 
     return plow_joint, phigh_joint
+
+
+def xi_bounds(prob):
+    xi0 = 2 - np.log(2 * prob - 1) / np.log(prob)
+    xi1 = np.ones_like(prob)
+    return xi0, xi1
 
 
 def multivariate_dependence_statistics(data,
