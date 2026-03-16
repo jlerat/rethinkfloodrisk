@@ -30,6 +30,10 @@ import matplotlib.pyplot as plt
 
 from hydrodiy.io import csv, iutils
 
+from pyrethink import datahub
+from pyrethink import postpredchecks as ppc
+
+
 # ----------------------------------------------------------------------
 # @Config
 # ----------------------------------------------------------------------
@@ -53,17 +57,67 @@ LOGGER = iutils.get_logger(basename)
 # @Process
 # ----------------------------------------------------------------------
 
+def gumbel_cdf(uv, rho):
+    theta = 1. / (1. - rho)
+    xy = -np.log(uv)
+    expsum = np.power(xy, theta).sum(axis=1)
+    return np.exp(-np.power(expsum, 1. / theta))
+
+def gumbel_survival(uv, rho):
+    return 1 - uv.sum(axis=1) + gumbel_cdf(uv, rho)
+
+def clayton_cdf(uv, rho):
+    theta = 2. * rho / (1. - rho)
+    expsum = np.power(uv, -theta).sum(axis=1) - 1.
+    return np.power(expsum, -1. / theta)
+
+def clayton_survival(uv, rho):
+    return 1 - uv.sum(axis=1) + clayton_cdf(uv, rho)
+
+def frank_cdf(uv, rho):
+    theta = 2. * rho / (1. - rho)
+    x = np.exp(-theta * uv[:, 0])
+    y = np.exp(-theta * uv[:, 1])
+    w = 1 - math.exp(-theta)
+    z = w - (1 - x) * (1 - y)
+    return -1/theta*np.log(z/w)
+
+def frank_survival(uv, rho):
+    return 1 - uv.sum(axis=1) + frank_cdf(uv, rho)
+
+
+def mtcj_cdf(uv, rho):
+    theta = 2. * rho / (1. - rho)
+    x = np.power(uv[:, 0], -theta)
+    y = np.power(uv[:, 1], -theta)
+    return np.power(x + y - 1, -1./theta)
+
+def mtcj_survival(uv, rho):
+    return 1 - uv.sum(axis=1) + mtcj_cdf(uv, rho)
+
+
+u = np.linspace(1e-2, 1 - 1e-2, 10)
+uv = np.repeat(u[:, None], 2, axis=1)
+
 aep = np.logspace(-1, math.log10(50), 100)
 
 mean = np.zeros(2)
 prob = 1 - aep * 1e-2
 
+ams, _, _, stations = datahub.get_ams_concat()
+pair = (0, 4)
+sid1 = ams.columns[pair[0]]
+sid2 = ams.columns[pair[1]]
+ams = ams.iloc[:, list(pair)]
+biv = ppc.bivariate_dependence_statistics(ams)
+dep = biv["dependence"]
+
 plt.close("all")
 w, h = 5, 4
-ncols, nrows = 3, 2
+ncols, nrows = 2, 2
 fig = plt.figure(figsize=(w * ncols, h * nrows),
                  layout="constrained")
-rhos = np.linspace(0.1, 0.9, 6)
+rhos = np.linspace(0.1, 0.9, 4)
 mosaic = [[r for r in rs] for rs in np.array_split(rhos, 2)]
 axs = fig.subplot_mosaic(mosaic)
 
@@ -98,9 +152,9 @@ for rho, ax in axs.items():
         p1 = iabove.sum() / ns
         taun2[iq] = p1 / (1 - q)
 
-    # Student df = 3
+    # Student
     xit, xibart, taut = {}, {}, {}
-    for df in [3, 5, 10]:
+    for df in [3]:
         scale = math.sqrt((df - 2) / df)
         z = student_t.ppf(prob, scale=scale, df=df)
         zz = np.repeat(z[:, None], 2, axis=1)
@@ -111,13 +165,36 @@ for rho, ax in axs.items():
         xibart[df] = 2 * np.log(1 - prob) / np.log(p1) - 1
         taut[df] = p1 / (1 - prob)
 
+    # Gumbel
+    uv = np.repeat(prob[:, None], 2, axis=1)
+    p1 = gumbel_survival(uv, rho)
+    taug = p1 / (1 - prob)
+
+    # Clayton
+    p1 = clayton_cdf(1 - uv, rho)
+    tauc = p1 / (1 - prob)
+
+    # Frank
+    p1 = frank_survival(uv, rho)
+    tauf = p1 / (1 - prob)
+
+    # MTCJ
+    p1 = mtcj_cdf(1 - uv, rho)
+    taum = p1 / (1 - prob)
+
     # plots
+    ax.plot(dep.index * 1e-2, dep.tau, "o-", label=f"Data {sid1}/{sid2}")
+
     #ax.plot(aep, xin, "k-", label="xi gaussian")
     #ax.plot(aep, xibarn, "k--", label="xibar gaussian")
     ax.plot(prob, taun, "k-", label="tau gaussian")
     ax.plot(prob, taun2, "k:", label="tau gaussian (sample)")
 
-    ax.plot(prob, taul, "-", color="purple", label="tau Laplace")
+    ax.plot(prob, taul, ":", color="purple", label="tau Laplace (sample)")
+    ax.plot(prob, taug, "-", color="orange", label="tau Gumbel")
+    ax.plot(prob, tauc, "-", color="0.5", label="tau Clayton - survival")
+    ax.plot(prob, tauf, "-", color="pink", label="tau Frank")
+    ax.plot(prob, taum, "-", color="chocolate", label="tau MTCJ - survival")
 
     cols = {3: "tab:blue", 5:"tab:red", 10:"tab:green"}
     for df in xit:
@@ -132,7 +209,7 @@ for rho, ax in axs.items():
     ylim = (0, 1)
     ax.set(title=title, ylim=ylim, xlabel="CDF [-]")
 
-    ax.legend(loc=2, framealpha=0.)
+    ax.legend(loc=3, fontsize="small", framealpha=0.)
 
 fp = fimg / "explore_xi.png"
 fig.savefig(fp)
