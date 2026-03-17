@@ -248,7 +248,7 @@ def process(config, script_paths, logger, data):
                     if (ml - x0) * (x1 - ml) > 0:
                         ax.plot([m, m], [y0, y1], "-", lw=3, color=cols[ig])
                         ax.set_ylim((y0, y1))
-                        w = 0.4
+                        w = 0.3
                         xy = (m, y1 * w + y0 * (1-w))
                         xytext = (0, 5)
                         txt = f"Mean\n{m:0.2f}%"

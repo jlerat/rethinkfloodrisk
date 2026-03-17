@@ -49,14 +49,15 @@ from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
 
 def process(config, script_paths, logger, data):
-    for pcensor, rho_min, has_cluster, copula in get_iter_options(data):
+    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
         _, obs_data, mvnproc, _, _ = select_data(data,
                                                  pcensor=pcensor,
                                                  rho_min=rho_min,
                                                  has_cluster=has_cluster,
-                                                 copula=copula)
+                                                 copula_shape=copula_shape)
         if len(mvnproc) == 0:
             continue
+
         assert len(mvnproc) == 1
         rn = next(iter(mvnproc))
         logger.info(f"-- Plotting {rn.text} --", nret=1)
@@ -82,7 +83,7 @@ def process(config, script_paths, logger, data):
                 grp = aname
                 logger.info(f"Group {grp}", ntab=2)
 
-                cn = f"{grp}_obs_log10aep_{event}"
+                cn = f"{grp}_obs_{event}_log10aep"
                 if cn not in mvnproc.columns:
                     logger.info(f"No data for group {grp}, skip", ntab=3)
                     ax.axis("off")
@@ -143,14 +144,17 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug mode",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_min", help="Minimum rho value",
-                        type=float, default=-1.)
+    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
+                        type=str, default="-1|0")
+    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
+                        type=str, default="0|3")
     args = parser.parse_args()
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_min",
+    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
                                "awidth", "aheight", "fdpi", "ncols",
-                               "excludes", "diag", "debug",
+                               "excludes", "copula_shapes",
+                               "diag", "debug",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
@@ -170,9 +174,11 @@ if __name__ == "__main__":
     exclude = "NONE"
     events = ["2022-02-27"]
 
-    config = CF(args.version, args.pcensor, args.rho_min,
-                awidth, aheight, fdpi, ncols,
-                excludes, args.diag, args.debug,
+    config = CF(args.version, args.pcensor,
+                args.rho_mins.split("|"),
+                awidth, aheight, fdpi, ncols, excludes,
+                args.copula_shapes.split("|"),
+                args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, events,

@@ -267,15 +267,16 @@ def select_data(data, **kwargs):
 def process(config, script_paths, logger, data):
 
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
-        ffa, obs_data, _, _, _ = select_data(data,
-                                             pcensor=pcensor,
-                                             rho_min=rho_min,
-                                             has_cluster=has_cluster,
-                                             copula_shape=copula_shape)
+        ffa, obs_data, mvnproc, _, _ = select_data(data,
+                                                   pcensor=pcensor,
+                                                   rho_min=rho_min,
+                                                   has_cluster=has_cluster,
+                                                   copula_shape=copula_shape)
         if len(ffa) == 0:
             continue
 
         assert len(ffa) == 2
+        assert len(mvnproc) == 2
 
         rn_isin = next(rn for rn in ffa if rn.exclude == "NONE")
         rn_isout = next(rn for rn in ffa if rn.exclude != "NONE")
@@ -287,7 +288,9 @@ def process(config, script_paths, logger, data):
             logger.info(f"Plotting {stationid}", ntab=1)
 
             plt.close("all")
-            mosaic = [["isin", "isout"]]
+            mosaic = [["ffa-isin", "ffa-isout"],
+                      ["obs-isin", "obs-isout"]]
+
             nrows = len(mosaic)
             ncols = len(mosaic[0])
             figsize = (ncols * config.awidth, nrows * config.aheight)
@@ -305,90 +308,96 @@ def process(config, script_paths, logger, data):
 
             # Plot ffa
             for iax, (aname, ax) in enumerate(axs.items()):
-                rn = rn_isin if aname == "isin" else rn_isout
+                ptype, dsrc = aname.split("-")
+                rn = rn_isin if dsrc == "isin" else rn_isout
 
-                # Plot data
-                peaks = obs_data[rn].loc[:, str(stationid)]
+                if ptype == "ffa":
+                    # Plot data
+                    peaks = obs_data[rn].loc[:, str(stationid)]
 
-                x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
-                same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
-                _, same = np.where(same)
-                time = obs_data[rn].WATER_YEAR.iloc[same]
+                    x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
+                    same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
+                    _, same = np.where(same)
+                    time = obs_data[rn].WATER_YEAR.iloc[same]
 
-                ythresh = y[-3]
-                arrowprops = {
-                    "edgecolor": "0.4",
-                    "arrowstyle": "-"
-                    }
-                for wy, xx, yy in zip(time, x, y):
-                    if yy < ythresh:
-                        continue
-                    txt = str(wy)
-                    ax.annotate(txt, xy=(xx, yy),
-                                xycoords="data",
-                                xytext=(-40, 40),
-                                va="bottom", ha="right",
-                                textcoords="offset points",
-                                arrowprops=arrowprops,
-                                zorder=5)
+                    ythresh = y[-3]
+                    arrowprops = {
+                        "edgecolor": "0.4",
+                        "arrowstyle": "-"
+                        }
+                    for wy, xx, yy in zip(time, x, y):
+                        if yy < ythresh:
+                            continue
+                        txt = str(wy)
+                        ax.annotate(txt, xy=(xx, yy),
+                                    xycoords="data",
+                                    xytext=(-40, 40),
+                                    va="bottom", ha="right",
+                                    textcoords="offset points",
+                                    arrowprops=arrowprops,
+                                    zorder=5)
 
-                # Plot FFA
-                df = ffa[rn]
-                istation = obs_data[rn].columns.tolist().index(str(stationid))
-                quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
-                aris = quantiles.index.to_series().str\
-                        .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
+                    # Plot FFA
+                    df = ffa[rn]
+                    istation = obs_data[rn].columns.tolist().index(str(stationid))
+                    quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
+                    aris = quantiles.index.to_series().str\
+                            .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
 
-                iok = aris <= ari_max
-                aris = aris[iok]
-                quantiles = quantiles.loc[iok]
+                    iok = aris <= ari_max
+                    aris = aris[iok]
+                    quantiles = quantiles.loc[iok]
 
-                inocens = 1 - 1./aris >= pcensor
-                quantiles = quantiles.loc[inocens]
-                aris = aris[inocens]
-                freqplots.plot_marginal_quantiles(ax, aris, quantiles, ptype,
-                                                  center_column="POSTERIOR_PREDICTIVE",
-                                                  q0_column="5%",
-                                                  q1_column="95%",
-                                                  alpha=0.3,
-                                                  facecolor="tab:blue",
-                                                  edgecolor="k")
+                    inocens = 1 - 1./aris >= pcensor
+                    quantiles = quantiles.loc[inocens]
+                    aris = aris[inocens]
+                    freqplots.plot_marginal_quantiles(ax, aris, quantiles, ptype,
+                                                      center_column="POSTERIOR_PREDICTIVE",
+                                                      q0_column="5%",
+                                                      q1_column="95%",
+                                                      alpha=0.3,
+                                                      facecolor="tab:blue",
+                                                      edgecolor="k")
 
-                retp = [10, 100, 500]
-                aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
+                    retp = [10, 100, 500]
+                    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
 
-                if aname == "isin":
-                    exctxt = "All data"
+                    if aname == "isin":
+                        exctxt = "All data"
+                    else:
+                        ev = int(re.sub("-.*", "", rn.exclude)) + 1
+                        exctxt = f"Without {ev} flood"
+
+                    title = f"({letters[iax]}) Flood Frequency Curve - {exctxt}"
+                    xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
+                    ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
+                    ax.set(title=title, ylabel=ylab, xlabel=xlab)
+
+                    q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
+
+                    txt = "Uncertainty in 1:100 event\n\n"
+                    kw = dict(va="top", ha="left", transform=ax.transAxes)
+                    ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
+
+                    delta = 0.06
+                    for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
+                        q = q100.loc[st]
+                        h = datahub.linear_interpolation(q, rc_q, rc_h)
+                        stt = "post pred" if st.startswith("POST") else st
+
+                        txt = f"{stt:<12s}"
+                        ytxt = 0.97 - delta * (ist + 1)
+                        ax.text(0.03, ytxt, txt, **kw)
+
+                        txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
+                        ax.text(0.18, ytxt, txt, **kw)
+
                 else:
-                    ev = int(re.sub("-.*", "", rn.exclude)) + 1
-                    exctxt = f"Without {ev} flood"
+                    mvn = mvnproc[rn]
+                    import pdb; pdb.set_trace()
 
-                title = f"({letters[iax]}) {exctxt}"
-                xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
-                ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
-                ax.set(title=title, ylabel=ylab, xlabel=xlab)
-
-                q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
-
-                txt = "Uncertainty in 1:100 event\n\n"
-                kw = dict(va="top", ha="left", transform=ax.transAxes)
-                ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
-
-                delta = 0.06
-                for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
-                    q = q100.loc[st]
-                    h = datahub.linear_interpolation(q, rc_q, rc_h)
-                    stt = "post pred" if st.startswith("POST") else st
-
-                    txt = f"{stt:<12s}"
-                    ytxt = 0.97 - delta * (ist + 1)
-                    ax.text(0.03, ytxt, txt, **kw)
-
-                    txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
-                    ax.text(0.18, ytxt, txt, **kw)
-
-            ftitle = f"{sinfo.NAME} ({stationid}) [{rtxt}]"
-            fig.suptitle(ftitle, fontweight="bold")
+            #ftitle = f"{sinfo.NAME} ({stationid})"
+            #fig.suptitle(ftitle, fontweight="bold")
 
             basename = script_paths.basename
             fp = f"{basename}_{stationid}_{rtxt}_v{config.version}.png"
@@ -435,7 +444,7 @@ if __name__ == "__main__":
     excludes = ["NONE", "2021"]
     load_ffa = True
     load_obs_data = True
-    load_mvnproc = False
+    load_mvnproc = True
     load_expected_params = False
     load_postpred_checks = False
     config = CF(args.version, args.pcensor,

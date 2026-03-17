@@ -69,7 +69,8 @@ def process(config, script_paths, logger, data):
         stationids = [cn for cn in obs_data.columns if not cn.startswith("WATER")]
         ncols = config.ncols
         variables = config.variables
-        varnames = [f"{ppt}/{vn}" for ppt in variables for vn in variables[ppt]]
+        varnames = [f"{ppt}/{vn}" if vn != "." else "."
+                    for ppt in variables for vn in variables[ppt]]
         nv = len(varnames)
         nrows = nv // ncols + int(nv % ncols > 0)
         mosaic = [[varnames[ncols * ir + ic] if ncols * ir + ic < nv else "."
@@ -87,55 +88,59 @@ def process(config, script_paths, logger, data):
             ppt, varname = aname.split("/")
             df = postpred[ppt]
 
-            if ppt == "univ":
+            if ppt in ["univ", "biv"]:
                 df = df.loc[df.VARIABLE == varname]
                 df = df.filter(regex="pvalue\\[", axis=1)
-                df.columns = stationids
+                if ppt == "univ":
+                    df.columns = stationids
+                else:
+                    cc = ["/".join([stationids[int(i) - 1]
+                                    for i in re.sub(".*\\[|\\]", "",
+                                                    cn).split(",")])
+                          for cn in df.columns]
+                    df.columns = cc
+
                 df.squeeze().plot(ax=ax, kind="barh")
 
-            elif ppt == "biv":
-                idx = df.VARIABLE.str.startswith(varname + "_")
-                q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
-                df = df.loc[idx].filter(regex="pvalue\\[", axis=1)
-                df = df.set_index(q)
+            #elif ppt == "biv":
+            #    df = df.loc[df.VARIABLE == varname]
+            #    obj = putils.ecdfplot(ax, df.T)
+            #    obj = obj[df.index[0]]
 
-                obj = putils.ecdfplot(ax, df.T)
-                obj = obj[df.index[0]]
+            #    ax.legend(loc=2, fontsize="small",
+            #              framealpha=0.)
 
-                ax.legend(loc=2, fontsize="small",
-                          framealpha=0.)
+            #    idx = obj["index"]
+            #    x = obj["values"]
+            #    y = obj["position"]
+            #    out = {
+            #        "low": x < 0.05,
+            #        "high": x > 0.95
+            #        }
 
-                idx = obj["index"]
-                x = obj["values"]
-                y = obj["position"]
-                out = {
-                    "low": x < 0.05,
-                    "high": x > 0.95
-                    }
+            #    for name, ipb in out.items():
+            #        npb = ipb.sum()
+            #        if npb == 0:
+            #            continue
 
-                for name, ipb in out.items():
-                    npb = ipb.sum()
-                    if npb == 0:
-                        continue
+            #        xpb, ypb, idxp = x[ipb], y[ipb], idx[ipb]
+            #        col = "tab:red"
+            #        for cnt, (xx, yy, ii) in enumerate(zip(xpb, ypb, idxp)):
+            #            ax.plot(xx, yy, "o", color=col)
+            #            i1 = int(re.sub(".*\\[|,.*", "", ii)) - 1
+            #            sta1 = stationids[i1]
+            #            i2 = int(re.sub(".*,|\\].*", "", ii)) - 1
+            #            sta2 = stationids[i2]
+            #            txt = f"{sta1}\n{sta2}"
 
-                    xpb, ypb, idxp = x[ipb], y[ipb], idx[ipb]
-                    col = "tab:red"
-                    for cnt, (xx, yy, ii) in enumerate(zip(xpb, ypb, idxp)):
-                        ax.plot(xx, yy, "o", color=col)
-                        i1 = int(re.sub(".*\\[|,.*", "", ii)) - 1
-                        sta1 = stationids[i1]
-                        i2 = int(re.sub(".*,|\\].*", "", ii)) - 1
-                        sta2 = stationids[i2]
-                        txt = f"{sta1}\n{sta2}"
-
-                        xt = 0.2 if name == "low" else 0.8
-                        ha = "left" if name == "low" else "right"
-                        yt = np.linspace(0, 1,  2 * npb)[1 + cnt]
-                        ax.annotate(txt, xy=(xx, yy),
-                                    xytext=(xt, yt),
-                                    textcoords="axes fraction",
-                                    va="bottom", ha=ha,
-                                    arrowprops=arrowprops)
+            #            xt = 0.2 if name == "low" else 0.8
+            #            ha = "left" if name == "low" else "right"
+            #            yt = np.linspace(0, 1,  2 * npb)[1 + cnt]
+            #            ax.annotate(txt, xy=(xx, yy),
+            #                        xytext=(xt, yt),
+            #                        textcoords="axes fraction",
+            #                        va="bottom", ha=ha,
+            #                        arrowprops=arrowprops)
             else:
                 idx = df.VARIABLE.str.startswith(varname + "_")
                 q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
@@ -143,8 +148,10 @@ def process(config, script_paths, logger, data):
                 se = df.set_index(q).squeeze()
                 se.plot(ax=ax, kind="barh")
 
-            m = (df - 0.5).abs().mean().mean()
-            ax.text(0.5, 0.5, f"mean diff\n{m:0.2f}",
+            mv = df.mean().mean()
+            md = (df - 0.5).abs().mean().mean()
+            txt = f"mean pval\n{mv:0.2f}\n\nmean diff\n{md:0.2f}"
+            ax.text(0.5, 0.5, txt,
                     transform=ax.transAxes,
                     va="center", ha="center",
                     fontweight="bold", fontsize="x-large",
@@ -167,6 +174,11 @@ def process(config, script_paths, logger, data):
         fig.savefig(fp, dpi=config.fdpi)
 
         # Bivariate xi functions
+        if not config.xi_plots:
+            continue
+
+        obs = data.obs_data[rn]
+
         df = postpred["biv"]
         pairs = df.filter(regex="obs\\[", axis=1)\
             .columns\
@@ -177,7 +189,7 @@ def process(config, script_paths, logger, data):
         fd = script_paths.fimg / f"xifunctions_{rn.text}"
         fd.mkdir(exist_ok=True)
         for pair in pairs:
-            mosaic = [["xi", "xibar", "tau"]]
+            mosaic = [["scatter", "xi"], ["xibar", "tau"]]
             ncols, nrows = len(mosaic[0]), len(mosaic)
             plt.close("all")
             fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
@@ -193,6 +205,11 @@ def process(config, script_paths, logger, data):
             logger.info(f"xi fun plots for pair {sid1}/{sid2}", ntab=1)
 
             for varname, ax in axs.items():
+                if varname == "scatter":
+                    putils.bivarnplot(ax, obs.loc[:, [sid1, sid2]].values,
+                                      namex=sid1, namey=sid2)
+                    continue
+
                 idx = df.VARIABLE.str.startswith(varname + "_")
                 q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")
                 dd = df.loc[idx]\
@@ -213,7 +230,8 @@ def process(config, script_paths, logger, data):
                 ax.legend(loc=2)
 
                 title = f"{varname} functions for {sid1} / {sid2}"
-                ax.set(title=title)
+                ylim = (0, 1)
+                ax.set(title=title, ylim=ylim)
 
             fp = f"{basename}_{rn.text}_xi_{sid1}_{sid2}_v{config.version}.png"
             fp = fd / fp
@@ -236,6 +254,8 @@ if __name__ == "__main__":
                         type=str, default="-1|0")
     parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
                         type=str, default="0|3")
+    parser.add_argument("-x", "--xi_plots", help="Draw xi plots",
+                        action="store_true", default=False)
     args = parser.parse_args()
 
     # Config
@@ -248,10 +268,11 @@ if __name__ == "__main__":
                                "load_mvnproc",
                                "load_expected_params",
                                "load_postpred_checks",
-                               "variables", "exclude"])
+                               "variables", "exclude",
+                               "xi_plots"])
     awidth = 6
     aheight = 5
-    ncols = 2
+    ncols = 3
     fdpi = 300
     excludes = ["NONE"]
     load_ffa = False
@@ -263,9 +284,9 @@ if __name__ == "__main__":
 
     # Post pred checks to plot
     variables = {
-        "univ": ["lskewness2", "lkurtosis2"],
-        "biv": ["xi", "xibar"],
-        "multi": ["xi", "xibar"]
+        "univ": ["lcoeffvar2", "lskewness2", "lkurtosis2"],
+        "biv": ["kendalltau_high", "xibar_q90", "krupskii7"],
+        "multi": ["xi", "xibar", "."]
     }
 
     config = CF(args.version, args.pcensor,
@@ -277,7 +298,7 @@ if __name__ == "__main__":
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, variables,
-                exclude)
+                exclude, args.xi_plots)
 
     # Baseline
     source_file = Path(__file__).resolve()
