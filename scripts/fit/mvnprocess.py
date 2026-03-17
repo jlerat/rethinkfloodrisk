@@ -80,10 +80,10 @@ opm = hyruns.OptionManager(stationid_cond=stationid_cond,
 # Select certain fit tasks
 pcensors = [0.3]
 copula_shapes = [0, 3, 5]
-excludes = ["NONE"]
-rho_mins = [-1, 0]
-has_clusters_all = [True, False]
-dirichlet_alphas = [1., 1.5]
+excludes = ["NONE", "2021"]
+rho_mins = [-1]
+has_clusters_all = [False]
+dirichlet_alphas = [1.]
 
 opm.from_cartesian_product(batch=np.arange(nbatch),
                            pcensor=pcensors,

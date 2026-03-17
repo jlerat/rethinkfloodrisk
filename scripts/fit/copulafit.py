@@ -81,9 +81,9 @@ excludes = ["NONE",
             "2007",
             "2016"]
 
-rho_mins = [-1, 0]
+rho_mins = [-1]
 
-has_clusters_all = [False, True]
+has_clusters_all = [False]
 
 opm.from_cartesian_product(pcensor=pcensors,
                            exclude=excludes,
