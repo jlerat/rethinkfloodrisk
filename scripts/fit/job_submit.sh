@@ -20,10 +20,10 @@ else
 fi
 
 # Configure array numbers
-NTASKS=48
+NTASKS=12
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
 ARRAYS_PROC="0-$((3*$NTASKS - 1))"
-ARRAYS_MVN="0-479"
+ARRAYS_MVN="0-119"
 
 # Job config
 JOBSCRIPT=$FROOT/scripts/fit/job_script.job
