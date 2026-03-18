@@ -123,7 +123,7 @@ def process(config, script_paths, logger, data):
 
         for iax, (aname, ax) in enumerate(axs.items()):
             logger.info(f"Plot {aname}", ntab=1)
-            evtype = "or" if re.search("any", aname) else "and"
+            evtype = "OR" if re.search("any", aname) else "AND"
 
             if aname.startswith("diagram"):
                 pa, pb = 0.0, 0.995
@@ -169,7 +169,7 @@ def process(config, script_paths, logger, data):
                 # integral
                 xt1 = xthresh[ista1]
                 xt2 = xthresh[ista2]
-                if evtype == "and":
+                if evtype == "AND":
                     ii = (XX1 >= xt1) & (XX2 >= xt2)
                 else:
                     ii = (XX1 >= xt1) | (XX2 >= xt2)
@@ -186,7 +186,7 @@ def process(config, script_paths, logger, data):
                 ax.yaxis.set_major_locator(ticker.MaxNLocator(3))
                 ax.zaxis.set_major_locator(ticker.MaxNLocator(3))
 
-                txt = r"$Pr(X_1>x_1^* \cap X_2>x_2^*)$" if evtype == "and"\
+                txt = r"$Pr(X_1>x_1^* \cap X_2>x_2^*)$" if evtype == "AND"\
                     else r"$Pr(X_1>x_1^* \cup X_2>x_2^*)$"
                 xa = XX1[ii].mean()
                 ya = XX2[ii].mean()
@@ -194,7 +194,7 @@ def process(config, script_paths, logger, data):
                 iclose = np.where(diff == diff.min())
                 za = PP[iclose][0]
                 z0, z1 = ax.get_zlim()
-                wref = 0.5 if evtype == "and" else 0.85
+                wref = 0.5 if evtype == "AND" else 0.85
                 zt0, zt1 = [z1 * w + z0 * (1 - w) for w in [wref - 0.08, wref]]
                 ax.text(xa, ya, zt1, txt, ha="right",
                         fontsize=12, fontweight="bold")
@@ -269,7 +269,7 @@ def process(config, script_paths, logger, data):
                 ax.yaxis.set_major_locator(ticker.MaxNLocator(4))
                 ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
 
-                title = r"$\bigcap_i\ X_i > x_i^*$" if evtype == "and"\
+                title = r"$\bigcap_i\ X_i > x_i^*$" if evtype == "AND"\
                     else r"$\bigcup_i\ X_i > x_i^*$"
                 title = f"({letters[iax]}) Probability of '{evtype}' event {title}"
 
