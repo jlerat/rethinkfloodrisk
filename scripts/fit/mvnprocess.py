@@ -112,7 +112,7 @@ if debug:
     exclude = "NONE"
     copula_shape = 0
     has_clusters = False
-    rho_min = 0
+    rho_min = -1
     dirichlet_alpha = 1.
 
 copula_type = 1 if copula_shape > 0 else 0
@@ -172,7 +172,9 @@ rk = potpeaks.rank(ascending=False)
 obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
 
 if debug:
-    obs = ["2022-02-27", "2022-03-30"]
+    obs = ["2008-01-04", "2017-03-31", "2022-02-27", "2022-03-30"]
+
+obs.append("MAX-17-08")
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -289,7 +291,16 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
         # Obs aep
         for event in obs:
             # Get peak flow data
-            pp = potpeaks.loc[event].squeeze()
+            if event == "MAX-17-08":
+                e17 = next(e for e in obs if re.search("2017-03", e))
+                pp17 = potpeaks.loc[e17].squeeze()
+
+                e08 = next(e for e in obs if re.search("2008-01", e))
+                pp08 = potpeaks.loc[e08].squeeze()
+                pp = np.maximum(pp17, pp08)
+            else:
+                pp = potpeaks.loc[event].squeeze()
+
             zev = np.nan * np.zeros(ccs.nstations)
 
             # Compute cdf for each station

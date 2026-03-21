@@ -26,10 +26,9 @@ import numpy as np
 import pandas as pd
 
 import matplotlib.pyplot as plt
-from matplotlib import ticker
-from mpl_toolkits.mplot3d.proj3d import proj_transform
-from matplotlib.text import Annotation
 import matplotlib.patheffects as pe
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
 
 from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
@@ -47,6 +46,41 @@ from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
+# Schematic
+RIVERS = {
+    "richmond": [
+        [0.026, 0.876],
+        [0.144, 0.815],
+        [0.144, 0.556],
+        [0.535, 0.369],
+        [0.535, 0.303],
+        [0.590, 0.274],
+        [0.683, 0.351]
+        ],
+    "wilsons": [
+        [0.867, 0.776],
+        [0.540,	0.580],
+        [0.535,	0.369]
+        ],
+    "leycester": [
+        [0.272, 0.725],
+        [0.540,	0.580]
+        ],
+    "coopers": [
+        [0.687, 0.670],
+        [0.791,	0.907]
+        ]
+    }
+
+STATIONS = {
+        "203004": [0.200, 0.532],
+        "203005": [0.144, 0.815],
+        "203010": [0.336, 0.694],
+        "203014": [0.754, 0.707],
+        "203012": [0.867, 0.776],
+        "203002": [0.773, 0.873]
+    }
+
 
 def process(config, script_paths, logger, data):
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
@@ -58,77 +92,110 @@ def process(config, script_paths, logger, data):
         if len(mvnproc) == 0:
             continue
 
-        assert len(mvnproc) == 1
-        rn = next(iter(mvnproc))
-        logger.info(f"-- Plotting {rn.text} --", nret=1)
+        assert len(mvnproc) == 2
 
-        mvnproc = mvnproc[rn]
-        obs_data = obs_data[rn]
+        rn_isin = next(rn for rn in mvnproc if rn.exclude == "NONE")
+        rn_isout = next(rn for rn in mvnproc if rn.exclude != "NONE")
 
-        groups = mvnproc.columns.str.replace("_.*", "", regex=True).unique()
-        groups = [g for g in groups if g not in ["", "mvn", "mv"]]
+        logger.info(f"-- Plotting {rn_isin.text} --", nret=1)
 
-        ng = len(groups)
-        nrows = ng // config.ncols + int(ng % config.ncols > 0)
-        mosaic = [[groups[ncols * ir + ic] if ncols * ir + ic < ng else "."
-                   for ic in range(ncols)] for ir in range(nrows)]
+        mvnproc_in = mvnproc[rn_isin]
+        mvnproc_out = mvnproc[rn_isout]
 
-        for event in config.events:
+        #potpeaks, _, _ = datahub.get_potpeaks()
+        #rk = potpeaks.rank(ascending=False)
+        #obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
+
+        ncols = config.ncols
+        nev = len(config.events)
+        nrows = nev // ncols + (nev % ncols != 0)
+        mosaic = [[config.events[ir * ncols + ic] for ic in range(ncols)]
+                  for ir in range(nrows)]
+        nrows = len(mosaic)
+        plt.close("all")
+        fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+                         layout="constrained")
+        kw = dict(hspace=0.05, wspace=0.05)
+        axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
+
+        for event, ax in axs.items():
             logger.info(f"Plotting {event}", ntab=1)
-            plt.close("all")
-            fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
-                             layout="constrained")
-            axs = fig.subplot_mosaic(mosaic)
-            for aname, ax in axs.items():
-                grp = aname
-                logger.info(f"Group {grp}", ntab=2)
 
-                cn = f"{grp}_obs_{event}_log10aep"
-                if cn not in mvnproc.columns:
-                    logger.info(f"No data for group {grp}, skip", ntab=3)
-                    ax.axis("off")
-                    continue
+            # River lines
+            for rname, pts in RIVERS.items():
+                pts = np.array(pts)
+                ax.plot(pts[:, 0], pts[:, 1], "-",
+                        color=config.river_color,
+                        lw=8, solid_capstyle="round")
 
-                # value -> %
-                aep = 10**(mvnproc.loc[:, cn] + 2)
-                prob = aep
+            # Stations
+            for sid, pts in STATIONS.items():
+                # AEP data
+                cn = f"G{sid}_obs_{event}_log10aep"
+                p_in = 10**mvnproc_in.loc[:, cn]
+                pm_in = p_in.mean()
+                ps_in = p_in.std()
+                p_out = 10**mvnproc_out.loc[:, cn]
+                pm_out = p_out.mean()
+                ps_out = p_out.std()
 
-                if prob.notnull().sum() == 0:
-                    logger.info(f"No data for group {grp}, skip", ntab=3)
-                    ax.axis("off")
-                    continue
+                x, y = pts
+                col = cm.Reds_r(Normalize(vmin=0, vmax=20)(pm_in * 100))
+                ax.plot(x, y, "o",
+                        ms=12, mec="k", mfc=col)
 
-                x0 = round(math.log10(max(1e-9, prob.quantile(0.001))), 2)
-                x1 = round(math.log10(prob.max()), 2)
-                bins = np.logspace(x0, x1, 50)
+                xy = [x, y]
+                delta = 18
+                txt = f"{sid}\n" if event == config.events[0] else ""
+                txt += f"{pm_in * 100:0.1f}% $\pm$ {ps_in * 100:0.1f}%"
+                #txt += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
 
-                ax.hist(prob, bins=bins, facecolor="0.8", edgecolor="0.2")
+                if sid == "203014":
+                    xytext = [delta, -1.5 * delta]
+                    va = "top"
+                    ha = "left"
+                elif sid == "203002":
+                    xytext = [-delta, delta]
+                    va = "bottom"
+                    ha = "right"
+                else:
+                    xytext = [delta, delta]
+                    va = "bottom"
+                    ha = "left"
 
-                m = prob.mean()
-                y0, y1 = ax.get_ylim()
-                xy = (m, (y0 + y1) / 2)
-                paef = pe.withStroke(linewidth=4,
-                                     foreground="w")
+                ax.annotate(txt, xy,
+                            ha=ha, va=va,
+                            xytext=xytext,
+                            fontsize="large",
+                            textcoords="offset pixels")
 
-                ax.annotate(f"Mean\n{m:0.2f}%", xy, (0, 5),
-                            xycoords="data", textcoords="offset points",
-                            fontweight="bold", va="bottom", ha="center",
-                            fontsize=15,
-                            path_effects=[paef])
-                ax.plot([m, m], [y0, y1], "k-", lw=2)
+            ax.axis("off")
 
-                title = f"{grp[1:]}"
-                xlab = "AEP [%]"
-                ax.set(title=title, xscale="log",
-                       xlabel=xlab, ylim=(y0, y1))
+            cn = f"GALL_obs_{event}_log10aep"
+            p_in = 10**mvnproc_in.loc[:, cn]
+            pm_in = p_in.mean()
+            ps_in = p_in.std()
+            p_out = 10**mvnproc_out.loc[:, cn]
+            pm_out = p_out.mean()
+            ps_out = p_out.std()
 
-            ftitle = f"Event {event} [{rn.text}]\n"
-            fig.suptitle(ftitle, fontsize=20, fontweight="bold")
+            if re.search("MAX", event):
+                dt = "Max 2017/2008"
+                title = f"{dt}\n"
+            else:
+                dt = pd.to_datetime(event).strftime("%b %Y")
+                title = f"{dt} flood\n"
 
-            basename = script_paths.basename
-            fp = f"{basename}_{rn.text}_{event}_v{config.version}.png"
-            fp = script_paths.fimg / fp
-            fig.savefig(fp, dpi=config.fdpi)
+            title += f"{pm_in * 100:0.2f}% $\pm$ {ps_in * 100:0.2f}%"
+            #title += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
+            ax.set_title(title, x=0.3, y=0.12,
+                         fontsize="x-large",
+                         fontweight="bold")
+
+        basename = script_paths.basename
+        fp = f"{basename}_{rn_isin.text}_v{config.version}.png"
+        fp = script_paths.fimg / fp
+        fig.savefig(fp, dpi=config.fdpi)
 
 
 if __name__ == "__main__":
@@ -140,49 +207,50 @@ if __name__ == "__main__":
                         type=int, required=True)
     parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
                         type=float, default=0.3)
-    parser.add_argument("-di", "--diag", help="Show stan diagnostics",
-                        action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug mode",
                         action="store_true", default=False)
     parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
-                        type=str, default="-1|0")
+                        type=str, default="-1")
     parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
-                        type=str, default="0|3")
+                        type=str, default="0")
     args = parser.parse_args()
 
     # Config
     CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
                                "awidth", "aheight", "fdpi", "ncols",
                                "excludes", "copula_shapes",
-                               "diag", "debug",
+                               "debug", "diag",
                                "load_obs_data",
                                "load_ffa",
                                "load_mvnproc",
                                "load_expected_params",
                                "load_postpred_checks",
-                               "events", "exclude"])
+                               "events", "exclude",
+                               "river_color"])
     awidth = 6
     aheight = 5
     fdpi = 300
-    ncols = 3
-    excludes = ["NONE"]
+    ncols = 2
     load_ffa = False
-    load_obs_data = True
+    load_obs_data = False
     load_mvnproc = True
     load_expected_params = False
     load_postpred_checks = False
-    exclude = "NONE"
-    events = ["2022-02-27"]
+    excludes = ["NONE", "2021"]
+    events = ["2008-01-04", "2017-03-31",
+              "MAX-17-08", "2022-02-27"]
+
+    river_color = "0.4"
 
     config = CF(args.version, args.pcensor,
                 args.rho_mins.split("|"),
                 awidth, aheight, fdpi, ncols, excludes,
                 args.copula_shapes.split("|"),
-                args.diag, args.debug,
+                args.debug, False,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, events,
-                exclude)
+                excludes, river_color)
 
     # Baseline
     source_file = Path(__file__).resolve()
