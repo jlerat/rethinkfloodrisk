@@ -238,7 +238,7 @@ cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
     + cols_cond_all
 
 res = pd.DataFrame(np.nan, index=samples.index,
-                   columns=cols)
+                   columns=cols + cols_obs)
 
 iparts = ccs.partitions.sample(probs, len(samples))
 
@@ -316,7 +316,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 if ~np.isnan(qo):
                     cdf = gev.cdf(qo)
                     # Store individual estimate of event
-                    if gname == "GALL":
+                    if gname == "GALL" and event in obs_main:
                         lc = math.log10(1 - cdf) if 1 - cdf > 0 else np.nan
                         res.loc[i, f"G{sid}_obs_{event}_log10aep"] = lc
 
