@@ -168,13 +168,10 @@ LOGGER.info("Load data")
 ams, _, _, stations = datahub.get_ams_concat()
 potpeaks, _, _ = datahub.get_potpeaks()
 
-rk = potpeaks.rank(ascending=False)
-obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
-
-if debug:
-    obs = ["2008-01-04", "2017-03-31", "2022-02-27", "2022-03-30"]
-
+obs = potpeaks.index.astype(str).tolist()
 obs.append("MAX-17-08")
+obs_main = ["2008-01-04", "2017-03-31", "2022-02-27", "2022-03-30",
+            "MAX-17-08"]
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -229,8 +226,9 @@ for aep in aep_targets:
     cols_cond_all.extend(cc)
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_{event}_log10aep" for event in obs
-            for g in list(groups_mvn_cdf.keys()) + gsta]
+cols_obs = [f"{g}_obs_{event}_log10aep"
+            for g in list(groups_mvn_cdf.keys()) + gsta
+            for event in (obs if g == "GALL" else obs_main)]
 
 stats = [f"{st}_log10aep{aep:02d}"
          for st in ["all", "any"]
@@ -289,7 +287,8 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
             res.loc[i, f"{gname}_any_log10aep{aep_target:02d}"] = lsany
 
         # Obs aep
-        for event in obs:
+        events = obs if gname == "GALL" else obs_main
+        for event in events:
             # Get peak flow data
             if event == "MAX-17-08":
                 e17 = next(e for e in obs if re.search("2017-03", e))
