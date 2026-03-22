@@ -147,7 +147,7 @@ def process(config, script_paths, logger, data):
                 xy = [x, y]
                 delta = 18
                 txt = f"{sid}\n" if event == config.events[0] else ""
-                txt += f"{pm_in * 100:0.1f}% $\pm$ {ps_in * 100:0.1f}%"
+                txt += f"{pm_in * 100:0.1f}% $\\pm$ {ps_in * 100:0.1f}%"
                 #txt += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
 
                 if sid == "203014":
@@ -186,7 +186,7 @@ def process(config, script_paths, logger, data):
                 dt = pd.to_datetime(event).strftime("%b %Y")
                 title = f"{dt} flood\n"
 
-            title += f"{pm_in * 100:0.2f}% $\pm$ {ps_in * 100:0.2f}%"
+            title += f"{pm_in * 100:0.2f}% $\\pm$ {ps_in * 100:0.2f}%"
             #title += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
             ax.set_title(title, x=0.3, y=0.12,
                          fontsize="x-large",
