@@ -173,6 +173,11 @@ obs.append("MAX-17-08")
 obs_main = ["2008-01-04", "2017-03-31", "2022-02-27", "2022-03-30",
             "MAX-17-08"]
 
+if debug:
+    obs = obs_main.copy()
+    obs.append("1991-03-13")
+    obs.append("2009-06-22")
+
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
     diag = json.load(fo)
@@ -325,6 +330,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                                                                 cdf)
 
             sevent = ccs.survival_given_partition(ipartition, zev, grp_idx)
+
             lsev = math.log10(sevent) if sevent > 0 else np.nan
             res.loc[i, f"{gname}_obs_{event}_log10aep"] = lsev
 
