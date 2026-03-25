@@ -87,11 +87,6 @@ def process(config, script_paths, logger, data):
             csqr = math.sqrt(1 - rho)
             return sqr, csqr
 
-        def fun(v, x, rho):
-            sqr, csqr = const(rho)
-            w = norm.ppf(v)
-            return norm.cdf((x - w * sqr) / csqr).prod(axis=1)
-
         def true_cdf(x, rho, napprox):
             nsta = x.shape[1]
             mean = np.zeros(nsta)
@@ -100,30 +95,51 @@ def process(config, script_paths, logger, data):
             return [rv.cdf(x)]
 
         def approx_cdf(x, rho, napprox):
+            """ multivariate cdf integration via quadrature """
+            sqr, csqr = const(rho)
+            # BUG FIX: swap sqr and csqr?????
+
             cdf = np.zeros(len(x))
-            eps = 0.5 / napprox
-            v = np.linspace(eps, 1 - eps, napprox)
-            dv = v[1] - v[0]
-            for i, vv in enumerate(v):
-                cdf += fun(vv, x, rho) * dv
+            eps = 5e-1 / napprox
+            u = np.linspace(eps, 1 - eps, napprox)
+            v = norm.ppf(u)
+            du = u[1] - u[0]
+            cdf = norm.cdf((x[:, :, None] - v[None, None, :] * sqr) / csqr)
+            cdf = cdf.prod(axis=1).sum(axis=-1) * du
             return cdf
 
         plt.close("all")
-        fig, axs = plt.subplots(ncols=3)
-        z = np.linspace(-3, 3, 50)
-        nsta = 10
+        fig, ax = plt.subplots()
+        z = np.linspace(-4, 4, 50)
+        nsta = 5
+        #nsmp = 10000
+        #v = np.random.normal(size=nsmp)[:, None]
+        #eps = np.random.normal(size=(nsmp, nsta))
+        napp = 100
 
-        for rho, ax in zip([0.2, 0.5, 0.9], axs):
+        for rho in [0.2, 0.5, 0.99]:
             cc = np.zeros((len(z), 2))
+
+            #sqr, csqr = const(rho)
+            #zz = sqr * v + csqr * eps
+
             for ix, x in enumerate(z):
                 xx = x * np.ones((1, nsta))
-                cc[ix, 0] = true_cdf(xx, rho, 50)[0]
-                cc[ix, 1] = approx_cdf(xx, rho, 50)[0]
+                cc[ix, 0] = true_cdf(xx, rho, napp)[0]
+                cc[ix, 1] = approx_cdf(xx, rho, napp)[0]
 
-            ax.plot(z, cc[:, 0])
-            ax.plot(z, cc[:, 1])
-            ax.set(title=f"rho = {rho}",
-                   xlabel="z score")
+            ax.plot(z, cc[:, 0], label=f"ρ={rho:0.2f} - True",
+                    lw=1)
+            col = ax.get_lines()[-1].get_color()
+            ax.plot(z, cc[:, 1], "--",
+                    label=f"ρ={rho:0.2f} - Approx",
+                    color=col, lw=2, alpha=0.9)
+
+            #ax.plot(z, cc[:, 1] - cc[:, 0], label=f"ρ={rho:0.2f} - diff",
+            #        lw=1)
+
+        ax.set(xlabel="z score", ylabel="CDF")
+        ax.legend()
         plt.show()
         import pdb; pdb.set_trace()
 
