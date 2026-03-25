@@ -26,6 +26,8 @@ import pandas as pd
 from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvt
 from scipy.optimize import minimize_scalar
+from scipy.stats import gamma
+from scipy.special import gamma as gamma_fun
 
 
 import matplotlib.pyplot as plt
@@ -90,79 +92,181 @@ def process(config, script_paths, logger, data):
             w = norm.ppf(v)
             return norm.cdf((x - w * sqr) / csqr).prod(axis=1)
 
-        def approx_cdf_basic(x, rho, n):
+        def true_cdf(x, rho, napprox):
+            nsta = x.shape[1]
+            mean = np.zeros(nsta)
+            cov = rho * np.eye(nsta) + (1 - rho) * np.ones((nsta, nsta))
+            rv = mvt(mean=mean, cov=cov)
+            return [rv.cdf(x)]
+
+        def approx_cdf(x, rho, napprox):
             cdf = np.zeros(len(x))
-            eps = 0.5 / n
-            v = np.linspace(eps, 1 - eps, n)
+            eps = 0.5 / napprox
+            v = np.linspace(eps, 1 - eps, napprox)
             dv = v[1] - v[0]
             for i, vv in enumerate(v):
                 cdf += fun(vv, x, rho) * dv
             return cdf
 
-        def ofun(u, nsta, rho, lmaep):
-            xx = norm.ppf(u) * np.ones((1, nsta))
+        plt.close("all")
+        fig, axs = plt.subplots(ncols=3)
+        z = np.linspace(-3, 3, 50)
+        nsta = 10
+
+        for rho, ax in zip([0.2, 0.5, 0.9], axs):
+            cc = np.zeros((len(z), 2))
+            for ix, x in enumerate(z):
+                xx = x * np.ones((1, nsta))
+                cc[ix, 0] = true_cdf(xx, rho, 50)[0]
+                cc[ix, 1] = approx_cdf(xx, rho, 50)[0]
+
+            ax.plot(z, cc[:, 0])
+            ax.plot(z, cc[:, 1])
+            ax.set(title=f"rho = {rho}",
+                   xlabel="z score")
+        plt.show()
+        import pdb; pdb.set_trace()
+
+
+
+        def ofun(u, nsta, use_approx, rho, u_smp,
+                 kendall, lmaep, kind):
             napp = 10 if config.debug else 50
-            c = approx_cdf_basic(xx, rho, napp)[0]
+            cdf_fun = approx_cdf if use_approx else true_cdf
+            if kind == "AND":
+                xx = norm.ppf(u) * np.ones((1, nsta))
+                c = cdf_fun(xx, rho, napp)[0]
+            elif kind == "OR":
+                xx = norm.ppf(u) * np.ones((1, nsta))
+                c = 1 - cdf_fun(-xx, rho, napp)[0]
+            elif kind == "KENDALL":
+                xx = norm.ppf(1 - u) * np.ones((1, nsta))
+                c0 = cdf_fun(xx, rho, napp)[0]
+                c = 1 - np.interp(c0, kendall.p, kendall.t)
+            elif kind == "AND_SMP":
+                c = np.all(u_smp < u, axis=1).sum() / nsmp
+            elif kind == "OR_SMP":
+                c = 1 - np.all(u_smp < 1 - u, axis=1).sum() / nsmp
+
             err = (math.log(c) - lmaep)**2
             return err
 
-        def fit(maep, nsta, rho):
-            ua = maep
-            ub = maep**(1./nsta)
+        def fit(maep, nsta, use_approx, rho, u_smp,
+                kendall, kind):
+            if kind.startswith("AND"):
+                ua = maep
+                ub = maep**(1./nsta)
+            elif kind.startswith("OR"):
+                ua = 1 - (1 - maep)**(1./nsta)
+                ub = maep
+            elif kind.startswith("KENDALL"):
+                ua = maep
+                ub = 1 - math.exp(-gamma.ppf(gamma_fun(nsta) * maep, a=nsta))
+
             lmaep = math.log(maep)
+            args = (nsta, use_approx, rho, u_smp,
+                    kendall, lmaep, kind,)
             opt = minimize_scalar(ofun, bracket=(ua, ub),
                                   bounds=(ua, ub),
-                                  args=(nsta, rho, lmaep,))
-            return opt.x
+                                  args=args)
+            return opt
 
-        plt.close("all")
-        rhos = [0.5, 0.9]
-        nstas = [2, 10, 30]
-        w = 6
-        fig, axs = plt.subplots(ncols=len(nstas),
-                                figsize=(w * len(nstas), w),
-                                layout="constrained",
-                                sharex=True, sharey=True)
+        # Configure
+        rhos = [0.8] if config.debug else [0.3, 0.9]
+        nstas = [2] if config.debug else [2, 10, 30]
+        aep_types = ["AND"] if config.debug else ["AND", "OR", "KENDALL"]
 
-        naeps = 8 if config.debug else 30
+        naeps = 11 if config.debug else 31
         maeps = np.logspace(-3, -1, naeps)
 
-        for iax, (nsta, ax) in enumerate(zip(nstas, axs)):
+        napp = 50
+        use_approx = True
+
+        # Create plot
+        plt.close("all")
+        mosaic = [[f"{t}_{n}" for n in nstas]
+                  for t in aep_types]
+        w = 6
+        ncols, nrows = len(mosaic[0]), len(mosaic)
+        fig = plt.figure(figsize=(w * ncols, w * nrows),
+                         layout="constrained")
+        axs = fig.subplot_mosaic(mosaic,
+                                 sharex=True,
+                                 sharey=True)
+
+        nsmp = 1000000
+        v = np.random.normal(size=nsmp)[:, None]
+
+        for iax, (aname, ax) in enumerate(axs.items()):
+            aep_type, nsta = aname.split("_")
+            nsta = int(nsta)
+            eps = np.random.normal(size=(nsmp, nsta))
+
             for rho in rhos:
-                logger.info(f"Dealing with nsta={nsta} rho={rho:0.2f}")
-                uaeps = np.zeros_like(maeps)
+                logger.info(f"Dealing with {aep_type}/nsta={nsta} rho={rho:0.2f}")
+
+                # Exact / approx
+                uaeps = np.nan * np.zeros((len(maeps), 2))
+
+                sqr, csqr = const(rho)
+                x = sqr * v + csqr * eps
+
+                u_smp = norm.cdf(x)
+                t = np.linspace(0, 1, napp)
+                p = np.array([np.all(u_smp - tt < 0, axis=1).sum() / nsmp
+                              for tt in t])
+                kendall = pd.DataFrame({"t": t, "p": p})
+
                 for iaep, maep in enumerate(maeps):
                     if iaep % 5 == 0 :
                         logger.info(f"maep #{iaep + 1:2d}", ntab=1)
-                    u = fit(maep, nsta, rho)
-                    p = approx_cdf_basic(norm.ppf(u) * np.ones((1, nsta)),
-                                         rho, 20)[0]
-                    if abs(p - maep) < 1e-5:
-                        logger.warning(f"High error : {abs(p - maep):3.3e}",
-                                       ntab=1)
 
-                    uaeps[iaep] = u
+                    opt = fit(maep, nsta, use_approx, rho,
+                              u_smp, kendall, aep_type)
+                    uaeps[iaep, 0] = opt.x
+                    if aep_type != "KENDALL":
+                        opt_smp = fit(maep, nsta, use_approx,
+                                      rho, u_smp,
+                                      kendall, aep_type + "_SMP")
+                        uaeps[iaep, 1] = opt_smp.x
 
-                ax.plot(maeps * 100, uaeps * 100,
-                        "-", lw=3, label=f"ρ={rho:0.2f}")
+                if aep_type != "KENDALL":
+                    ax.plot(maeps * 100, uaeps[:, 0] * 100,
+                            "o-", lw=3, label=f"ρ={rho:0.2f}")
+                else:
+                    ax.plot([], [], "-",
+                            lw=3, label=f"ρ={rho:0.2f}")
+
+                col = ax.get_lines()[-1].get_color()
+                ax.plot(maeps * 100, uaeps[:, 1] * 100,
+                        "o--", lw=1.5, label=f"ρ={rho:0.2f} (sample)",
+                        color=col)
 
             ylab = "Univariate Equivalent AEP [%]" if nsta == 2 else ""
-            ax.set(title=f"({letters[iax]}) {nsta} stations",
+            ax.set(title=f"({letters[iax]}) '{aep_type}' event - {nsta} stations",
                    xscale="log",
                    yscale="log",
-                   xlabel="Multivariate 'AND' AEP [%]",
+                   xlabel=f"Multivariate '{aep_type}' AEP [%]",
                    ylabel=ylab)
 
-            ax.plot(maeps * 100, maeps * 100, "k-",
+            comonot = maeps * 100
+            if aep_type == "AND":
+                indep = maeps**(1./nsta)
+            elif aep_type == "OR":
+                indep = (1 - (1 - maeps)**(1./nsta))
+            else:
+                indep = 1 - np.exp(-gamma.ppf(gamma_fun(nsta) * maeps, a=nsta))
+
+            ax.plot(maeps * 100, comonot, "k-",
                     label="Co-monotone", lw=0.8)
-            ax.plot(maeps * 100, maeps**(1./nsta) * 100, "k--",
+            ax.plot(maeps * 100, indep * 100, "k:",
                     label="Indedendent", lw=0.8)
 
-            fmt = lambda x, pos: f"1:{100/x:0.0f}"
+
+            fmt = lambda x, pos: f"1:{int(100/x):,d}"
             ax.xaxis.set_major_formatter(fmt)
             ax.yaxis.set_major_formatter(fmt)
-            if iax == 0:
-                ax.legend(loc=4, fontsize="large")
+            ax.legend(loc=4, fontsize="large")
 
             ax.grid()
 
