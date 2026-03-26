@@ -55,7 +55,7 @@ if FLOG.exists():
 for f in FTESTS.glob("test_mv_censored_no_missing_vs_floodstan*.png"):
     f.unlink()
 
-LOGGER = fsample.get_logger(stan_logger=PROGRESS, flog=FLOG)
+LOGGER = fsample.get_logger(use_stan_logger=PROGRESS, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 3
 STAN_NWARM_DEFAULT = 5000

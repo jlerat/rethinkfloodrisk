@@ -82,7 +82,7 @@ def test_kendall_function_independence(nstations, allclose):
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 8])
-def test_compute_kendall(nstations, allclose):
+def test_compute_empirical_kendall(nstations, allclose):
     rho = 1e-3
     cdf = mes.GaussianFactorCopulaCDF(nstations, rho)
 
@@ -98,4 +98,34 @@ def test_compute_kendall(nstations, allclose):
     expected = kfi.cdf(t)
 
     assert allclose(expected, pk.Kc, atol=2e-2)
+
+
+@pytest.mark.parametrize("kind", ["AND", "OR"])
+@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+def test_compute_marginal_score(kind, nstations, rho, allclose):
+    cdf = mes.GaussianFactorCopulaCDF(nstations, rho, napprox=500)
+
+    nsamples = 100000
+    mex1 = mes.MarginalExceedanceScore(kind, cdf,
+                                       empirical=False,
+                                       nsamples=nsamples,
+                                       logger=LOGGER)
+    mex2 = mes.MarginalExceedanceScore(kind, cdf,
+                                       empirical=True,
+                                       nsamples=nsamples,
+                                       logger=LOGGER)
+
+    maeps = np.logspace(math.log10(1e-2/5), -1, 10)
+    scs = np.zeros((len(maeps), 2))
+    for iaep, maep in enumerate(maeps):
+        scs[iaep, 0] = mex1.compute_score(maep)
+        scs[iaep, 1] = mex2.compute_score(maep)
+
+    err = np.abs(np.diff(np.log(scs), axis=1)).squeeze()
+    #print(f"{kind}-{nstations}-{rho} : {err.max():0.2f}")
+    # .. pretty poor fit
+    assert err.max() < 1.1e-1
+
+
 

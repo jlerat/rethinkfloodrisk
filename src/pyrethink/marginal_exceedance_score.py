@@ -22,7 +22,36 @@ class KendallFunctionIndependence():
         return np.exp(-gamma.ppf(1 - p, a=self.nstations))
 
 
-class GaussianFactorCopulaCDF():
+class CopulaCDF():
+    def __init__(self, name, nstations, rho):
+        self.name = name
+        self.nstations = nstations
+        if rho < 0 or rho >= 1:
+            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
+        self.rho = rho
+
+        self.x_vect = np.ones((1, nstations))
+
+    def __str__(self):
+        txt = f"{self.name} copula with rho={self.rho:0.2f}"\
+              + f" in {self.nstations} dims."
+        return txt
+
+    def cdf(self, x):
+        raise NotImplementedError
+
+    def cdf_main_diagonal(self, x):
+        self.x_vect.fill(x)
+        return self.cdf(self.x_vect)
+
+    def sample(self, nsamples):
+        raise NotImplementedError
+
+    def kendal_function(self, t):
+        raise NotImplementedError
+
+
+class GaussianFactorCopulaCDF(CopulaCDF):
     """ Compute the CDF for a Gaussian factor copula such that
         Ui = Phi(Zi)
         Zi = sqrt(rho) V + sqrt(1 - rho) Ei
@@ -34,26 +63,27 @@ class GaussianFactorCopulaCDF():
         Computation is done in an arbitrary number of dimensions.
     """
     def __init__(self, nstations, rho, napprox=500):
-        self.nstations = nstations
-        if rho < 0 or rho >= 1:
-            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
-        self.rho = rho
+        super(GaussianFactorCopulaCDF, self).__init__("GaussianFactor",
+                                                      nstations, rho)
         self.napprox = napprox
 
         # Required for the cdf integration
         mean = np.zeros(nstations)
         cov = (1 - rho) * np.eye(nstations) \
             + rho * np.ones((nstations, nstations))
-
         self.rv = mvt(mean=mean, cov=cov)
-        self.x_vect = np.zeros((1, nstations))
 
         # Required for the factor integration
-        eps = 5e-1 / napprox
-        u = np.linspace(eps, 1 - eps, napprox)
-        self.v = norm.ppf(u)
-        self.du = u[1] - u[0]
-        self.buf = np.zeros((1, nstations, napprox))
+        if napprox > 0:
+            eps = 5e-1 / napprox
+            u = np.linspace(eps, 1 - eps, napprox)
+            self.v = norm.ppf(u)
+            self.du = u[1] - u[0]
+            self.buf = np.zeros((1, nstations, napprox))
+        else:
+            self.v = None
+            self.du = None
+            self.buf = None
 
     @property
     def sqr(self):
@@ -85,14 +115,53 @@ class GaussianFactorCopulaCDF():
         else:
             return self.rv.cdf(x)
 
-    def cdf_main_diagonal(self, x):
-        self.x_vect.fill(x)
-        return self.cdf(self.x_vect)
-
     def sample(self, nsamples):
         v = np.random.normal(size=nsamples)
         eps = np.random.normal(size=(nsamples, self.nstations))
         return norm.cdf(self.sqr * v[:, None] + self.csqr * eps)
+
+
+class GumbelCopulaCDF():
+    """ Compute the CDF for an Archimedean copula
+        C(u) = phi_inv(sum phi(u_i))
+
+        phi(x) = -log(x)**theta
+
+    """
+    def __init__(self, nstations, rho):
+        super(GumbelCopulaCDF, self).__init__("Gumbel",
+                                              nstations, rho)
+        self.theta = 1 / (1 - rho)
+        self.phi = lambda x: (-np.log(x))**self.theta
+        self.phi_inv = lambda y: np.exp(-y**(1./self.theta))
+        self.x_vect = np.ones((1, nstations))
+
+    def cdf(self, x):
+        if x.ndim != 2:
+            errmsg = "Expected x of dim 2"
+            raise ValueError(errmsg)
+
+        if x.shape[0] != 1:
+            errmsg = "Expected x.shape[0] to be 1"
+            raise ValueError(errmsg)
+
+        return self.phi_inv(self.phi(x).sum())
+
+    def kendall_function(self, t):
+        """ See
+        Barbe, P., Genest, C., Ghoudi, K., & Rémillard, B. (1996).
+        On Kendall’s Process. Journal of Multivariate Analysis,
+        58(2), 197–229. https://doi.org/10.1006/jmva.1996.0048
+        Page 205
+        """
+        Kc = t
+        for i in range(1, self.nstations):
+            f = (-self.phi(t))**i / math.factorial(i)
+            # ith derivative of phi
+            # TODO!
+            g = 0
+            Kc += f * g
+        return Kc
 
 
 class MarginalExceedanceScore():
@@ -155,13 +224,14 @@ class MarginalExceedanceScore():
                 case "OR":
                     c = 1 - np.all(u_smp < 1 - u, axis=1).sum() / nsmp
                 case "KENDALL":
-                    pass
+                    raise ValueError("Cannot use 'empirical' computation"
+                                     + " of KENDALL cdf")
 
         err = (math.log(c) - lmaep)**2
         return err
 
     def compute_bounds(self, maep):
-        nsta = self.nstations
+        nsta = self.cdf_computer.nstations
         match self.kind:
             case "AND":
                 ua = maep
