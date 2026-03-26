@@ -7,6 +7,8 @@ from scipy.stats import gamma
 from scipy.stats import multivariate_normal as mvt
 from scipy.optimize import minimize_scalar
 
+from hydrodiy.stat import sutils
+
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR", "KENDALL"]
 
@@ -190,13 +192,7 @@ class MarginalExceedanceScore():
     def compute_empirical_kendall(self):
         u_smp = self.u_smp
         N, P = u_smp.shape
-        probs = np.zeros(N)
-        logger = self.logger
-        for i in range(N):
-            if i % 1000 == 0 and logger is not None:
-                logger.info(f"Empirical kendall step {i:6,d} / {N:6,d}")
-            probs[i] = np.all(np.greater(u_smp[[i]], u_smp), axis=1).sum() / N
-
+        probs = sutils.multivariate_dominance(u_smp) / N
         t = np.arange(1, N + 1) / N
         Kc = np.zeros_like(t)
         for i, tt in enumerate(t):

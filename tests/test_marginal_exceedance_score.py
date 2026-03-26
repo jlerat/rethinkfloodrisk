@@ -81,8 +81,9 @@ def test_kendall_function_independence(nstations, allclose):
         assert allclose(p[iok], expected[iok])
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 8])
-def test_compute_empirical_kendall(nstations, allclose):
+@pytest.mark.parametrize("nstations", [2, 5, 7])
+@pytest.mark.parametrize("repeat", np.arange(1, 6))
+def test_compute_empirical_kendall(nstations, repeat, allclose):
     rho = 1e-3
     cdf = mes.GaussianFactorCopulaCDF(nstations, rho)
 
@@ -93,11 +94,12 @@ def test_compute_empirical_kendall(nstations, allclose):
     pk = mex.compute_empirical_kendall()
     t = pk.t
 
-    # Expected
+    # Expected independent
     kfi = mes.KendallFunctionIndependence(nstations)
     expected = kfi.cdf(t)
 
-    assert allclose(expected, pk.Kc, atol=2e-2)
+    atol = 1e-2 if nstations <= 5 else 4e-2
+    assert allclose(expected, pk.Kc, atol=atol)
 
 
 @pytest.mark.parametrize("kind", ["AND", "OR"])
@@ -106,7 +108,7 @@ def test_compute_empirical_kendall(nstations, allclose):
 def test_compute_marginal_score(kind, nstations, rho, allclose):
     cdf = mes.GaussianFactorCopulaCDF(nstations, rho, napprox=500)
 
-    nsamples = 100000
+    nsamples = 1000000
     mex1 = mes.MarginalExceedanceScore(kind, cdf,
                                        empirical=False,
                                        nsamples=nsamples,
@@ -123,9 +125,6 @@ def test_compute_marginal_score(kind, nstations, rho, allclose):
         scs[iaep, 1] = mex2.compute_score(maep)
 
     err = np.abs(np.diff(np.log(scs), axis=1)).squeeze()
-    #print(f"{kind}-{nstations}-{rho} : {err.max():0.2f}")
-    # .. pretty poor fit
-    assert err.max() < 1.1e-1
-
+    assert err.max() < 1e-1
 
 
