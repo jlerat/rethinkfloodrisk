@@ -190,6 +190,10 @@ class MarginalExceedanceScore():
             self.empirical_kendall = None
 
     def compute_empirical_kendall(self):
+        logger = self.logger
+        if logger is not None:
+            logger.info("Computing kendall function")
+
         u_smp = self.u_smp
         N, P = u_smp.shape
         probs = sutils.multivariate_dominance(u_smp) / N
