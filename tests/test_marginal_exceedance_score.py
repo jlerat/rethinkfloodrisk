@@ -16,40 +16,66 @@ from pyrethink import marginal_exceedance_score as mes
 
 LOGGER = iutils.get_logger("test")
 
+
+@pytest.mark.parametrize("name", mes.COPULAS)
+def test_copulas(name, allclose):
+    if name == "Gumbel":
+        pytest.skip("Gumbel not ready yet.")
+
+    nstations = 10
+    if name == "Independence":
+        args = ()
+    elif name == "Gaussian":
+        args = (np.eye(10),)
+    elif name == "GaussianOneFactor":
+        args = (0.8,)
+    elif name == "Gumbel":
+        args = (0.8,)
+
+    cop = mes.copula_factory(name, nstations, *args)
+
+    smp = cop.sample(100)
+    assert len(smp) == 100
+
+    cdf = cop.cdf(smp)
+    assert len(cdf) == 100
+
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 @pytest.mark.parametrize("napprox", [0, 100, 500])
 def test_gaussian_cdf(nstations, rho, napprox, allclose):
-    cdf = mes.GaussianFactorCopulaCDF(nstations, rho)
-
     mean = np.zeros(nstations)
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
+
+    if napprox == 0:
+        cop = mes.GaussianCopula(nstations, cov)
+    else:
+        cop = mes.GaussianOneFactorCopula(nstations, rho, napprox)
+
     rv = mvt(mean=mean, cov=cov)
     u = np.linspace(1e-5, 1-1e-5, 10)
     maxerr = 0
     zmaxerr = None
-    for ix, x in enumerate(norm.ppf(u)):
-        c1 = rv.cdf(x * np.ones((1, nstations)))
-
-        c2 = cdf.cdf_main_diagonal(x)
+    for iu, uu in enumerate(u):
+        c1 = rv.cdf(norm.ppf(uu) * np.ones((1, nstations)))
+        c2 = cop.cdf_main_diagonal(uu)
         atol = 2e-3 if napprox == 100 else 2e-4
         assert allclose(c1, c2, atol=atol)
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
-def test_gaussian_sampling(nstations, rho, allclose):
-    cdf = mes.GaussianFactorCopulaCDF(nstations, rho)
+def test_gaussian_one_factor_sampling(nstations, rho, allclose):
     mean = np.zeros(nstations)
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
     rv = mvt(mean=mean, cov=cov)
-
     nsamples = 1000000
     x1 = rv.rvs(size=nsamples)
     m1 = x1.mean(axis=0)
     cov1 = np.cov(x1.T)
 
-    x2 = norm.ppf(cdf.sample(nsamples))
+    cop = mes.GaussianOneFactorCopula(nstations, rho, nsamples)
+    x2 = norm.ppf(cop.random_samples)
     m2 = x2.mean(axis=0)
     cov2 = np.cov(x2.T)
 
@@ -59,10 +85,10 @@ def test_gaussian_sampling(nstations, rho, allclose):
 
 @pytest.mark.parametrize("nstations", [2, 3, 5, 10, 20])
 def test_kendall_function_independence(nstations, allclose):
+    cop = mes.IndependenceCopula(nstations)
     t = np.linspace(0, 1, 1000)
-    kfi = mes.KendallFunctionIndependence(nstations)
-    p = kfi.cdf(t)
-    t2 = kfi.ppf(p)
+    p = cop.kendall_function(t)
+    t2 = cop.inverse_kendall_function(p)
     if nstations < 10:
         assert allclose(t2, t, atol=2e-3)
 
@@ -85,10 +111,11 @@ def test_kendall_function_independence(nstations, allclose):
 @pytest.mark.parametrize("repeat", np.arange(1, 6))
 def test_compute_empirical_kendall(nstations, repeat, allclose):
     rho = 1e-3
-    cdf = mes.GaussianFactorCopulaCDF(nstations, rho)
+    nsamples = 20000
+    cop = mes.GaussianOneFactorCopula(nstations, rho)
 
     kind = "AND"
-    nsamples = 20000
+
     mex = mes.MarginalExceedanceScore(kind, cdf, nsamples=nsamples,
                                       logger=LOGGER)
     pk = mex.compute_empirical_kendall()
