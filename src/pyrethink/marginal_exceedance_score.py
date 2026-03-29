@@ -234,7 +234,7 @@ class GaussianCopula(Copula):
 
     @property
     def params(self):
-        return self_params
+        return self._params
 
     @params.setter
     def params(self, cor):
@@ -290,7 +290,7 @@ class GaussianOneFactorCopula(GaussianCopula):
 
     @property
     def params(self):
-        return self_params
+        return self._params
 
     @params.setter
     def params(self, rho):
@@ -347,14 +347,14 @@ class GumbelCopula(Copula):
 
     @property
     def params(self):
-        return self_params
+        return self._params
 
     @params.setter
     def params(self, rho):
         if rho < 0 or rho >= 1:
             raise ValueError(f"Expected rho in [0, 1[, got {rho}")
         self._params = rho
-        self._theta =  1 / (1 - rho)
+        self._theta = 1 / (1 - rho)
 
     @property
     def theta(self):
@@ -422,7 +422,8 @@ class MarginalExceedanceScore():
                 ub = maep
             case "KENDALL":
                 ua = maep
-                ub = self.independence_copula.inverse_kendall_function(1 - maep)
+                p = 1 - maep
+                ub = self.independence_copula.inverse_kendall_function(p)
         return ua, ub
 
     def compute_score(self, maep):
@@ -431,7 +432,6 @@ class MarginalExceedanceScore():
         self.opt = minimize_scalar(self.objective_function, bracket=bounds,
                                    bounds=bounds, args=(lmaep,))
         return self.opt.x
-
 
 
 class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
