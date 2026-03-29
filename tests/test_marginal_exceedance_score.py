@@ -156,3 +156,23 @@ def test_compute_marginal_score(kind, nstations, rho, allclose):
     assert err.max() < 1e-1
 
 
+@pytest.mark.parametrize("kind", ["AND", "OR"])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+@pytest.mark.parametrize("maep", [0.1, 0.01])
+def test_compute_marginal_score_set(kind, rho, maep, allclose):
+    nstations = 2
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex = mes.MarginalExceedanceScore(kind, cop)
+    mex.logger = LOGGER
+    df = mex.compute_set(maep)
+
+    for _, uv in df.iterrows():
+        x = uv.values[None, :]
+        if kind == "AND":
+            c = cop.survival(x)
+        elif kind == "OR":
+            c = 1 - cop.cdf(x)
+
+        assert allclose(c, maep, atol=1e-5)

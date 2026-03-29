@@ -397,29 +397,37 @@ class MarginalExceedanceScore():
         self.independence_copula = IndependenceCopula(copula.nstations)
         self.logger = None
         self._samples = None
+        self._u_vect = np.ones((1, copula.nstations))
 
-    def objective_function(self, u, lmaep):
+    def objective_function_set(self, u, lmaep):
         match self.kind:
             case "AND":
-                c = self.copula.cdf_main_diagonal(u)
+                c = self.copula.survival(u)
             case "OR":
-                c = 1 - self.copula.cdf_main_diagonal(1 - u)
+                c = 1 - self.copula.cdf(u)
             case "KENDALL":
-                c0 = self.copula.cdf_main_diagonal(u)
+                c0 = self.copula.cdf(u)
                 c = 1 - self.copula.inverse_kendall_function(c0)
 
+        if c == 0:
+            return np.inf
         err = (math.log(c) - lmaep)**2
         return err
+
+    def objective_function_diagonal(self, u, lmaep):
+        u_vect = self._u_vect
+        u_vect.fill(u)
+        return self.objective_function_set(u_vect, lmaep)
 
     def compute_bounds(self, maep):
         nsta = self.copula.nstations
         match self.kind:
             case "AND":
-                ua = maep
-                ub = maep**(1./nsta)
-            case "OR":
                 ua = 1 - (1 - maep)**(1./nsta)
                 ub = maep
+            case "OR":
+                ua = maep
+                ub = maep**(1./nsta)
             case "KENDALL":
                 ua = maep
                 p = 1 - maep
@@ -429,9 +437,34 @@ class MarginalExceedanceScore():
     def compute_score(self, maep):
         bounds = self.compute_bounds(maep)
         lmaep = math.log(maep)
-        self.opt = minimize_scalar(self.objective_function, bracket=bounds,
-                                   bounds=bounds, args=(lmaep,))
+        self.opt = minimize_scalar(self.objective_function_diagonal,
+                                   bracket=bounds, bounds=bounds,
+                                   args=(lmaep,))
         return self.opt.x
+
+    def compute_set(self, maep, npoints=50):
+        if self.copula.nstations != 2:
+            errmsg = "Can only compute set for 2 dimensions"
+            raise ValueError(errmsg)
+
+        u = maep + (1 - 2 * maep) * np.linspace(0, 1, npoints)
+        df = pd.DataFrame({"u": u, "v": np.zeros_like(u)})
+        bounds = [0, 1]
+        lmaep = math.log(maep)
+        u_vect = self._u_vect
+
+        for iu, uu in enumerate(u):
+            u_vect[0, 0] = uu
+
+            def ofun(v, lmaep):
+                u_vect[0, 1] = v
+                return self.objective_function_set(u_vect, lmaep)
+
+            opt = minimize_scalar(ofun, bracket=bounds, bounds=bounds,
+                                  args=(lmaep,))
+            df.loc[iu, "v"] = opt.x
+
+        return df
 
 
 class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
@@ -446,9 +479,9 @@ class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
 
         match self.kind:
             case "AND":
-                c = np.all(u_smp < u, axis=1).sum() / n_smp
+                c = np.all(u_smp > 1 - u, axis=1).sum() / n_smp
             case "OR":
-                c = 1 - np.all(u_smp < 1 - u, axis=1).sum() / n_smp
+                c = 1 - np.all(u_smp < u, axis=1).sum() / n_smp
             case "KENDALL":
                 raise ValueError("Cannot use 'empirical' computation"
                                  + " of KENDALL cdf")

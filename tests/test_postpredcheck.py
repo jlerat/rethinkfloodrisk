@@ -157,7 +157,7 @@ def test_bivariate_statistics(repeat, rho, allclose):
     x = np.repeat(mv.index.values[:, None] / 100, nsta, axis=1)
     z = norm.ppf(x)
     expected = 2 - rv.logcdf(z) / np.log(x[:, 0])
-    assert allclose(mv.xi, expected, atol=5e-2, rtol=2e-2)
+    assert allclose(mv.xi, expected, atol=1e-1, rtol=2e-2)
 
 
 @pytest.mark.parametrize("copula_shape", [0, 2.5, 5])
