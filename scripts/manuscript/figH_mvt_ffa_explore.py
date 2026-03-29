@@ -35,56 +35,13 @@ from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
 
 from pyrethink import datahub
+from pyrethink import marginal_exceedance_score as mes
 
 from floodstan import marginals
 
 from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data
-
-def find_marginal_exceedance_score_2d(cor2d, aep, nexplore):
-    nstations = 2
-    rv = mvt(mean=np.zeros(nstations), cov=cor2d)
-
-    t = np.linspace(-3, 2, nexplore + 2)
-    t0, t1 = t[[0, -1]]
-    u = (np.exp(-t) - math.exp(-t0)) / (math.exp(-t1) - math.exp(-t0))
-    u = u[1:-1]
-
-    z = norm.ppf(u)
-    x = np.zeros((1, nstations))
-    w = np.zeros_like(u)
-    v = np.zeros_like(u)
-    laep = math.log(aep * 1e-2)
-
-    def ofun(w):
-        x[0, -1] = w
-        lc = rv.logcdf(-x)
-        return abs(lc - laep)
-
-    for iz, zz in enumerate(z):
-        x[0, 0] = zz
-        opt = minimize_scalar(ofun, bounds=[-5, 5])
-        w[iz] = opt.x
-        v[iz] = norm.cdf(w[iz])
-
-    return u, v
-
-
-def find_marginal_exceedance_score_nd(cor, aep):
-    nstations = cor.shape[1]
-    rv = mvt(mean=np.zeros(nstations), cov=cor)
-    laep = math.log(aep * 1e-2)
-    x = np.zeros((1, nstations))
-
-    def ofun(w):
-        x[:] = w
-        lc = rv.logcdf(-x)
-        return abs(lc - laep)
-
-    opt = minimize_scalar(ofun, bounds=[-5, 5])
-    return norm.cdf(opt.x)
-
 
 def process(config, script_paths, logger, data):
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
@@ -132,13 +89,17 @@ def process(config, script_paths, logger, data):
         axs = fig.subplot_mosaic(mosaic)
 
         for iax, (aname, ax) in enumerate(axs.items()):
+            kind = re.sub(".*_", "", aname)
             logger.info(f"Plot {aname}", ntab=1)
 
             if aname.startswith("aep+2d"):
-                cor2d = cor[[isid1, isid2]][:, [isid1, isid2]]
+                cop = mes.GaussianCopula(2)
+                cop.params = cor[[isid1, isid2]][:, [isid1, isid2]]
+                mex = mes.MarginalExceedanceScore(kind, cop)
 
-                for aep in config.aep_target:
+                for maep in config.maep_target:
                     logger.info(f"AEP 1:{100 / aep:0.0f}", ntab=2)
+                    scs[iaep, 0] = mex.compute_score(maep)
                     u, v = find_marginal_exceedance_score_2d(cor2d, aep,
                                                              nexplore=200)
                     ax.plot(u, v, "-",
@@ -182,7 +143,7 @@ def process(config, script_paths, logger, data):
             else:
                 nstas = [2, 4, 6]
                 nstas_txt = [f"{n} stations" for n in nstas]
-                aeps = config.aep_target
+                aeps = config.maep_target
                 aeps_txt = [f"1:{100 / a:0.0f} AEP" for a in aeps]
                 values = pd.DataFrame(np.nan, index=nstas_txt,
                                       columns=aeps_txt)
@@ -256,7 +217,7 @@ if __name__ == "__main__":
                                "load_expected_params",
                                "load_postpred_checks",
                                "sta1", "sta2", "sta3", "sta4",
-                               "ngrid", "aep_target"])
+                               "ngrid", "maep_target"])
     awidth = 6
     aheight = 5
     fdpi = 300
@@ -273,7 +234,7 @@ if __name__ == "__main__":
     sta4 = "203010"
 
     ngrid = 20 if args.debug else 50
-    aep_target = [1, 10]
+    maep_target = [1, 10]
 
     config = CF(args.version, args.pcensor,
                 args.rho_mins.split("|"),
@@ -285,7 +246,7 @@ if __name__ == "__main__":
                 load_mvnproc, load_expected_params,
                 load_postpred_checks,
                 sta1, sta2, sta3, sta4,
-                ngrid, aep_target)
+                ngrid, maep_target)
 
     # Baseline
     source_file = Path(__file__).resolve()
