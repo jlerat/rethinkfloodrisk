@@ -9,13 +9,35 @@ from scipy.optimize import minimize_scalar
 
 from hydrodiy.stat import sutils
 
-COPULAS = ["Independence", "Gaussian",
-           "GaussianOneFactor", "Gumbel"]
+COPULAS = ["Independence", "Comonotone",
+           "Gaussian", "GaussianOneFactor",
+           "Gumbel"]
+
+SYMETRICAL_COPULAS = ["Independence", "Comonotone",
+                      "Gaussian", "GaussianOneFactor"]
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR", "KENDALL"]
 
+NKENDALL_DEFAULT = 20000
 
-def copula_factory(name, nstations, *args, **kwargs):
+
+def to2d(x, nstations):
+    if x.ndim == 1:
+        x = x[None, :]
+
+    if x.ndim != 2:
+        errmsg = "Expected array of dim 2"
+        raise ValueError(errmsg)
+
+    if x.shape[1] != nstations:
+        errmsg = "Expected second dimension of array of size {nstations}."\
+                 + " Got {x.shape[1]}."
+        raise ValueError(errmsg)
+
+    return x
+
+
+def copula_factory(name, nstations):
     if name not in COPULAS:
         txt = "/".join(COPULAS)
         errmsg = f"Expected {name} in '{txt}', got {name}."
@@ -23,23 +45,30 @@ def copula_factory(name, nstations, *args, **kwargs):
 
     if name == "Independence":
         return IndependenceCopula(nstations)
+    if name == "Comonotone":
+        return ComonotoneCopula(nstations)
     elif name == "Gaussian":
-        return GaussianCopula(nstations, *args, **kwargs)
+        return GaussianCopula(nstations)
     elif name == "GaussianOneFactor":
-        return GaussianOneFactorCopula(nstations, *args, **kwargs)
+        return GaussianOneFactorCopula(nstations)
     elif name == "Gumbel":
-        return GumbelCopula(nstations, *args, **kwargs)
+        return GumbelCopula(nstations)
 
 
 class Copula():
-    def __init__(self, name, nstations, nsamples=20000, logger=None):
+    def __init__(self, name, nstations):
         self.name = name
+        self.symetrical = name in SYMETRICAL_COPULAS
         self.nstations = nstations
-        self.logger = logger
+        self._params = None
+        self.logger = None
 
-        self.nsamples = nsamples
+        # Potential random variable
+        self._mean = np.zeros(nstations)
+        self._rv = None
+
+        self._nkendall = None
         self._random_samples = None
-
         self._kendall_function_data = None
         self._u_data = None
 
@@ -47,17 +76,27 @@ class Copula():
         txt = f"{self.name} copula {self.nstations} dimensions."
         return txt
 
-    @property
-    def kendall_function_data(self):
-        kdd = self._kendall_function
-        if kdd is None:
+    def compute_kendall_function_data(self, nkendall=NKENDALL_DEFAULT):
+        kdd = self._kendall_function_data
+
+        compute = kdd is None
+        if kdd is not None:
+            compute = self._nkendall != nkendall
+
+        if compute:
             logger = self.logger
             if logger is not None:
                 logger.info("Computing kendall function")
 
-            u = self.random_samples
+            # Generate samples
+            self._nkendall = nkendall
+            u = self.sample(nkendall)
+            self._random_samples = u
+
+            # Compute kendall
             N = len(u)
-            probs = sutils.multivariate_dominance(u) / N
+            printlog = logger is not None
+            probs = sutils.multivariate_dominance(u, printlog=printlog) / N
             t = np.arange(1, N + 1) / N
             Kc = np.zeros_like(t)
             for i, tt in enumerate(t):
@@ -68,11 +107,8 @@ class Copula():
 
         return kdd
 
-    @property
-    def random_samples(self):
-        if self._random_samples is None:
-            self._random_samples = self.sample(self.nsamples)
-        return self._random_samples
+    def pdf(self, u):
+        raise NotImplementedError
 
     def cdf(self, u):
         raise NotImplementedError
@@ -98,26 +134,88 @@ class Copula():
         self._u_data = u_data
         return self.cdf(u_data)
 
+    def survival(self, u):
+        u = to2d(u, self.nstations)
+        if self.symetrical:
+            return self.cdf(1 - u)
+        else:
+            raise NotImplementedError
+
+    def survival_main_diagonal(self, u):
+        if self.symetrical:
+            return self.cdf_main_diagonal(1 - u)
+        else:
+            raise NotImplementedError
+
+    def marginal_transformed_ppf(self, u):
+        raise NotImplementedError
+
+    def marginal_transformed_cdf(self, x):
+        raise NotImplementedError
+
     def sample(self, nsamples):
         raise NotImplementedError
 
-    def kendall_function(self, t):
-        kdd = self.kendall_function_data
+    def conditional_sample(self, icond, zcond, itarget):
+        raise NotImplementedError
+
+    def kendall_function(self, t, nkendall=NKENDALL_DEFAULT):
+        kdd = self.compute_kendall_function_data(nkendall)
         return np.interp(t, kdd.t, kdd.Kc)
 
-    def inverse_kendall_function(self, p):
-        kdd = self.kendall_function_data
+    def inverse_kendall_function(self, p, nkendall=NKENDALL_DEFAULT):
+        kdd = self.compute_kendall_function_data(nkendall)
         return np.interp(p, kdd.Kc, kdd.t)
 
 
-class IndependenceCopula(Copula):
-    def __init__(self, nstations, nsamples=20000):
-        super(IndependenceCopula, self).__init__("Independence",
-                                                 nstations,
-                                                 nsamples=nsamples)
+class ComonotoneCopula(Copula):
+    def __init__(self, nstations):
+        super(ComonotoneCopula, self).__init__("Comonotone",
+                                               nstations)
+
+    def pdf(self, u):
+        u = to2d(u, self.nstations)
+        return np.all(u == u[:, [0]], axis=1).astype(float)
 
     def cdf(self, u):
+        u = to2d(u, self.nstations)
+        return np.min(u, axis=1)
+
+    def marginal_transformed_ppf(self, u):
+        return u
+
+    def marginal_transformed_cdf(self, x):
+        return x
+
+    def sample(self, nsamples):
+        return np.repeat(np.random.uniform(0, 1, (nsamples, 1)),
+                         self.nstations, axis=1)
+
+    def kendall_function(self, t):
+        return t
+
+    def inverse_kendall_function(self, p):
+        return p
+
+
+class IndependenceCopula(Copula):
+    def __init__(self, nstations):
+        super(IndependenceCopula, self).__init__("Independence",
+                                                 nstations)
+
+    def pdf(self, u):
+        u = to2d(u, self.nstations)
+        return np.ones(u.shape[0])
+
+    def cdf(self, u):
+        u = to2d(u, self.nstations)
         return np.prod(u, axis=1)
+
+    def marginal_transformed_ppf(self, u):
+        return u
+
+    def marginal_transformed_cdf(self, x):
+        return x
 
     def sample(self, nsamples):
         return np.random.uniform(0, 1, (nsamples, self.nstations))
@@ -130,30 +228,40 @@ class IndependenceCopula(Copula):
 
 
 class GaussianCopula(Copula):
-    def __init__(self, nstations, cov, nsamples=20000):
+    def __init__(self, nstations):
         super(GaussianCopula, self).__init__("Gaussian",
-                                             nstations,
-                                             nsamples)
-        if cov.shape != (nstations, nstations):
-            errmsg = f"Expected cov of shape ({nstations},{nstations})."\
-                     + f" Got {cov.shape}."
-            raise ValueError(errmsg)
+                                             nstations)
 
-        mean = np.zeros(nstations)
-        self.rv = mvt(mean=mean, cov=cov)
+    @property
+    def params(self):
+        return self_params
+
+    @params.setter
+    def params(self, cor):
+        self._params = cor
+        self._rv = mvt(self._mean, cor)
 
     def cdf(self, u):
-        if u.ndim != 2:
-            errmsg = "Expected x of dim 2"
+        u = to2d(u, self.nstations)
+        if self._rv is None:
+            errmsg = "rv is None, set parameters."
             raise ValueError(errmsg)
+        return self._rv.cdf(self.marginal_transformed_ppf(u))
 
-        return self.rv.cdf(norm.ppf(u))
+    def marginal_transformed_ppf(self, u):
+        return norm.ppf(u)
+
+    def marginal_transformed_cdf(self, x):
+        return norm.cdf(x)
 
     def sample(self, nsamples):
-        return self.rv.rvs(size=nsamples)
+        if self._rv is None:
+            errmsg = "rv is None, set parameters."
+            raise ValueError(errmsg)
+        return self._rv.rvs(size=nsamples)
 
 
-class GaussianOneFactorCopula(Copula):
+class GaussianOneFactorCopula(GaussianCopula):
     """ Compute the CDF for a Gaussian factor copula such that
         Ui = Phi(Zi)
         Zi = sqrt(rho) V + sqrt(1 - rho) Ei
@@ -164,40 +272,44 @@ class GaussianOneFactorCopula(Copula):
 
         Computation is done in an arbitrary number of dimensions.
     """
-    def __init__(self, nstations, rho, napprox=500, nsamples=20000):
-        super(GaussianOneFactorCopula, self).__init__("GaussianOneFactor",
-                                                      nstations,
-                                                      nsamples)
-        if rho < 0 or rho >= 1:
-            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
-        self.rho = rho
+    def __init__(self, nstations):
+        super(GaussianOneFactorCopula, self).__init__(nstations)
+        self.name = "GaussianOneFactor"
+        self._sqr = None
+        self._csqr = None
+
+        self.set_approx()
+
+    def set_approx(self, napprox=500):
         self.napprox = napprox
-
-        # Required for the cdf integration
-        mean = np.zeros(nstations)
-        cov = (1 - rho) * np.eye(nstations) \
-            + rho * np.ones((nstations, nstations))
-        self.rv = mvt(mean=mean, cov=cov)
-
-        # Required for the factor integration
         eps = 5e-1 / napprox
         u = np.linspace(eps, 1 - eps, napprox)
         self.v = norm.ppf(u)
         self.du = u[1] - u[0]
-        self.buf = np.zeros((1, nstations, napprox))
+        self.buf = np.zeros((1, self.nstations, napprox))
+
+    @property
+    def params(self):
+        return self_params
+
+    @params.setter
+    def params(self, rho):
+        if rho < 0 or rho >= 1:
+            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
+        self._params = rho
+        self._sqr = math.sqrt(rho)
+        self._csqr = math.sqrt(1 - rho)
 
     @property
     def sqr(self):
-        return math.sqrt(self.rho)
+        return self._sqr
 
     @property
     def csqr(self):
-        return math.sqrt(1 - self.rho)
+        return self._csqr
 
     def cdf(self, u):
-        if u.ndim != 2:
-            errmsg = "Expected u of dim 2"
-            raise ValueError(errmsg)
+        u = to2d(u, self.nstations)
 
         if self.buf.shape[0] != len(u):
             self.buf = np.zeros((len(u), self.nstations, self.napprox))
@@ -226,14 +338,31 @@ class GumbelCopula(Copula):
         phi(x) = -log(x)**theta
 
     """
-    def __init__(self, nstations, rho, nsamples):
+    def __init__(self, nstations):
         super(GumbelCopula, self).__init__("Gumbel",
-                                           nstations,
-                                           nsamples)
-        self.theta = 1 / (1 - rho)
+                                           nstations)
+        self._theta = None
         self.phi = lambda x: (-np.log(x))**self.theta
         self.phi_inv = lambda y: np.exp(-y**(1./self.theta))
-        self.x_vect = np.ones((1, nstations))
+
+    @property
+    def params(self):
+        return self_params
+
+    @params.setter
+    def params(self, rho):
+        if rho < 0 or rho >= 1:
+            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
+        self._params = rho
+        self._theta =  1 / (1 - rho)
+
+    @property
+    def theta(self):
+        return self._theta
+
+    def cdf(self, u):
+        u = to2d(u, self.nstations)
+        return self.phi_inv(self.phi(u).sum(axis=1))
 
     def kendall_function(self, t):
         """ See
@@ -253,44 +382,31 @@ class GumbelCopula(Copula):
 
 
 class MarginalExceedanceScore():
-    def __init__(self, kind, copula,
-                 empirical=False, nsamples=10000,
-                 logger=None):
+    def __init__(self, kind, copula):
         if kind not in MARGINAL_EXCEEDANCE_SCORE_KINDS:
             txt = "/".join(MARGINAL_EXCEEDANCE_SCORE_KINDS)
             errmsg = f"Expected kind in {txt}, got {kind}."
             raise ValueError(errmsg)
         self.kind = kind
-        self.empirical = empirical
+
+        if not isinstance(copula, Copula):
+            errmsg = "Expected copula to be an instance of 'Copula'"
+            raise ValueError(errmsg)
+
         self.copula = copula
         self.independence_copula = IndependenceCopula(copula.nstations)
-        self.logger = logger
-
-        self.nsamples = nsamples
-        self.usamples = None
+        self.logger = None
+        self._samples = None
 
     def objective_function(self, u, lmaep):
-        if not self.empirical:
-            x = norm.ppf(u)
-            match self.kind:
-                case "AND":
-                    c = self.copula.cdf_main_diagonal(u)
-                case "OR":
-                    c = 1 - self.copula.cdf_main_diagonal(1 - u)
-                case "KENDALL":
-                    c0 = self.copula.cdf_main_diagonal(x)
-                    c = self.copula.inverse_kendall_function(c0)
-        else:
-            u_smp = self.u_smp
-            nsmp = u_smp.shape[0]
-            match self.kind:
-                case "AND":
-                    c = np.all(u_smp < u, axis=1).sum() / nsmp
-                case "OR":
-                    c = 1 - np.all(u_smp < 1 - u, axis=1).sum() / nsmp
-                case "KENDALL":
-                    raise ValueError("Cannot use 'empirical' computation"
-                                     + " of KENDALL cdf")
+        match self.kind:
+            case "AND":
+                c = self.copula.cdf_main_diagonal(u)
+            case "OR":
+                c = 1 - self.copula.cdf_main_diagonal(1 - u)
+            case "KENDALL":
+                c0 = self.copula.cdf_main_diagonal(u)
+                c = 1 - self.copula.inverse_kendall_function(c0)
 
         err = (math.log(c) - lmaep)**2
         return err
@@ -306,7 +422,7 @@ class MarginalExceedanceScore():
                 ub = maep
             case "KENDALL":
                 ua = maep
-                ub = self.independence_copula.inverse_kendall_function(maep)
+                ub = self.independence_copula.inverse_kendall_function(1 - maep)
         return ua, ub
 
     def compute_score(self, maep):
@@ -315,3 +431,27 @@ class MarginalExceedanceScore():
         self.opt = minimize_scalar(self.objective_function, bracket=bounds,
                                    bounds=bounds, args=(lmaep,))
         return self.opt.x
+
+
+
+class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
+
+    def __init__(self, kind, copula, nsamples):
+        super(MarginalExceedanceScoreEmpirical, self).__init__(kind, copula)
+        self.samples = self.copula.sample(nsamples)
+
+    def objective_function(self, u, lmaep):
+        u_smp = self.samples
+        n_smp = len(u_smp)
+
+        match self.kind:
+            case "AND":
+                c = np.all(u_smp < u, axis=1).sum() / n_smp
+            case "OR":
+                c = 1 - np.all(u_smp < 1 - u, axis=1).sum() / n_smp
+            case "KENDALL":
+                raise ValueError("Cannot use 'empirical' computation"
+                                 + " of KENDALL cdf")
+
+        err = (math.log(c) - lmaep)**2
+        return err

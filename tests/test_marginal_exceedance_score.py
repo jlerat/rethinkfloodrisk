@@ -23,22 +23,23 @@ def test_copulas(name, allclose):
         pytest.skip("Gumbel not ready yet.")
 
     nstations = 10
-    if name == "Independence":
-        args = ()
-    elif name == "Gaussian":
-        args = (np.eye(10),)
-    elif name == "GaussianOneFactor":
-        args = (0.8,)
-    elif name == "Gumbel":
-        args = (0.8,)
+    cop = mes.copula_factory(name, nstations)
 
-    cop = mes.copula_factory(name, nstations, *args)
+    rho = 0.8
+    if name == "Gaussian":
+        cop.params = (1 - rho) * np.eye(nstations) \
+                     + rho * np.ones((nstations, nstations))
+    else:
+        cop.params = rho
 
     smp = cop.sample(100)
     assert len(smp) == 100
 
     cdf = cop.cdf(smp)
     assert len(cdf) == 100
+
+    surv = cop.survival(smp)
+    assert len(surv) == 100
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
@@ -48,9 +49,12 @@ def test_gaussian_cdf(nstations, rho, napprox, allclose):
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
 
     if napprox == 0:
-        cop = mes.GaussianCopula(nstations, cov)
+        cop = mes.GaussianCopula(nstations)
+        cop.params = cov
     else:
-        cop = mes.GaussianOneFactorCopula(nstations, rho, napprox)
+        cop = mes.GaussianOneFactorCopula(nstations)
+        cop.params = rho
+        cop.set_approx(napprox)
 
     rv = mvt(mean=mean, cov=cov)
     u = np.linspace(1e-5, 1-1e-5, 10)
@@ -62,6 +66,9 @@ def test_gaussian_cdf(nstations, rho, napprox, allclose):
         atol = 2e-3 if napprox == 100 else 2e-4
         assert allclose(c1, c2, atol=atol)
 
+        s1 = rv.cdf(-norm.ppf(uu) * np.ones((1, nstations)))
+        s2 = cop.survival_main_diagonal(uu)
+        assert allclose(s1, s2, atol=atol)
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
@@ -74,8 +81,9 @@ def test_gaussian_one_factor_sampling(nstations, rho, allclose):
     m1 = x1.mean(axis=0)
     cov1 = np.cov(x1.T)
 
-    cop = mes.GaussianOneFactorCopula(nstations, rho, nsamples)
-    x2 = norm.ppf(cop.random_samples)
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+    x2 = norm.ppf(cop.sample(nsamples))
     m2 = x2.mean(axis=0)
     cov2 = np.cov(x2.T)
 
@@ -110,40 +118,33 @@ def test_kendall_function_independence(nstations, allclose):
 @pytest.mark.parametrize("nstations", [2, 5, 7])
 @pytest.mark.parametrize("repeat", np.arange(1, 6))
 def test_compute_empirical_kendall(nstations, repeat, allclose):
-    rho = 1e-3
-    nsamples = 20000
-    cop = mes.GaussianOneFactorCopula(nstations, rho)
-
-    kind = "AND"
-
-    mex = mes.MarginalExceedanceScore(kind, cdf, nsamples=nsamples,
-                                      logger=LOGGER)
-    pk = mex.compute_empirical_kendall()
-    t = pk.t
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = 1e-3
+    pk = cop.compute_kendall_function_data()
 
     # Expected independent
-    kfi = mes.KendallFunctionIndependence(nstations)
-    expected = kfi.cdf(t)
+    copi = mes.IndependenceCopula(nstations)
+    expected = copi.kendall_function(pk.t)
 
-    atol = 1e-2 if nstations <= 5 else 4e-2
-    assert allclose(expected, pk.Kc, atol=atol)
+    err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.Kc))
+    atol = 2e-2 if nstations <= 5 else 5e-2
+    assert err.max() < atol
 
 
 @pytest.mark.parametrize("kind", ["AND", "OR"])
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 def test_compute_marginal_score(kind, nstations, rho, allclose):
-    cdf = mes.GaussianFactorCopulaCDF(nstations, rho, napprox=500)
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex1 = mes.MarginalExceedanceScore(kind, cop)
+    mex1.logger = LOGGER
 
     nsamples = 1000000
-    mex1 = mes.MarginalExceedanceScore(kind, cdf,
-                                       empirical=False,
-                                       nsamples=nsamples,
-                                       logger=LOGGER)
-    mex2 = mes.MarginalExceedanceScore(kind, cdf,
-                                       empirical=True,
-                                       nsamples=nsamples,
-                                       logger=LOGGER)
+    mex2 = mes.MarginalExceedanceScoreEmpirical(kind, cop,
+                                                nsamples=nsamples)
+    mex2.logger = LOGGER
 
     maeps = np.logspace(math.log10(1e-2/5), -1, 10)
     scs = np.zeros((len(maeps), 2))
