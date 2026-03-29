@@ -21,6 +21,12 @@ MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR", "KENDALL"]
 NKENDALL_DEFAULT = 20000
 
 
+def check_aep(aep):
+    if aep <= 0 or aep >= 1:
+        errmsg = "Expected aep in ]0,1[, got {aep}."
+        raise ValueError(errmsg)
+
+
 def to2d(x, nstations):
     if x.ndim == 1:
         x = x[None, :]
@@ -406,9 +412,8 @@ class MarginalExceedanceScore():
             case "OR":
                 c = 1 - self.copula.cdf(u)
             case "KENDALL":
-                c0 = self.copula.cdf(u)
-                c = 1 - self.copula.inverse_kendall_function(c0)
-
+                c0 = self.copula.cdf(1 - u)
+                c = 1 - self.copula.kendall_function(c0)
         if c == 0:
             return np.inf
         err = (math.log(c) - lmaep)**2
@@ -429,42 +434,64 @@ class MarginalExceedanceScore():
                 ua = maep
                 ub = maep**(1./nsta)
             case "KENDALL":
-                ua = maep
-                p = 1 - maep
-                ub = self.independence_copula.inverse_kendall_function(p)
+                ub = 1 - maep
+                ua = self.independence_copula.inverse_kendall_function(ub)
         return ua, ub
 
     def compute_score(self, maep):
+        check_aep(maep)
         bounds = self.compute_bounds(maep)
         lmaep = math.log(maep)
-        self.opt = minimize_scalar(self.objective_function_diagonal,
-                                   bracket=bounds, bounds=bounds,
-                                   args=(lmaep,))
-        return self.opt.x
+        opt = minimize_scalar(self.objective_function_diagonal,
+                              bracket=bounds, bounds=bounds,
+                              args=(lmaep,))
+        return opt.x, opt.fun
 
-    def compute_set(self, maep, npoints=50):
+    def compute_set(self, maep, npoints=50, nitermax=5):
+        check_aep(maep)
         if self.copula.nstations != 2:
             errmsg = "Can only compute set for 2 dimensions"
             raise ValueError(errmsg)
 
-        u = maep + (1 - 2 * maep) * np.linspace(0, 1, npoints)
-        df = pd.DataFrame({"u": u, "v": np.zeros_like(u)})
+        eps = 0.25 / npoints
+        u = np.linspace(eps, 1 - eps, 2 * npoints)
+        df = []
+        niter = 0
+        logger = self.logger
         bounds = [0, 1]
-        lmaep = math.log(maep)
-        u_vect = self._u_vect
 
-        for iu, uu in enumerate(u):
-            u_vect[0, 0] = uu
+        while len(df) < npoints and niter < nitermax:
+            if logger is not None:
+                logger.info(f"Compute set - iteration {niter}")
 
-            def ofun(v, lmaep):
-                u_vect[0, 1] = v
-                return self.objective_function_set(u_vect, lmaep)
+            df = pd.DataFrame({"u": u, "v": np.zeros_like(u),
+                               "log10_cdf_err": np.zeros_like(u)})
+            lmaep = math.log(maep)
+            u_vect = self._u_vect
 
-            opt = minimize_scalar(ofun, bracket=bounds, bounds=bounds,
-                                  args=(lmaep,))
-            df.loc[iu, "v"] = opt.x
+            for iu, uu in enumerate(u):
+                u_vect[0, 0] = uu
 
-        return df
+                def ofun(v, lmaep):
+                    u_vect[0, 1] = v
+                    return self.objective_function_set(u_vect, lmaep)
+
+                opt = minimize_scalar(ofun, bracket=bounds, bounds=bounds,
+                                      args=(lmaep,))
+                df.loc[iu, "v"] = opt.x
+                df.loc[iu, "log10_cdf_err"] = opt.fun
+
+            df = df.loc[df.log10_cdf_err < 1e-3]
+            if len(df) == 0:
+                errmsg = "Failed to identify set."
+                raise ValueError(errmsg)
+
+            u0 = df.u.iloc[0] - eps
+            u1 = df.u.iloc[-1] + eps
+            u = np.linspace(u0, u1, npoints)
+            niter += 1
+
+        return df, niter
 
 
 class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):

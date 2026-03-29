@@ -149,14 +149,14 @@ def test_compute_marginal_score(kind, nstations, rho, allclose):
     maeps = np.logspace(math.log10(1e-2/5), -1, 10)
     scs = np.zeros((len(maeps), 2))
     for iaep, maep in enumerate(maeps):
-        scs[iaep, 0] = mex1.compute_score(maep)
-        scs[iaep, 1] = mex2.compute_score(maep)
+        scs[iaep, 0], _ = mex1.compute_score(maep)
+        scs[iaep, 1], _ = mex2.compute_score(maep)
 
     err = np.abs(np.diff(np.log(scs), axis=1)).squeeze()
     assert err.max() < 1e-1
 
 
-@pytest.mark.parametrize("kind", ["AND", "OR"])
+@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 @pytest.mark.parametrize("maep", [0.1, 0.01])
 def test_compute_marginal_score_set(kind, rho, maep, allclose):
@@ -165,14 +165,35 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
     cop.params = rho
 
     mex = mes.MarginalExceedanceScore(kind, cop)
+    df, _ = mex.compute_set(maep)
+
+    if kind == "AND":
+        check = cop.survival(df.iloc[:, :2])
+    elif kind == "OR":
+        check = 1 - cop.cdf(df.iloc[:, :2])
+    elif kind == "KENDALL":
+        t = cop.cdf(1 - df.iloc[:, :2])
+        check = 1 - cop.kendall_function(t)
+
+    err = np.abs(np.log(check) - math.log(maep))
+    assert (err < 5e-2).all()
+
+
+@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+@pytest.mark.parametrize("maep", [0.1, 0.01])
+def test_compare_scores(kind, rho, maep, allclose):
+    nstations = 2
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex = mes.MarginalExceedanceScore(kind, cop)
     mex.logger = LOGGER
-    df = mex.compute_set(maep)
+    df, _ = mex.compute_set(maep, npoints=500)
 
-    for _, uv in df.iterrows():
-        x = uv.values[None, :]
-        if kind == "AND":
-            c = cop.survival(x)
-        elif kind == "OR":
-            c = 1 - cop.cdf(x)
+    # Check mex0 is in df
+    mex0, _ = mex.compute_score(maep)
+    diff = df.iloc[:, :2] - np.array([[mex0] * 2])
+    err = np.max(np.abs(diff), axis=1)
+    assert err.min() < 1e-3
 
-        assert allclose(c, maep, atol=1e-5)
