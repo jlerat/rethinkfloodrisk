@@ -274,7 +274,7 @@ class GaussianOneFactorCopula(GaussianCopula):
         with V ~ N(0,1)  Ei ~ N(0,1)
 
         Hence Z ~ N(0, Sigma)
-        with Sigma = (1-rho) eye + rho ones
+        with Sigma = (1-rho) x eye + rho x ones
 
         Computation is done in an arbitrary number of dimensions.
     """
@@ -401,6 +401,7 @@ class MarginalExceedanceScore():
 
         self.copula = copula
         self.independence_copula = IndependenceCopula(copula.nstations)
+        self.comonotone_copula = ComonotoneCopula(copula.nstations)
         self.logger = None
         self._samples = None
         self._u_vect = np.ones((1, copula.nstations))
@@ -410,7 +411,7 @@ class MarginalExceedanceScore():
             case "AND":
                 c = self.copula.survival(u)
             case "OR":
-                c = 1 - self.copula.cdf(u)
+                c = 1 - self.copula.cdf(1 - u)
             case "KENDALL":
                 c0 = self.copula.cdf(1 - u)
                 c = 1 - self.copula.kendall_function(c0)
@@ -424,30 +425,45 @@ class MarginalExceedanceScore():
         u_vect.fill(u)
         return self.objective_function_set(u_vect, lmaep)
 
-    def compute_bounds(self, maep):
+    def compute_score_bounds(self, maep):
         nsta = self.copula.nstations
+        cop_ind = self.independence_copula
+        cop_com = self.comonotone_copula
+
         match self.kind:
             case "AND":
-                ua = 1 - (1 - maep)**(1./nsta)
-                ub = maep
-            case "OR":
-                ua = maep
-                ub = maep**(1./nsta)
-            case "KENDALL":
+                ua = 1 - maep**(1. / nsta)
                 ub = 1 - maep
-                ua = self.independence_copula.inverse_kendall_function(ub)
+            case "OR":
+                ua = 1 - (1 - maep)**(1. / nsta)
+                ub = maep
+            case "KENDALL":
+                ua = 1 - cop_com.inverse_kendall_function(1 - maep)
+                ub = 1 - cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
+
         return ua, ub
 
     def compute_score(self, maep):
+        """ Marginal exceedance score, i.e. the value alpha such that
+        Pr(ex(u, u0)) = maep
+        with ex the exceedance operator defined on Rn x Rn -> {0, 1}
+        and  u0, a reference vector such that
+        for all i in 1..n,  u0[i] = alpha
+        """
         check_aep(maep)
-        bounds = self.compute_bounds(maep)
+        bounds = self.compute_score_bounds(maep)
         lmaep = math.log(maep)
         opt = minimize_scalar(self.objective_function_diagonal,
                               bracket=bounds, bounds=bounds,
                               args=(lmaep,))
         return opt.x, opt.fun
 
-    def compute_set(self, maep, npoints=50, nitermax=5):
+    def compute_set(self, maep, npoints=200, nitermax=5):
+        """ Marginal exceedance set in 2 dimensions, i.e.  the set of values (a1, a2)
+        such that
+        Pr(ex(u, [a1, a2])) = maep
+        with ex the exceedance operator defined on R2 x R2 -> {0, 1}
+        """
         check_aep(maep)
         if self.copula.nstations != 2:
             errmsg = "Can only compute set for 2 dimensions"

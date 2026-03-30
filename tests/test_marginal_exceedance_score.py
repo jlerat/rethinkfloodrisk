@@ -189,11 +189,10 @@ def test_compare_scores(kind, rho, maep, allclose):
 
     mex = mes.MarginalExceedanceScore(kind, cop)
     mex.logger = LOGGER
-    df, _ = mex.compute_set(maep, npoints=500)
+    df, _ = mex.compute_set(maep)
 
     # Check mex0 is in df
     mex0, _ = mex.compute_score(maep)
-    diff = df.iloc[:, :2] - np.array([[mex0] * 2])
-    err = np.max(np.abs(diff), axis=1)
-    assert err.min() < 1e-3
+    expected = np.interp(mex0, df.u, df.v)
+    assert allclose(mex0, expected, 1e-3)
 
