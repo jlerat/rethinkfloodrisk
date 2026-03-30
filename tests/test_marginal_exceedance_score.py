@@ -172,7 +172,7 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
     elif kind == "OR":
         check = 1 - cop.cdf(df.iloc[:, :2])
     elif kind == "KENDALL":
-        t = cop.cdf(1 - df.iloc[:, :2])
+        t = cop.cdf(df.iloc[:, :2])
         check = 1 - cop.kendall_function(t)
 
     err = np.abs(np.log(check) - math.log(maep))

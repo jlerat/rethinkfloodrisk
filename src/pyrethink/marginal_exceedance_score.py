@@ -409,11 +409,11 @@ class MarginalExceedanceScore():
     def objective_function_set(self, u, lmaep):
         match self.kind:
             case "AND":
-                c = self.copula.survival(1 - u)
+                c = self.copula.survival(u)
             case "OR":
-                c = 1 - self.copula.cdf(1 - u)
+                c = 1 - self.copula.cdf(u)
             case "KENDALL":
-                c0 = self.copula.cdf(1 - u)
+                c0 = self.copula.cdf(u)
                 c = 1 - self.copula.kendall_function(c0)
         if c == 0:
             return np.inf
@@ -432,14 +432,14 @@ class MarginalExceedanceScore():
 
         match self.kind:
             case "AND":
-                ua = maep
-                ub = maep**(1. / nsta)
+                ua = 1 - maep**(1. / nsta)
+                ub = 1 - maep
             case "OR":
-                ua = 1 - (1 - maep)**(1. / nsta)
-                ub = maep
+                ua = 1 - maep
+                ub = (1 - maep)**(1. / nsta)
             case "KENDALL":
-                ua = 1 - cop_com.inverse_kendall_function(1 - maep)
-                ub = 1 - cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
+                ua = cop_com.inverse_kendall_function(1 - maep)
+                ub = cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
 
         return ua, ub
 
@@ -516,13 +516,14 @@ class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
         super(MarginalExceedanceScoreEmpirical, self).__init__(kind, copula)
         self.samples = self.copula.sample(nsamples)
 
-    def objective_function(self, u, lmaep):
+    def objective_function_set(self, u, lmaep):
+        u = to2d(u, self.copula.nstations)
         u_smp = self.samples
         n_smp = len(u_smp)
 
         match self.kind:
             case "AND":
-                c = np.all(u_smp > 1 - u, axis=1).sum() / n_smp
+                c = np.all(u_smp > u, axis=1).sum() / n_smp
             case "OR":
                 c = 1 - np.all(u_smp < u, axis=1).sum() / n_smp
             case "KENDALL":
