@@ -438,8 +438,8 @@ class MarginalExceedanceScore():
                 ua = 1 - maep
                 ub = (1 - maep)**(1. / nsta)
             case "KENDALL":
-                ua = cop_com.inverse_kendall_function(1 - maep)
-                ub = cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
+                ua = cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
+                ub = cop_com.inverse_kendall_function(1 - maep)
 
         return ua, ub
 
