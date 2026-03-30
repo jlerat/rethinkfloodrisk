@@ -23,7 +23,7 @@ NKENDALL_DEFAULT = 20000
 
 def check_aep(aep):
     if aep <= 0 or aep >= 1:
-        errmsg = "Expected aep in ]0,1[, got {aep}."
+        errmsg = f"Expected aep in ]0,1[, got {aep}."
         raise ValueError(errmsg)
 
 
@@ -409,7 +409,7 @@ class MarginalExceedanceScore():
     def objective_function_set(self, u, lmaep):
         match self.kind:
             case "AND":
-                c = self.copula.survival(u)
+                c = self.copula.survival(1 - u)
             case "OR":
                 c = 1 - self.copula.cdf(1 - u)
             case "KENDALL":
@@ -432,8 +432,8 @@ class MarginalExceedanceScore():
 
         match self.kind:
             case "AND":
-                ua = 1 - maep**(1. / nsta)
-                ub = 1 - maep
+                ua = maep
+                ub = maep**(1. / nsta)
             case "OR":
                 ua = 1 - (1 - maep)**(1. / nsta)
                 ub = maep
@@ -459,8 +459,8 @@ class MarginalExceedanceScore():
         return opt.x, opt.fun
 
     def compute_set(self, maep, npoints=200, nitermax=5):
-        """ Marginal exceedance set in 2 dimensions, i.e.  the set of values (a1, a2)
-        such that
+        """ Marginal exceedance set in 2 dimensions,
+        i.e.  the set of values (a1, a2) such that
         Pr(ex(u, [a1, a2])) = maep
         with ex the exceedance operator defined on R2 x R2 -> {0, 1}
         """
