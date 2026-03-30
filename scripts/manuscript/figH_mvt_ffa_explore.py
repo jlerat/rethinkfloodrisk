@@ -75,13 +75,12 @@ def process(config, script_paths, logger, data):
 
         logger.info(f"-- Plotting {rn.text} --", nret=1)
 
-        plt.close("all")
-        kinds = ["AND"]
+        kinds = ["AND", "OR", "KENDALL"]
+        ptypes = ["aep+2d", "aep+nd"]
         mosaic = [[f"{ptype}_{kind}" for kind in kinds]
-                  for ptype in ["aep+2d", "aep+nd"]]
-        if config.debug:
-            mosaic = [mosaic[-1]]
+                  for ptype in ptypes]
 
+        plt.close("all")
         nrows = len(mosaic)
         ncols = len(mosaic[0])
         fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
@@ -93,60 +92,59 @@ def process(config, script_paths, logger, data):
             logger.info(f"Plot {aname}", ntab=1)
 
             if aname.startswith("aep+2d"):
+                #cop = mes.IndependenceCopula(2)
                 cop = mes.GaussianCopula(2)
                 cop.params = cor[[isid1, isid2]][:, [isid1, isid2]]
+
                 mex = mes.MarginalExceedanceScore(kind, cop)
+                x0, x1 = 1e-3, 0.5
 
                 for maep in config.maep_target:
-                    logger.info(f"AEP 1:{100 / aep:0.0f}", ntab=2)
-                    scs[iaep, 0] = mex.compute_score(maep)
-                    u, v = find_marginal_exceedance_score_2d(cor2d, aep,
-                                                             nexplore=200)
-                    ax.plot(u, v, "-",
-                            lw=2,
-                            label=f"AEP solution set for 1:{100 / aep:0.0f}")
+                    logger.info(f"AEP 1:{1 / maep:0.0f}", ntab=2)
 
-                    iopt = np.argmin(np.abs(u - v))
+                    mex0, _ = mex.compute_score(maep)
+                    npoints = 50 if config.debug else 200
+                    df, _ = mex.compute_set(maep, npoints=npoints)
+
+                    ax.plot(df.u, df.v, "-", lw=2,
+                            label=f"AEP solution set for 1:{1. / maep:0.0f}")
+
                     col = ax.get_lines()[-1].get_color()
-                    xa = u[iopt]
-                    ax.plot(xa, xa, "o", color=col, ms=10)
-                    ax.plot([xa] * 2, [0, xa], "--", lw=1, color=col, alpha=0.8)
+                    ax.plot(mex0, mex0, "o", color=col, ms=10)
+                    ax.plot([mex0] * 2, [0, mex0], "--", lw=1, color=col, alpha=0.8)
 
-                    txt = f"1:{1. / (1 - xa):0.0f}"
-                    ax.annotate(txt, xy=(xa, 0), xytext=(7, 10),
+                    txt = f"1:{1. / mex0:0.0f}"
+                    ax.annotate(txt, xy=(mex0, x0), xytext=(7, 10),
                                 textcoords="offset pixels",
                                 color=col, fontweight="bold")
 
-                ax.legend(loc=1, fontsize="large", framealpha=1)
+                if kind == "AND":
+                    ax.legend(loc=2, fontsize="large", framealpha=1)
 
-                x0, x1 = 0, 1 - 1./200
                 ax.plot([x0, x1], [x0, x1], "k-", lw=0.9, alpha=0.8)
 
-                xlabel = f"{config.sta1} - Marginal exceedance score [-]"
-                ylabel = f"{config.sta2} - Marginal exceedance score [-]"
+                xlabel = f"{config.sta1} - Marginal Exceedance Score [-]"
+                ylabel = f"{config.sta2} - Marginal Exceedance Score [-]"
+                title = f"({letters[iax]}) Marginal Exceedance Score '{kind}'"\
+                        + " - Bivariate"
                 ax.set(xlim=(x0, x1), ylim=(x0, x1),
                        xlabel=xlabel, ylabel=ylabel,
-                       title="(b) Bivariate exceedance scores")
+                       xscale="log", yscale="log",
+                       title=title)
 
-                fwd = lambda x: -np.log(1 - x)
-                inv = lambda y: 1 - np.exp(-y)
-                ax.set_xscale("function", functions=(fwd, inv))
-                ax.set_yscale("function", functions=(fwd, inv))
-
-                taep = [5, 10, 50, 100]
-                xtk = [1 - 1/aep for aep in taep]
-                xtkl = [f"1:{aep}" for aep in taep]
-                ax.set_xticks(xtk, labels=xtkl)
-                ax.set_yticks(xtk, labels=xtkl)
-
+                aep = [500, 100, 10, 2]
+                tk = [1./a for a in aep]
+                tkl = [f"1:{a}" for a in aep]
+                ax.set_xticks(tk, labels=tkl)
+                ax.set_yticks(tk, labels=tkl)
 
             else:
                 nstas = [2, 4, 6]
                 nstas_txt = [f"{n} stations" for n in nstas]
-                aeps = config.maep_target
-                aeps_txt = [f"1:{100 / a:0.0f} AEP" for a in aeps]
+                maeps = config.maep_target
+                maeps_txt = [f"1:{1/a:0.0f} AEP" for a in maeps]
                 values = pd.DataFrame(np.nan, index=nstas_txt,
-                                      columns=aeps_txt)
+                                      columns=maeps_txt)
                 for ista, nsta in enumerate(nstas):
                     logger.info(f"Nstations {nsta}", ntab=2)
                     if nsta == 2:
@@ -156,30 +154,36 @@ def process(config, script_paths, logger, data):
                     else:
                         isids = np.arange(nstations)
 
-                    cord = cor[isids][:, isids]
-                    for iaep, aep in enumerate(aeps):
-                        v = find_marginal_exceedance_score_nd(cord, aep)
+                    #cop = mes.IndependenceCopula(nsta)
+                    cop = mes.GaussianCopula(nsta)
+                    cop.params = cor[isids][:, isids]
+
+                    mex = mes.MarginalExceedanceScore(kind, cop)
+                    for iaep, maep in enumerate(maeps):
+                        mex0, _ = mex.compute_score(maep)
                         cn = values.columns[iaep]
                         idx = values.index[ista]
-                        values.loc[idx, cn] = v
+                        values.loc[idx, cn] = mex0
 
                 values.plot(kind="bar", ax=ax,
-                            rot=0)
+                            rot=0, legend=False)
 
-                fwd = lambda x: -np.log(1 - x)
-                inv = lambda y: 1 - np.exp(-y)
-                ax.set_yscale("function", functions=(fwd, inv))
-
-                x0, x1 = 0, 1 - 1./100
-                ylabel = f"Marginal exceedance score [-]"
+                x0, x1 = 1. / 500, 1. / 2
+                ylabel = f"Common Marginal Exceedance Score [-]"
+                title = f"({letters[iax]}) Marginal Exceedance Score '{kind}'"\
+                        + " - Multivariate"
                 ax.set(ylim=(x0, x1), ylabel=ylabel,
-                       title="(b) Multivariate exceedance scores")
+                       yscale="log",
+                       title=title)
 
-                taep = [5, 10, 50]
-                xtk = [1 - 1/aep for aep in taep]
-                xtkl = [f"1:{aep}" for aep in taep]
-                ax.set_yticks(xtk, labels=xtkl)
+                aep = [500, 100, 10, 2]
+                tk = [1./a for a in aep]
+                tkl = [f"1:{a}" for a in aep]
+                ax.set_yticks(tk, labels=tkl)
                 ax.grid(axis="y")
+
+                if kind == "AND":
+                    ax.legend(loc=2)
 
         basename = script_paths.basename
         fp = f"{basename}_{rn.text}_v{config.version}.png"
@@ -234,7 +238,7 @@ if __name__ == "__main__":
     sta4 = "203010"
 
     ngrid = 20 if args.debug else 50
-    maep_target = [1, 10]
+    maep_target = [1e-2, 1e-1]
 
     config = CF(args.version, args.pcensor,
                 args.rho_mins.split("|"),
