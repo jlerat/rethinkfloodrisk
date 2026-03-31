@@ -45,6 +45,7 @@ def test_copulas(name, allclose):
     surv = cop.survival(smp)
     assert len(surv) == 100
 
+
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 @pytest.mark.parametrize("napprox", [0, 100, 500])
