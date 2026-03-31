@@ -35,13 +35,10 @@ from hydrodiy.plot import putils
 
 from pyrethink import datahub
 from pyrethink import sample
-
+from pyrethink import marginal_exceedance_score as mes
 from floodstan import marginals
 
 import figA_impact_of_period_on_FFA
-import importlib
-importlib.reload(figA_impact_of_period_on_FFA)
-
 from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data
@@ -84,11 +81,11 @@ STATIONS = {
 
 def process(config, script_paths, logger, data):
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
-        _, obs_data, mvnproc, _, _ = select_data(data,
-                                                 pcensor=pcensor,
-                                                 rho_min=rho_min,
-                                                 has_cluster=has_cluster,
-                                                 copula_shape=copula_shape)
+        _, obs_data, mvnproc, expected, _ = select_data(data,
+                                                        pcensor=pcensor,
+                                                        rho_min=rho_min,
+                                                        has_cluster=has_cluster,
+                                                        copula_shape=copula_shape)
         if len(mvnproc) == 0:
             continue
 
@@ -101,10 +98,22 @@ def process(config, script_paths, logger, data):
 
         mvnproc_in = mvnproc[rn_isin]
         mvnproc_out = mvnproc[rn_isout]
+        expected_in = expected[rn_isin]
+        expected_out = expected[rn_isout]
 
-        #potpeaks, _, _ = datahub.get_potpeaks()
+        potpeaks, _, _ = datahub.get_potpeaks()
         #rk = potpeaks.rank(ascending=False)
         #obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
+
+        # Dependence
+        nstations = potpeaks.shape[1]
+        cop_in = mes.GaussianCopula(nstations)
+        cor = pd.Series(expected_in["corr_IW"]).values.reshape((nstations, nstations))
+        cop_in.params = cor
+
+        cop_out = mes.GaussianCopula(nstations)
+        cor = pd.Series(expected_out["corr_IW"]).values.reshape((nstations, nstations))
+        cop_out.params = cor
 
         ncols = config.ncols
         nev = len(config.events)
@@ -146,7 +155,7 @@ def process(config, script_paths, logger, data):
 
                 xy = [x, y]
                 delta = 18
-                txt = f"{sid}\n" if event == config.events[0] else ""
+                txt = f"({sid})\n" if event == config.events[0] else ""
                 txt += f"{pm_in * 100:0.1f}% $\\pm$ {ps_in * 100:0.1f}%"
                 #txt += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
 
@@ -171,13 +180,6 @@ def process(config, script_paths, logger, data):
 
             ax.axis("off")
 
-            cn = f"GALL_obs_{event}_log10aep"
-            p_in = 10**mvnproc_in.loc[:, cn]
-            pm_in = p_in.mean()
-            ps_in = p_in.std()
-            p_out = 10**mvnproc_out.loc[:, cn]
-            pm_out = p_out.mean()
-            ps_out = p_out.std()
 
             if re.search("MAX", event):
                 dt = "Max 2017/2008"
@@ -186,8 +188,25 @@ def process(config, script_paths, logger, data):
                 dt = pd.to_datetime(event).strftime("%b %Y")
                 title = f"{dt} flood\n"
 
-            title += f"{pm_in * 100:0.2f}% $\\pm$ {ps_in * 100:0.2f}%"
-            #title += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
+            # Marginals
+            cdfs = np.zeros((1, nstations))
+            obs = potpeaks.loc[event]
+            ex = expected_in
+            for isite in range(nstations):
+                gev = marginals.GEV()
+                gev.locn = ex["ylocs"][f"ylocn[{isite + 1}]"]
+                gev.logscale = ex["ylogscales"][f"ylogscale[{isite + 1}]"]
+                gev.shape1 = ex["yshape1"][f"yshape1[{isite + 1}]"]
+                cdfs[0, isite] = gev.cdf(obs.iloc[isite])
+
+            logger.info("MEXS - Kendall", ntab=2)
+            c0 = cop_in.cdf(cdfs)
+            pm = 1 - cop_in.kendall_function(c0)
+
+            dt = pd.to_datetime(event).strftime("%b %Y")
+            title = f"{dt} flood\n"
+            title += f"{pm * 100:0.1f}%"
+
             ax.set_title(title, x=0.3, y=0.12,
                          fontsize="x-large",
                          fontweight="bold")
@@ -234,11 +253,11 @@ if __name__ == "__main__":
     load_ffa = False
     load_obs_data = False
     load_mvnproc = True
-    load_expected_params = False
+    load_expected_params = True
     load_postpred_checks = False
     excludes = ["NONE", "2021"]
     events = ["2008-01-04", "2017-03-31",
-              "MAX-17-08", "2022-02-27"]
+              "2022-02-27", "2022-03-30"]
 
     river_color = "0.4"
 
