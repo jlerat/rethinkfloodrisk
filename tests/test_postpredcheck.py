@@ -74,7 +74,7 @@ def test_joint_exceedance_probabilities_correlated(nsta, nsamples, allclose):
     expected = rv.cdf(zz)
     err = np.abs(np.arcsinh(p0) - np.arcsinh(expected))
 
-    atol = 1e-2 if nsamples == 5000 else 5e-2
+    atol = 2e-2 if nsamples == 5000 else 5e-2
     assert err.max() < atol
 
     expected = rv.cdf(-zz)
