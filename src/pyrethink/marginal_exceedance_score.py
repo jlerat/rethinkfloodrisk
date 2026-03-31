@@ -469,7 +469,7 @@ class MarginalExceedanceScore():
             errmsg = "Can only compute set for 2 dimensions"
             raise ValueError(errmsg)
 
-        eps = 0.25 / npoints
+        eps = 1e-4
         u = np.linspace(eps, 1 - eps, 2 * npoints)
         df = []
         niter = 0
