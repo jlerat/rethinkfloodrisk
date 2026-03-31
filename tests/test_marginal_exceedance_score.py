@@ -6,6 +6,7 @@ from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvt
 from scipy.stats import gamma
 from scipy.special import gamma as gamma_fun
+from scipy.special import expit
 
 import pytest
 
@@ -35,6 +36,9 @@ def test_copulas(name, allclose):
     smp = cop.sample(100)
     assert len(smp) == 100
 
+    pdf = cop.pdf(smp)
+    assert len(pdf) == 100
+
     cdf = cop.cdf(smp)
     assert len(cdf) == 100
 
@@ -44,7 +48,7 @@ def test_copulas(name, allclose):
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 @pytest.mark.parametrize("napprox", [0, 100, 500])
-def test_gaussian_cdf(nstations, rho, napprox, allclose):
+def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
     mean = np.zeros(nstations)
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
 
@@ -56,10 +60,9 @@ def test_gaussian_cdf(nstations, rho, napprox, allclose):
         cop.params = rho
         cop.set_approx(napprox)
 
+
     rv = mvt(mean=mean, cov=cov)
-    u = np.linspace(1e-5, 1-1e-5, 10)
-    maxerr = 0
-    zmaxerr = None
+    u = expit(np.linspace(-10, 10, 50))
     for iu, uu in enumerate(u):
         c1 = rv.cdf(norm.ppf(uu) * np.ones((1, nstations)))
         c2 = cop.cdf_main_diagonal(uu)
@@ -69,6 +72,13 @@ def test_gaussian_cdf(nstations, rho, napprox, allclose):
         s1 = rv.cdf(-norm.ppf(uu) * np.ones((1, nstations)))
         s2 = cop.survival_main_diagonal(uu)
         assert allclose(s1, s2, atol=atol)
+
+        u_vect = uu * np.ones((1, nstations))
+        x = norm.ppf(u_vect)
+        p1 = rv.pdf(x) / np.prod(norm.pdf(x), axis=1)
+        p2 = cop.pdf(u_vect)
+        assert allclose(p1, p2, atol=atol)
+
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])

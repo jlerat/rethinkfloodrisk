@@ -69,7 +69,7 @@ class Copula():
         self._params = None
         self.logger = None
 
-        # Potential random variable
+        # underlying random variable
         self._mean = np.zeros(nstations)
         self._rv = None
 
@@ -181,7 +181,7 @@ class ComonotoneCopula(Copula):
 
     def pdf(self, u):
         u = to2d(u, self.nstations)
-        return np.all(u == u[:, [0]], axis=1).astype(float)
+        return (np.std(u, axis=1) < 1e-10).astype(float)
 
     def cdf(self, u):
         u = to2d(u, self.nstations)
@@ -247,12 +247,23 @@ class GaussianCopula(Copula):
         self._params = cor
         self._rv = mvt(self._mean, cor)
 
-    def cdf(self, u):
-        u = to2d(u, self.nstations)
+    @property
+    def rv(self):
         if self._rv is None:
             errmsg = "rv is None, set parameters."
             raise ValueError(errmsg)
-        return self._rv.cdf(self.marginal_transformed_ppf(u))
+        return self._rv
+
+    def pdf(self, u):
+        u = to2d(u, self.nstations)
+        x = self.marginal_transformed_ppf(u)
+        p = norm.pdf(x).prod(axis=1)
+        return self.rv.pdf(x) / p
+
+    def cdf(self, u):
+        u = to2d(u, self.nstations)
+        x = self.marginal_transformed_ppf(u)
+        return self.rv.cdf(x)
 
     def marginal_transformed_ppf(self, u):
         return norm.ppf(u)
@@ -306,6 +317,10 @@ class GaussianOneFactorCopula(GaussianCopula):
         self._sqr = math.sqrt(rho)
         self._csqr = math.sqrt(1 - rho)
 
+        nsta = self.nstations
+        cor = (1 - rho) * np.eye(nsta) + rho * np.ones((nsta, nsta))
+        self._rv = mvt(self._mean, cor)
+
     @property
     def sqr(self):
         return self._sqr
@@ -315,8 +330,10 @@ class GaussianOneFactorCopula(GaussianCopula):
         return self._csqr
 
     def cdf(self, u):
+        """ Fast computation of CDF useful for high dimensions.
+        Note that pdf is not approximated.
+        """
         u = to2d(u, self.nstations)
-
         if self.buf.shape[0] != len(u):
             self.buf = np.zeros((len(u), self.nstations, self.napprox))
 
@@ -325,7 +342,8 @@ class GaussianOneFactorCopula(GaussianCopula):
         #      int(prod(Phi(xi - sqrt(rho) v) / sqrt(1 - rho)) dv,
         #          v=-infty,
         #          v=+infty)
-        np.add(norm.ppf(u)[:, :, None],
+        x = self.marginal_transformed_ppf(u)
+        np.add(x[:, :, None],
                -self.sqr * self.v[None, None, :],
                out=self.buf)
         np.multiply(self.buf, 1./self.csqr, out=self.buf)
