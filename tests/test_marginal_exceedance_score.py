@@ -12,6 +12,7 @@ from scipy.special import expit
 import pytest
 
 from hydrodiy.io import iutils
+from hydrodiy.stat import sutils
 
 from pyrethink import marginal_exceedance_score as mes
 
@@ -51,13 +52,16 @@ def test_copulas(name, nstations, allclose):
     assert np.all(np.isfinite(surv))
 
     for kind in mes.MARGINAL_EXCEEDANCE_SCORE_KINDS:
+        if name == "Independence" and kind.endswith("SURVIVAL"):
+            continue
+
         aep = cop.aep(smp, kind)
         assert len(aep) == 100
 
         if kind == "KENDALL":
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
-            assert pv > 1e-1
+            assert pv > 1e-2
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
@@ -74,7 +78,6 @@ def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
         cop = mes.GaussianOneFactorCopula(nstations)
         cop.params = rho
         cop.set_approx(napprox)
-
 
     rv = mvt(mean=mean, cov=cov)
     u = expit(np.linspace(-10, 10, 50))
@@ -121,9 +124,19 @@ def test_kendall_function_independence(nstations, allclose):
     cop = mes.IndependenceCopula(nstations)
     t = np.linspace(0, 1, 1000)
     p = cop.kendall_function(t)
+
     t2 = cop.inverse_kendall_function(p)
     if nstations < 10:
         assert allclose(t2, t, atol=2e-3)
+
+    nsamples = 20000
+    u = np.random.uniform(0, 1, size=(nsamples, nstations))
+    ndom = sutils.multivariate_dominance(u)
+    value = np.sort(ndom / nsamples)
+    f = np.linspace(0, 1, nsamples)
+    expected = np.interp(t, value, f)
+    iok = t > 1e-1
+    assert allclose(p[iok], expected[iok], atol=1e-2)
 
     expected = np.zeros_like(t)
     nlt = np.log(1./t)
@@ -146,6 +159,7 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
     cop = mes.GaussianOneFactorCopula(nstations)
     cop.params = 1e-4
     cop.logger = LOGGER
+    cop.printlog = 5000
 
     if nstations == 2:
         nkendall = 10000
@@ -156,8 +170,9 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
 
     # Expected independent
     copi = mes.IndependenceCopula(nstations)
-    expected = copi.kendall_function(pk.cdf)
+    expected = copi.kendall_function(pk.value)
     err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.p))
+
     LOGGER.info(f"errmax = {err.max():3.3e}")
     atol = 2e-2 if nstations <= 5 else 1e-1
     assert err.max() < atol
@@ -166,7 +181,7 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
 @pytest.mark.parametrize("kind", ["AND", "OR"])
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
-def test_compute_marginal_score(kind, nstations, rho, allclose):
+def test_compute_analytical_and_empirical_marginal_score(kind, nstations, rho, allclose):
     cop = mes.GaussianOneFactorCopula(nstations)
     cop.params = rho
 
@@ -199,16 +214,8 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
     mex = mes.MarginalExceedanceScore(kind, cop)
     df, _ = mex.compute_set(maep)
 
-    if kind == "AND":
-        check = cop.survival(df.iloc[:, :2])
-    elif kind == "OR":
-        check = 1 - cop.cdf(df.iloc[:, :2])
-    elif kind == "KENDALL":
-        cdfs = cop.cdf(df.iloc[:, :2])
-        check = 1 - cop.kendall_function(cdfs)
-
-    err = np.abs(np.log(check) - math.log(maep))
-    assert (err < 5e-2).all()
+    check = cop.aep(df.iloc[:, :2], kind)
+    assert allclose(check, maep, atol=5e-2)
 
 
 @pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])

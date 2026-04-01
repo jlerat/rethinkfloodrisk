@@ -77,6 +77,7 @@ class Copula():
         self.nstations = nstations
         self._params = None
         self.logger = None
+        self.printlog = 0
 
         # underlying random variable
         self._mean = np.zeros(nstations)
@@ -85,7 +86,6 @@ class Copula():
         self._nkendall = None
         self._random_samples = None
         self._kendall_function_data = None
-        self._kendall_survival_function_data = None
         self._u_data = None
 
     def __str__(self):
@@ -93,23 +93,18 @@ class Copula():
         return txt
 
     def compute_kendall_function_data(self,
-                                      survival=False,
                                       nkendall=NKENDALL_DEFAULT):
-        if survival:
-            kdd = self._kendall_survival_function_data
-        else:
-            kdd = self._kendall_function_data
-
+        kdd = self._kendall_function_data
         compute = kdd is None
         if kdd is not None:
             compute = self._nkendall != nkendall
 
         if compute:
             logger = self.logger
-            printlog = False
-            if logger is not None:
+            printlog = 0
+            if logger is not None and self.printlog > 0:
                 logger.info("Computing kendall function")
-                printlog = True
+                printlog = self.printlog
 
             # Generate samples
             self._nkendall = nkendall
@@ -117,11 +112,9 @@ class Copula():
             self._random_samples = u
 
             # Compute kendall
-            N = len(u)
-            orientation = int(~survival)
-            cdfs = sutils.multivariate_dominance(u,
-                                                 orientation=orientation,
-                                                 printlog=printlog) / N
+            ndoms = sutils.multivariate_dominance(u,
+                                                  printlog=printlog)
+            cdfs = ndoms / len(u)
 
             # could also do, but this is way slower
             # cdfs = np.array([self.cdf(uu) for uu in u]).squeeze()
@@ -129,11 +122,7 @@ class Copula():
             printlog = logger is not None
             p = np.arange(1, nkendall + 1) / nkendall
             kdd = pd.DataFrame({"value": np.sort(cdfs), "p": p})
-
-            if survival:
-                self._kendall_survival_function_data = kdd
-            else:
-                self._kendall_function_data = kdd
+            self._kendall_function_data = kdd
 
         return kdd
 
@@ -181,9 +170,6 @@ class Copula():
             case "KENDALL":
                 cdf = self.cdf(u)
                 return 1 - self.kendall_function(cdf)
-            case "KENDALL_SURVIVAL":
-                surv = self.survival(u)
-                return self.kendall_function(surv, survival=True)
 
     def survival_main_diagonal(self, u):
         if self.symetrical:
@@ -204,17 +190,13 @@ class Copula():
         raise NotImplementedError
 
     def kendall_function(self, cdf,
-                         survival=False,
                          nkendall=NKENDALL_DEFAULT):
-        kdd = self.compute_kendall_function_data(survival,
-                                                 nkendall)
+        kdd = self.compute_kendall_function_data(nkendall)
         return np.interp(cdf, kdd.value, kdd.p)
 
     def inverse_kendall_function(self, p,
-                                 survival=False,
                                  nkendall=NKENDALL_DEFAULT):
-        kdd = self.compute_kendall_function_data(survival,
-                                                 nkendall)
+        kdd = self.compute_kendall_function_data(nkendall)
         return np.interp(p, kdd.p, kdd.value)
 
 
@@ -241,10 +223,10 @@ class ComonotoneCopula(Copula):
         return np.repeat(np.random.uniform(0, 1, (nsamples, 1)),
                          self.nstations, axis=1)
 
-    def kendall_function(self, t, survival=False):
-        return t
+    def kendall_function(self, cdf):
+        return cdf
 
-    def inverse_kendall_function(self, p, survival=False):
+    def inverse_kendall_function(self, p):
         return p
 
 
@@ -270,17 +252,11 @@ class IndependenceCopula(Copula):
     def sample(self, nsamples):
         return np.random.uniform(0, 1, (nsamples, self.nstations))
 
-    def kendall_function(self, cdf, survival=False):
-        if survival:
-            raise ValueError
-        else:
-            return 1 - gamma.cdf(np.log(1. / cdf), a=self.nstations)
+    def kendall_function(self, cdf):
+        return gamma.sf(np.log(1. / cdf), a=self.nstations)
 
-    def inverse_kendall_function(self, p, survival=False):
-        if survival:
-            raise ValueError
-        else:
-            return np.exp(-gamma.ppf(1 - p, a=self.nstations))
+    def inverse_kendall_function(self, p):
+        return np.exp(-gamma.isf(p, a=self.nstations))
 
 
 class GaussianCopula(Copula):
@@ -486,13 +462,23 @@ class MarginalExceedanceScore():
 
     def compute_score_bounds(self, maep):
         nsta = self.copula.nstations
-        cop_ind = self.independence_copula
-        cop_com = self.comonotone_copula
 
-        ua = cop_ind.aep(u, self.kind)
-        ub = cop_com.aep(u, self.kind)
-        if ua > ub:
-            ua, ub = ub, ua
+        match self.kind:
+            case "AND":
+                ua = 1 - maep ** (1. / nsta)
+                ub = 1 - maep
+            case "OR":
+                ua = 1 - maep
+                ub = (1 - maep) ** (1. / nsta)
+            case "KENDALL":
+                copi = self.independence_copula
+                cdf = copi.kendall_function_inverse(1 - maep)
+                ua = 1 - cdf ** (1. / nsta)
+
+                copc = self.comonotone_copula
+                cdf = copc.kendall_function_inverse(1 - maep)
+                ub = (1 - cdf) ** (1. / nsta)
+
         return ua, ub
 
     def compute_score(self, maep):
