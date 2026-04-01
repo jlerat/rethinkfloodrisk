@@ -2,6 +2,7 @@ from pathlib import Path
 import math
 import numpy as np
 
+from scipy.stats import kstest
 from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvt
 from scipy.stats import gamma
@@ -18,12 +19,12 @@ from pyrethink import marginal_exceedance_score as mes
 LOGGER = iutils.get_logger("test")
 
 
+@pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("name", mes.COPULAS)
-def test_copulas(name, allclose):
+def test_copulas(name, nstations, allclose):
     if name == "Gumbel":
         pytest.skip("Gumbel not ready yet.")
 
-    nstations = 10
     cop = mes.copula_factory(name, nstations)
 
     rho = 0.8
@@ -35,15 +36,28 @@ def test_copulas(name, allclose):
 
     smp = cop.sample(100)
     assert len(smp) == 100
+    assert np.all(np.isfinite(smp))
 
     pdf = cop.pdf(smp)
     assert len(pdf) == 100
+    assert np.all(np.isfinite(pdf))
 
     cdf = cop.cdf(smp)
     assert len(cdf) == 100
+    assert np.all(np.isfinite(cdf))
 
     surv = cop.survival(smp)
     assert len(surv) == 100
+    assert np.all(np.isfinite(surv))
+
+    for kind in mes.MARGINAL_EXCEEDANCE_SCORE_KINDS:
+        aep = cop.aep(smp, kind)
+        assert len(aep) == 100
+
+        if kind == "KENDALL":
+            # The aep computed from kendall should be uniform
+            st, pv = kstest(aep, "uniform")
+            assert pv > 1e-1
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])

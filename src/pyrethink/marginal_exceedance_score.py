@@ -16,7 +16,9 @@ COPULAS = ["Independence", "Comonotone",
 SYMETRICAL_COPULAS = ["Independence", "Comonotone",
                       "Gaussian", "GaussianOneFactor"]
 
-MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR", "KENDALL"]
+MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR",
+                                   "KENDALL",
+                                   "KENDALL_SURVIVAL"]
 
 NKENDALL_DEFAULT = 20000
 
@@ -24,6 +26,13 @@ NKENDALL_DEFAULT = 20000
 def check_aep(aep):
     if aep <= 0 or aep >= 1:
         errmsg = f"Expected aep in ]0,1[, got {aep}."
+        raise ValueError(errmsg)
+
+
+def check_kind(kind):
+    if kind not in MARGINAL_EXCEEDANCE_SCORE_KINDS:
+        txt = "/".join(MARGINAL_EXCEEDANCE_SCORE_KINDS)
+        errmsg = f"Expected kind in {txt}, got {kind}."
         raise ValueError(errmsg)
 
 
@@ -76,6 +85,7 @@ class Copula():
         self._nkendall = None
         self._random_samples = None
         self._kendall_function_data = None
+        self._kendall_survival_function_data = None
         self._u_data = None
 
     def __str__(self):
@@ -83,8 +93,13 @@ class Copula():
         return txt
 
     def compute_kendall_function_data(self,
+                                      survival=False,
                                       nkendall=NKENDALL_DEFAULT):
-        kdd = self._kendall_function_data
+        if survival:
+            kdd = self._kendall_survival_function_data
+        else:
+            kdd = self._kendall_function_data
+
         compute = kdd is None
         if kdd is not None:
             compute = self._nkendall != nkendall
@@ -103,15 +118,22 @@ class Copula():
 
             # Compute kendall
             N = len(u)
-            cdfs = sutils.multivariate_dominance(u, printlog=printlog) / N
+            orientation = int(~survival)
+            cdfs = sutils.multivariate_dominance(u,
+                                                 orientation=orientation,
+                                                 printlog=printlog) / N
 
             # could also do, but this is way slower
             # cdfs = np.array([self.cdf(uu) for uu in u]).squeeze()
 
             printlog = logger is not None
             p = np.arange(1, nkendall + 1) / nkendall
-            kdd = pd.DataFrame({"cdf": np.sort(cdfs), "p": p})
-            self._kendall_function_data = kdd
+            kdd = pd.DataFrame({"value": np.sort(cdfs), "p": p})
+
+            if survival:
+                self._kendall_survival_function_data = kdd
+            else:
+                self._kendall_function_data = kdd
 
         return kdd
 
@@ -149,16 +171,30 @@ class Copula():
         else:
             raise NotImplementedError
 
+    def aep(self, u, kind):
+        check_kind(kind)
+        match kind:
+            case "AND":
+                return self.survival(u)
+            case "OR":
+                return 1 - self.cdf(u)
+            case "KENDALL":
+                cdf = self.cdf(u)
+                return 1 - self.kendall_function(cdf)
+            case "KENDALL_SURVIVAL":
+                surv = self.survival(u)
+                return self.kendall_function(surv, survival=True)
+
     def survival_main_diagonal(self, u):
         if self.symetrical:
             return self.cdf_main_diagonal(1 - u)
         else:
             raise NotImplementedError
 
-    def marginal_transformed_ppf(self, u):
+    def marginal_ppf(self, u):
         raise NotImplementedError
 
-    def marginal_transformed_cdf(self, x):
+    def marginal_cdf(self, x):
         raise NotImplementedError
 
     def sample(self, nsamples):
@@ -168,14 +204,18 @@ class Copula():
         raise NotImplementedError
 
     def kendall_function(self, cdf,
+                         survival=False,
                          nkendall=NKENDALL_DEFAULT):
-        kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(cdf, kdd.cdf, kdd.p)
+        kdd = self.compute_kendall_function_data(survival,
+                                                 nkendall)
+        return np.interp(cdf, kdd.value, kdd.p)
 
     def inverse_kendall_function(self, p,
+                                 survival=False,
                                  nkendall=NKENDALL_DEFAULT):
-        kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(p, kdd.p, kdd.cdf)
+        kdd = self.compute_kendall_function_data(survival,
+                                                 nkendall)
+        return np.interp(p, kdd.p, kdd.value)
 
 
 class ComonotoneCopula(Copula):
@@ -191,20 +231,20 @@ class ComonotoneCopula(Copula):
         u = to2d(u, self.nstations)
         return np.min(u, axis=1)
 
-    def marginal_transformed_ppf(self, u):
+    def marginal_ppf(self, u):
         return u
 
-    def marginal_transformed_cdf(self, x):
+    def marginal_cdf(self, x):
         return x
 
     def sample(self, nsamples):
         return np.repeat(np.random.uniform(0, 1, (nsamples, 1)),
                          self.nstations, axis=1)
 
-    def kendall_function(self, t):
+    def kendall_function(self, t, survival=False):
         return t
 
-    def inverse_kendall_function(self, p):
+    def inverse_kendall_function(self, p, survival=False):
         return p
 
 
@@ -221,20 +261,26 @@ class IndependenceCopula(Copula):
         u = to2d(u, self.nstations)
         return np.prod(u, axis=1)
 
-    def marginal_transformed_ppf(self, u):
+    def marginal_ppf(self, u):
         return u
 
-    def marginal_transformed_cdf(self, x):
+    def marginal_cdf(self, x):
         return x
 
     def sample(self, nsamples):
         return np.random.uniform(0, 1, (nsamples, self.nstations))
 
-    def kendall_function(self, cdf):
-        return 1 - gamma.cdf(np.log(1. / cdf), a=self.nstations)
+    def kendall_function(self, cdf, survival=False):
+        if survival:
+            raise ValueError
+        else:
+            return 1 - gamma.cdf(np.log(1. / cdf), a=self.nstations)
 
-    def inverse_kendall_function(self, p):
-        return np.exp(-gamma.ppf(1 - p, a=self.nstations))
+    def inverse_kendall_function(self, p, survival=False):
+        if survival:
+            raise ValueError
+        else:
+            return np.exp(-gamma.ppf(1 - p, a=self.nstations))
 
 
 class GaussianCopula(Copula):
@@ -260,26 +306,27 @@ class GaussianCopula(Copula):
 
     def pdf(self, u):
         u = to2d(u, self.nstations)
-        x = self.marginal_transformed_ppf(u)
+        x = self.marginal_ppf(u)
         p = norm.pdf(x).prod(axis=1)
         return self.rv.pdf(x) / p
 
     def cdf(self, u):
         u = to2d(u, self.nstations)
-        x = self.marginal_transformed_ppf(u)
+        x = self.marginal_ppf(u)
         return self.rv.cdf(x)
 
-    def marginal_transformed_ppf(self, u):
+    def marginal_ppf(self, u):
         return norm.ppf(u)
 
-    def marginal_transformed_cdf(self, x):
+    def marginal_cdf(self, x):
         return norm.cdf(x)
 
     def sample(self, nsamples):
         if self._rv is None:
             errmsg = "rv is None, set parameters."
             raise ValueError(errmsg)
-        return self._rv.rvs(size=nsamples)
+        fun = self.marginal_cdf
+        return fun(self._rv.rvs(size=nsamples))
 
 
 class GaussianOneFactorCopula(GaussianCopula):
@@ -298,7 +345,6 @@ class GaussianOneFactorCopula(GaussianCopula):
         self.name = "GaussianOneFactor"
         self._sqr = None
         self._csqr = None
-
         self.set_approx()
 
     def set_approx(self, napprox=500):
@@ -346,7 +392,7 @@ class GaussianOneFactorCopula(GaussianCopula):
         #      int(prod(Phi(xi - sqrt(rho) v) / sqrt(1 - rho)) dv,
         #          v=-infty,
         #          v=+infty)
-        x = self.marginal_transformed_ppf(u)
+        x = self.marginal_ppf(u)
         np.add(x[:, :, None],
                -self.sqr * self.v[None, None, :],
                out=self.buf)
@@ -356,7 +402,8 @@ class GaussianOneFactorCopula(GaussianCopula):
     def sample(self, nsamples):
         v = np.random.normal(size=nsamples)
         eps = np.random.normal(size=(nsamples, self.nstations))
-        return norm.cdf(self.sqr * v[:, None] + self.csqr * eps)
+        fun = self.marginal_cdf
+        return fun(self.sqr * v[:, None] + self.csqr * eps)
 
 
 class GumbelCopula(Copula):
@@ -411,10 +458,7 @@ class GumbelCopula(Copula):
 
 class MarginalExceedanceScore():
     def __init__(self, kind, copula):
-        if kind not in MARGINAL_EXCEEDANCE_SCORE_KINDS:
-            txt = "/".join(MARGINAL_EXCEEDANCE_SCORE_KINDS)
-            errmsg = f"Expected kind in {txt}, got {kind}."
-            raise ValueError(errmsg)
+        check_kind(kind)
         self.kind = kind
 
         if not isinstance(copula, Copula):
@@ -429,14 +473,7 @@ class MarginalExceedanceScore():
         self._u_vect = np.ones((1, copula.nstations))
 
     def objective_function_set(self, u, lmaep):
-        match self.kind:
-            case "AND":
-                c = self.copula.survival(u)
-            case "OR":
-                c = 1 - self.copula.cdf(u)
-            case "KENDALL":
-                c0 = self.copula.cdf(u)
-                c = 1 - self.copula.kendall_function(c0)
+        c = self.copula.aep(u, self.kind)
         if c == 0:
             return np.inf
         err = (math.log(c) - lmaep)**2
@@ -452,17 +489,10 @@ class MarginalExceedanceScore():
         cop_ind = self.independence_copula
         cop_com = self.comonotone_copula
 
-        match self.kind:
-            case "AND":
-                ua = 1 - maep**(1. / nsta)
-                ub = 1 - maep
-            case "OR":
-                ua = 1 - maep
-                ub = (1 - maep)**(1. / nsta)
-            case "KENDALL":
-                ua = cop_ind.inverse_kendall_function(1 - maep)
-                ub = cop_com.inverse_kendall_function(1 - maep)
-
+        ua = cop_ind.aep(u, self.kind)
+        ub = cop_com.aep(u, self.kind)
+        if ua > ub:
+            ua, ub = ub, ua
         return ua, ub
 
     def compute_score(self, maep):
