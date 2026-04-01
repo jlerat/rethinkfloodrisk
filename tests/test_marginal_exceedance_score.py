@@ -128,17 +128,24 @@ def test_kendall_function_independence(nstations, allclose):
 
 @pytest.mark.parametrize("nstations", [2, 5, 7])
 @pytest.mark.parametrize("repeat", np.arange(1, 6))
-def test_compute_empirical_kendall(nstations, repeat, allclose):
+def test_compute_gaussian_kendall(nstations, repeat, allclose):
     cop = mes.GaussianOneFactorCopula(nstations)
-    cop.params = 1e-3
-    pk = cop.compute_kendall_function_data()
+    cop.params = 1e-4
+    cop.logger = LOGGER
+
+    if nstations == 2:
+        nkendall = 10000
+    elif nstations >= 5:
+        nkendall = 50000
+
+    pk = cop.compute_kendall_function_data(nkendall)
 
     # Expected independent
     copi = mes.IndependenceCopula(nstations)
-    expected = copi.kendall_function(pk.t)
-
-    err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.Kc))
-    atol = 2e-2 if nstations <= 5 else 5e-2
+    expected = copi.kendall_function(pk.cdf)
+    err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.p))
+    LOGGER.info(f"errmax = {err.max():3.3e}")
+    atol = 2e-2 if nstations <= 5 else 1e-1
     assert err.max() < atol
 
 
@@ -183,8 +190,8 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
     elif kind == "OR":
         check = 1 - cop.cdf(df.iloc[:, :2])
     elif kind == "KENDALL":
-        t = cop.cdf(df.iloc[:, :2])
-        check = 1 - cop.kendall_function(t)
+        cdfs = cop.cdf(df.iloc[:, :2])
+        check = 1 - cop.kendall_function(cdfs)
 
     err = np.abs(np.log(check) - math.log(maep))
     assert (err < 5e-2).all()

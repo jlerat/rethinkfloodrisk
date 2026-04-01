@@ -82,17 +82,19 @@ class Copula():
         txt = f"{self.name} copula {self.nstations} dimensions."
         return txt
 
-    def compute_kendall_function_data(self, nkendall=NKENDALL_DEFAULT):
+    def compute_kendall_function_data(self,
+                                      nkendall=NKENDALL_DEFAULT):
         kdd = self._kendall_function_data
-
         compute = kdd is None
         if kdd is not None:
             compute = self._nkendall != nkendall
 
         if compute:
             logger = self.logger
+            printlog = False
             if logger is not None:
                 logger.info("Computing kendall function")
+                printlog = True
 
             # Generate samples
             self._nkendall = nkendall
@@ -101,14 +103,14 @@ class Copula():
 
             # Compute kendall
             N = len(u)
-            printlog = logger is not None
-            probs = sutils.multivariate_dominance(u, printlog=printlog) / N
-            t = np.arange(1, N + 1) / N
-            Kc = np.zeros_like(t)
-            for i, tt in enumerate(t):
-                Kc[i] = (probs < tt).sum() / N
+            cdfs = sutils.multivariate_dominance(u, printlog=printlog) / N
 
-            kdd = pd.DataFrame({"t": t, "Kc": Kc})
+            # could also do, but this is way slower
+            # cdfs = np.array([self.cdf(uu) for uu in u]).squeeze()
+
+            printlog = logger is not None
+            p = np.arange(1, nkendall + 1) / nkendall
+            kdd = pd.DataFrame({"cdf": np.sort(cdfs), "p": p})
             self._kendall_function_data = kdd
 
         return kdd
@@ -165,13 +167,15 @@ class Copula():
     def conditional_sample(self, icond, zcond, itarget):
         raise NotImplementedError
 
-    def kendall_function(self, t, nkendall=NKENDALL_DEFAULT):
+    def kendall_function(self, cdf,
+                         nkendall=NKENDALL_DEFAULT):
         kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(t, kdd.t, kdd.Kc)
+        return np.interp(cdf, kdd.cdf, kdd.p)
 
-    def inverse_kendall_function(self, p, nkendall=NKENDALL_DEFAULT):
+    def inverse_kendall_function(self, p,
+                                 nkendall=NKENDALL_DEFAULT):
         kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(p, kdd.Kc, kdd.t)
+        return np.interp(p, kdd.p, kdd.cdf)
 
 
 class ComonotoneCopula(Copula):
@@ -226,8 +230,8 @@ class IndependenceCopula(Copula):
     def sample(self, nsamples):
         return np.random.uniform(0, 1, (nsamples, self.nstations))
 
-    def kendall_function(self, t):
-        return 1 - gamma.cdf(np.log(1./t), a=self.nstations)
+    def kendall_function(self, cdf):
+        return 1 - gamma.cdf(np.log(1. / cdf), a=self.nstations)
 
     def inverse_kendall_function(self, p):
         return np.exp(-gamma.ppf(1 - p, a=self.nstations))
@@ -456,7 +460,7 @@ class MarginalExceedanceScore():
                 ua = 1 - maep
                 ub = (1 - maep)**(1. / nsta)
             case "KENDALL":
-                ua = cop_ind.inverse_kendall_function(1 - maep)**(1./nsta)
+                ua = cop_ind.inverse_kendall_function(1 - maep)
                 ub = cop_com.inverse_kendall_function(1 - maep)
 
         return ua, ub
