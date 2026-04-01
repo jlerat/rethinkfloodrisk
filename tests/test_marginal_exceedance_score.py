@@ -52,10 +52,8 @@ def test_copulas(name, nstations, allclose):
     assert np.all(np.isfinite(surv))
 
     for kind in mes.MARGINAL_EXCEEDANCE_SCORE_KINDS:
-        if name == "Independence" and kind.endswith("SURVIVAL"):
-            continue
-
         aep = cop.aep(smp, kind)
+
         assert len(aep) == 100
 
         if kind == "KENDALL":

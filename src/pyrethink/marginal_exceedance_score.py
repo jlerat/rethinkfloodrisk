@@ -17,8 +17,7 @@ SYMETRICAL_COPULAS = ["Independence", "Comonotone",
                       "Gaussian", "GaussianOneFactor"]
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR",
-                                   "KENDALL",
-                                   "KENDALL_SURVIVAL"]
+                                   "KENDALL"]
 
 NKENDALL_DEFAULT = 20000
 
