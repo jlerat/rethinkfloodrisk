@@ -495,7 +495,8 @@ class MarginalExceedanceScore():
                               args=(lmaep,))
         return opt.x, opt.fun
 
-    def marginal_exceedance_set(self, maep, npoints=200, u0=1e-5, nitermax=5):
+    def marginal_exceedance_set(self, maep, npoints=200, u0=1e-5, nitermax=5,
+                                logerrmax=1e-3):
         """ Marginal exceedance set in 2 dimensions,
         i.e.  the set of values (a1, a2) such that
         Pr(ex(u, [a1, a2])) = maep
@@ -533,15 +534,21 @@ class MarginalExceedanceScore():
                 df.loc[iu, "v"] = opt.x
                 df.loc[iu, "log10_cdf_err"] = opt.fun
 
-            df = df.loc[df.log10_cdf_err < 1e-3]
-            if len(df) == 0:
+            iok = np.where(df.log10_cdf_err < logerrmax)[0]
+            ia = max(0, iok.min() - 1)
+            ib = min(len(df) - 1, iok.max())
+            if ia == ib:
                 errmsg = "Failed to identify set."
                 raise ValueError(errmsg)
 
-            ua = df.u.iloc[0] - u0
-            ub = df.u.iloc[-1] + u0
+            ua = max(df.u.iloc[ia] - u0, 0)
+            ub = min(df.u.iloc[ib] + u0, 1)
             u = np.linspace(ua, ub, npoints)
+
             niter += 1
+
+        iok = df.log10_cdf_err < logerrmax
+        df = df.loc[iok]
 
         return df, niter
 
