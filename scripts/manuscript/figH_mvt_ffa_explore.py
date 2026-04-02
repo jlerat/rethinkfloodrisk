@@ -30,6 +30,12 @@ from scipy.stats import multivariate_normal as mvt
 from scipy.optimize import minimize_scalar
 
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+from matplotlib.patches import Polygon as MPLPolygon
+
+import shapely
+from shapely import Polygon, LineString, Point
+from shapely.plotting import plot_polygon
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
@@ -97,6 +103,18 @@ def process(config, script_paths, logger, data):
         #isid4 = sids.index(config.sta4)
         rho = cor[isid1, isid2]
 
+        # Copula objects
+        nstas = [2, 10] if config.debug else [2, 5, 10, 20]
+        cops = {}
+        for nsta in nstas:
+            if config.use_indep:
+                cop = mes.IndependenceCopula(nsta)
+            else:
+                cop = mes.GaussianOneFactorCopula(nsta)
+                cop.params = rho
+
+            cops[nsta] = cop
+
         logger.info(f"-- Plotting {rn.text} / rho={rho:0.2f} --", nret=1)
 
         kinds = ["AND", "OR", "KENDALL"]
@@ -104,24 +122,22 @@ def process(config, script_paths, logger, data):
         mosaic = [[f"{ptype}_{kind}" for kind in kinds]
                   for ptype in ptypes]
 
+        putils.set_mpl(font_size=15)
+
         plt.close("all")
         nrows = len(mosaic)
         ncols = len(mosaic[0])
         fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
-                         layout="tight")
-        axs = fig.subplot_mosaic(mosaic)
+                         layout="constrained")
+        kw = dict(hspace=0.05)
+        axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
 
         for iax, (aname, ax) in enumerate(axs.items()):
             kind = re.sub(".*_", "", aname)
             logger.info(f"Plot {aname}", ntab=1)
 
             if aname.startswith("aep+2d"):
-                if config.use_indep:
-                    cop = mes.IndependenceCopula(2)
-                else:
-                    cop = mes.GaussianCopula(2)
-                    cop.params = np.array([[1, rho], [rho, 1]])
-
+                cop = cops[2]
                 mex = mes.MarginalExceedanceScore(kind, cop)
 
                 gevs = []
@@ -144,8 +160,9 @@ def process(config, script_paths, logger, data):
                 # plot data
                 x = obs_data.loc[:, sta1]
                 y = obs_data.loc[:, sta2]
-                ax.plot(x, y, "o", mfc="w", mec="k", alpha=0.8,
-                        label="Observed streamflow maxima")
+                ax.plot(x, y, "o", mfc="w", mec="k",
+                        alpha=0.8, ms=12,
+                        label="Observed\nstreamflow\nmaxima")
 
                 # plot pdf
                 ngrid = config.ngrid
@@ -159,10 +176,11 @@ def process(config, script_paths, logger, data):
                 px = gevs[0].pdf(xx)
                 py = gevs[1].pdf(yy)
                 zz *= px * py
-                cnt = ax.contourf(xx, yy, zz, cmap="Blues",
+                cnt = ax.contourf(xx, yy, zz, cmap=config.cmap_pdf,
                                   levels=30, alpha=0.5, norm="log",
                                   label="Survival cumulative density",
                                   antialiased=True)
+
                 for maep in config.maep_target:
                     logger.info(f"AEP 1:{1 / maep:0.0f}", ntab=2)
                     if maep == 1e-1:
@@ -171,32 +189,59 @@ def process(config, script_paths, logger, data):
                         color = config.col_aep100
 
                     # Plot MAEP solution set
-                    npoints = 20 if config.debug else 100
+                    npoints = 200
                     df, _ = mex.marginal_exceedance_set(maep, npoints=npoints)
                     x = gevs[0].ppf(df.u)
                     y = gevs[1].ppf(df.v)
-                    ax.plot(x, y, "-", lw=2, color=color,
-                            label=f"Solution set for AEP 1:{1. / maep:0.0f}")
+                    label = f"Solution\nset 1:{1./maep:0.0f}"
+                    ax.plot(x, y, "-", lw=3, color=color,
+                            label=label)
 
-                    # Plot common MAEP value
+                    line = LineString([(xx, yy) for xx, yy in zip(x, y)])
+                    pol = Polygon([(x0, y0), (x0, y1), (x1, y1),
+                                   (x1, y0), (x0, y0)])
+                    pol = shapely.difference(pol, line.buffer(1))
+                    topright = Point(x1 - 5, y1 - 5)
+                    pol = next(p for p in pol.geoms if p.contains(topright))
+                    xy = np.array(pol.exterior.xy)[:2].T
+                    pp = MPLPolygon(xy, closed=True,
+                                    hatch="//", ec=color, fc="none",
+                                    alpha=0.2)
+                    ax.add_patch(pp)
+
+                    txt = f"AEP < 1:{1./maep:0.0f}"
                     mex0, _ = mex.common_marginal_exceedance_score(maep)
-                    x = gevs[0].ppf(mex0)
-                    y = gevs[1].ppf(mex0)
-                    ax.plot(x, y, "o",
-                            ms=12, mfc=color, mec="w",
-                            label=f"Common MEXS for AEP 1:{1. / maep:0.0f}")
-                    ax.plot([x]*2, [y0, y], "--", lw=0.9, color=color)
+                    x_mex = gevs[0].ppf(mex0)
+                    y_mex = gevs[1].ppf(mex0)
+                    xy = math.exp((math.log(x_mex) + math.log(x1))/2), \
+                        math.exp((math.log(y_mex) + math.log(y1))/2)
+                    ax.annotate(txt, xy,
+                                va="center", ha="center",
+                                color=color, fontweight="bold",
+                                path_effects=[pe.withStroke(linewidth=7,
+                                                    foreground="w")])
+
+                    # Plot CMEXT
+                    label = "" #f"Common MEXS for AEP 1:{1. / maep:0.0f}"
+                    ax.plot(x_mex, y_mex, "o",
+                            ms=15, mfc=color, mec="w",
+                            label=label)
+                    ax.plot([x_mex]*2, [y0, y_mex], "--", lw=0.9, color=color)
+                    ax.plot([x0, x_mex], [y_mex] * 2, "--", lw=0.9, color=color)
                     txt = f"1:{1. / (1 - mex0):0.0f}"
-                    ax.annotate(txt, xy=(x, y0), xytext=(7, 10),
+                    ax.annotate(txt, xy=(x_mex, y0), xytext=(7, 15),
                                 textcoords="offset pixels",
-                                color=color, fontweight="bold")
+                                color=color, fontweight="bold",
+                                path_effects=[pe.withStroke(linewidth=7,
+                                                    foreground="w")])
 
-                if kind == "AND":
-                    ax.legend(loc=3, framealpha=1)
-
-                #x = np.linspace(x0, x1, 100)
-                #y = gevs[1].ppf(gevs[0].cdf(x))
-                #ax.plot(x, y, "k--", lw=0.9, alpha=0.6)
+                x = np.linspace(x0, x1, 100)
+                y = gevs[1].ppf(gevs[0].cdf(x))
+                label = "Identical marginal\n"\
+                        + f"exceedance\n"\
+                        + f"probabilities"
+                ax.plot(x, y, "k:", lw=1, alpha=0.6,
+                        label=label)
 
                 xlabel = f"Streamflow peak {config.sta1} [m3.s-1]"
 
@@ -214,8 +259,10 @@ def process(config, script_paths, logger, data):
                        xlabel=xlabel, ylabel=ylabel,
                        title=title)
 
+                if kind == "AND":
+                    ax.legend(loc=3, framealpha=1)
+
             else:
-                nstas = [2, 5, 10, 20]
                 nstas_txt = [f"{n} stations" for n in nstas]
                 maeps = config.maep_target
                 maeps_txt = [f"1:{1/a:0.0f} AEP" for a in maeps]
@@ -223,13 +270,7 @@ def process(config, script_paths, logger, data):
                                       columns=maeps_txt)
                 for ista, nsta in enumerate(nstas):
                     logger.info(f"Nstations {nsta}", ntab=2)
-                    if config.use_indep:
-                        cop = mes.IndependenceCopula(nsta)
-                    else:
-                        cop = mes.GaussianCopula(nsta)
-                        cop.params = (1 - rho) * np.eye(nsta) \
-                            + rho * np.ones((nsta, nsta))
-
+                    cop = cops[nsta]
                     mex = mes.MarginalExceedanceScore(kind, cop)
                     for iaep, maep in enumerate(maeps):
                         mex0, _ = mex.common_marginal_exceedance_score(maep)
@@ -237,23 +278,26 @@ def process(config, script_paths, logger, data):
                         idx = values.index[ista]
                         values.loc[idx, cn] = 1 - mex0
 
+                colors = [config.col_aep100,
+                          config.col_aep10]
                 values.plot(kind="bar", ax=ax,
-                            rot=0, legend=False)
+                            rot=0, legend=False,
+                            color=colors)
 
                 aep = [1000, 100, 10, 1]
                 tk = [1./a for a in aep]
 
                 if kind == "AND":
-                    ax.legend(loc=2)
-                    ylabel = f"Common Marginal Exceedance Score [-]"
+                    ax.legend(loc=2, ncol=2)
+                    ylabel = f"CMEXT exceedance probability [-]"
                     tkl = [f"1:{a}" for a in aep]
                 else:
                     ylabel = ""
                     tkl = []
 
                 x0, x1 = 1. / 2000, 1.
-                title = f"({letters[iax]}) Common Marginal Exceedance "\
-                        + f" Score\n'{kind}' exceedance"
+                title = f"({letters[iax]}) CMEXT marginal probability\n"\
+                        + f"'{kind}' exceedance"
                 ax.set(ylim=(x0, x1), ylabel=ylabel,
                        yscale="log",
                        title=title)
@@ -301,9 +345,9 @@ if __name__ == "__main__":
                                "sta1", "sta2", "sta3", "sta4",
                                "ngrid", "maep_target",
                                "use_indep", "col_aep100",
-                               "col_aep10"])
-    awidth = 5
-    aheight = 4
+                               "col_aep10", "cmap_pdf"])
+    awidth = 6
+    aheight = 6
     fdpi = 300
     excludes = ["NONE"]
     load_ffa = False
@@ -312,8 +356,9 @@ if __name__ == "__main__":
     load_expected_params = True
     load_postpred_checks = False
 
-    col_aep100 = "tab:red"
     col_aep10 = "tab:orange"
+    col_aep100 = "tab:blue"
+    cmap_pdf = "Greys"
 
     sta1 = "203002"
     sta2 = "203012"
@@ -335,7 +380,7 @@ if __name__ == "__main__":
                 sta1, sta2, sta3, sta4,
                 ngrid, maep_target,
                 args.use_indep, col_aep100,
-                col_aep10)
+                col_aep10, cmap_pdf)
 
     # Baseline
     source_file = Path(__file__).resolve()
