@@ -96,24 +96,24 @@ def process(config, script_paths, logger, data):
             for rho in rhos:
                 logger.info(f"Dealing with {aep_type}/nsta={nsta} rho={rho:0.2f}")
 
-                cdf = mes.GaussianFactorCopulaCDF(nsta, rho)
-                mex1 = mes.MarginalExceedanceScore(aep_type, cdf,
-                                                   nsamples=nsmp,
-                                                   empirical=False,
-                                                   logger=logger)
+                cop = mes.GaussianFactorCopula(nsta)
+                cop.params = rho
+
+                mex1 = mes.MarginalExceedanceScore(aep_type, cop)
+                mex1.logger = logger
+
                 if aep_type != "KENDALL":
-                    mex2 = mes.MarginalExceedanceScore(aep_type, cdf,
-                                                       nsamples=nsmp,
-                                                       empirical=True,
-                                                       logger=logger)
+                    mex2 = mes.MarginalExceedanceScoreEmpirical(aep_type, cop)
+                    mex2.logger = logger
+
                 uaeps = np.zeros((len(maeps), 2))
                 for iaep, maep in enumerate(maeps):
                     if iaep % 5 == 0 :
                         logger.info(f"maep #{iaep + 1:2d}", ntab=1)
 
-                    uaeps[iaep, 0] = mex1.compute_score(maep)
+                    uaeps[iaep, 0] = mex1.common_marginal_exceedance_score(maep)
                     if aep_type != "KENDALL":
-                        uaeps[iaep, 1] = mex2.compute_score(maep)
+                        uaeps[iaep, 1] = mex2.common_marginal_exceedance_score(maep)
 
 
                 ax.plot(maeps * 100, uaeps[:, 0] * 100,

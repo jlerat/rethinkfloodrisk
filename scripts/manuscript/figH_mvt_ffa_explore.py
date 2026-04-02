@@ -172,14 +172,14 @@ def process(config, script_paths, logger, data):
 
                     # Plot MAEP solution set
                     npoints = 20 if config.debug else 100
-                    df, _ = mex.compute_set(maep, npoints=npoints)
+                    df, _ = mex.marginal_exceedance_set(maep, npoints=npoints)
                     x = gevs[0].ppf(df.u)
                     y = gevs[1].ppf(df.v)
                     ax.plot(x, y, "-", lw=2, color=color,
                             label=f"Solution set for AEP 1:{1. / maep:0.0f}")
 
                     # Plot common MAEP value
-                    mex0, _ = mex.compute_score(maep)
+                    mex0, _ = mex.common_marginal_exceedance_score(maep)
                     x = gevs[0].ppf(mex0)
                     y = gevs[1].ppf(mex0)
                     ax.plot(x, y, "o",
@@ -232,7 +232,7 @@ def process(config, script_paths, logger, data):
 
                     mex = mes.MarginalExceedanceScore(kind, cop)
                     for iaep, maep in enumerate(maeps):
-                        mex0, _ = mex.compute_score(maep)
+                        mex0, _ = mex.common_marginal_exceedance_score(maep)
                         cn = values.columns[iaep]
                         idx = values.index[ista]
                         values.loc[idx, cn] = 1 - mex0

@@ -31,6 +31,7 @@ import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 
 from hydrodiy.io import csv, iutils, hyruns
+from hydrodiy.stat import sutils
 from hydrodiy.plot import putils
 
 from pyrethink import datahub
@@ -101,15 +102,15 @@ def process(config, script_paths, logger, data):
         expected_in = expected[rn_isin]
         expected_out = expected[rn_isout]
 
+        ams, _, _, _ = datahub.get_ams_concat()
         potpeaks, _, _ = datahub.get_potpeaks()
-        #rk = potpeaks.rank(ascending=False)
-        #obs = rk.index[(rk <= 2).any(axis=1)].astype(str).tolist()
 
         # Dependence
         nstations = potpeaks.shape[1]
         cop_in = mes.GaussianCopula(nstations)
         cor = pd.Series(expected_in["corr_IW"]).values.reshape((nstations, nstations))
         cop_in.params = cor
+        cop_in.logger = logger
 
         cop_out = mes.GaussianCopula(nstations)
         cor = pd.Series(expected_out["corr_IW"]).values.reshape((nstations, nstations))
@@ -189,7 +190,7 @@ def process(config, script_paths, logger, data):
                 title = f"{dt} flood\n"
 
             # Marginals
-            cdfs = np.zeros((1, nstations))
+            marg_cdfs = np.zeros((1, nstations))
             obs = potpeaks.loc[event]
             ex = expected_in
             for isite in range(nstations):
@@ -197,18 +198,24 @@ def process(config, script_paths, logger, data):
                 gev.locn = ex["ylocs"][f"ylocn[{isite + 1}]"]
                 gev.logscale = ex["ylogscales"][f"ylogscale[{isite + 1}]"]
                 gev.shape1 = ex["yshape1"][f"yshape1[{isite + 1}]"]
-                cdfs[0, isite] = gev.cdf(obs.iloc[isite])
+                marg_cdfs[0, isite] = gev.cdf(obs.iloc[isite])
 
             logger.info("MEXS - Kendall", ntab=2)
-            c0 = cop_in.cdf(cdfs)
-            pm = 1 - cop_in.kendall_function(c0)
+            c0 = cop_in.cdf(marg_cdfs)
+            nkendall = 30000
+            pm_kendall = 1 - cop_in.kendall_function(c0, nkendall=nkendall)
+            pm_and = cop_in.cdf(1 - marg_cdfs)
+            pm_or = 1 - c0
+
 
             dt = pd.to_datetime(event).strftime("%b %Y")
             title = f"{dt} flood\n"
-            title += f"{pm * 100:0.1f}%"
+            title += f"AND {pm_and * 100:0.1f}%\n"
+            title += f"OR  {pm_or * 100:0.1f}%\n"
+            title += f"KEN {pm_kendall * 100:0.1f}%\n"
 
             ax.set_title(title, x=0.3, y=0.12,
-                         fontsize="x-large",
+                         fontsize="large",
                          fontweight="bold")
 
         basename = script_paths.basename
