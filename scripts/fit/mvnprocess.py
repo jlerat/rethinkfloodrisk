@@ -29,6 +29,8 @@ from floodstan.marginals import GEV
 
 from pyrethink import datahub
 from pyrethink import copulas
+from pyrethink import marginal_exceedance_score as mes
+from pyrethink.marginal_exceedance_score import MARGINAL_EXCEEDANCE_SCORE_KINDS as MEXS_KINDS
 
 import importlib
 importlib.reload(copulas)
@@ -56,7 +58,7 @@ debug = args.debug
 
 # Configure mvn conditional
 stationid_cond = "203002"
-aep_targets = [1, 10]
+maeps = [1e-1, 1e-2]
 
 # Configure mvn cdf
 
@@ -75,7 +77,7 @@ if debug:
 
 # Runner
 opm = hyruns.OptionManager(stationid_cond=stationid_cond,
-                           aep_targets=aep_targets)
+                           maeps=maeps)
 
 # Select certain fit tasks
 pcensors = [0.3]
@@ -103,9 +105,6 @@ copula_shape = task.copula_shape
 has_clusters = task.has_clusters
 dirichlet_alpha = task.dirichlet_alpha
 
-# Frequency of log report
-iterlog = 5
-
 if debug:
     batch = 0
     pcensor = 0.3
@@ -116,6 +115,9 @@ if debug:
     dirichlet_alpha = 1.
 
 copula_type = 1 if copula_shape > 0 else 0
+
+if has_clusters:
+    raise ValueError("Does not deal with clusters")
 
 # ----------------------------------------------------------------------
 # @Folders
@@ -143,8 +145,7 @@ fwrite.mkdir(exist_ok=True, parents=True)
 basename = source_file.stem
 flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
 flog.parent.mkdir(exist_ok=True, parents=True)
-LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
-                           contextual=True)
+LOGGER = iutils.get_logger(basename, flog=flog, console=debug)
 LOGGER.log_dict(vars(args), "Command line arguments")
 task.log(LOGGER)
 
@@ -197,9 +198,6 @@ itarget = np.where(stationids != stationid_cond)[0]
 
 # Sampler
 ccs = copulas.Copula(copula_type, copula_shape, nvar)
-pids = np.array(data["partitions_id"])
-probs = ccs.partitions.compute_probabilities(pids,
-                                             dirichlet_alpha)
 
 LOGGER.info(f"Load samples TASK {fit_taskid}")
 fs = ftask / f"copulafit_samples_TASK{fit_taskid}.zip"
@@ -221,79 +219,54 @@ gev = GEV()
 
 nsamples = len(samples)
 
-cols_cond = {}
-cols_cond_all = []
-sidc = stationid_cond
-for aep in aep_targets:
-    cc = [f"mv_cond{sidc}_aep{aep:02d}_{sid}_smp"
-          for sid in stationids if sid != sidc]
-    cols_cond[aep] = cc
-    cols_cond_all.extend(cc)
-
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"{g}_obs_{event}_log10aep"
-            for g in list(groups_mvn_cdf.keys()) + gsta
-            for event in (obs if g == "GALL" else obs_main)]
+cols_obs = [f"G{sid}_obs_UNIV_{event}_log10aep"
+            for sid in stationids
+            for event in obs_main]
 
-stats = [f"{st}_log10aep{aep:02d}"
-         for st in ["all", "any"]
-         for aep in aep_targets]
+cols_obs += [f"{g}_obs_{kd}_{event}_log10aep"
+             for g in list(groups_mvn_cdf.keys())
+             for kd in MEXS_KINDS
+             for event in obs_main]
 
+stats = [f"CMEXS_{kd}_log10aep{1./aep:0.0f}"
+         for kd in MEXS_KINDS
+         for aep in maeps]
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
-    + cols_cond_all
+       + cols_obs
 
 res = pd.DataFrame(np.nan, index=samples.index,
-                   columns=cols + cols_obs)
-
-iparts = ccs.partitions.sample(probs, len(samples))
+                   columns=cols)
 
 for ismp, (i, smp) in enumerate(samples.iterrows()):
-    if i % iterlog == 0:
-        LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}")
+    LOGGER.info(f"Processing sample {ismp + 1} / {nsamples}", nret=1)
 
     # retrieve correlation matrix
     corr = smp.filter(regex="corr_IW").values.reshape((nvar, nvar)).T
     ccs.corr = corr
 
-    # Get random partition
-    ipartition = iparts[ismp]
-
-    # Sample conditional
-    for aep_target in aep_targets:
-        prob = 1 - aep_target / 100
-        zcond = copulas.copula_marginal_ppf(copula_type,
-                                            copula_shape,
-                                            [prob])
-        z = ccs.conditional_sample_given_partition(ipartition, icond, zcond,
-                                                   itarget)
-        s = copulas.copula_marginal_survival(copula_type, copula_shape, z)
-        sid = stationid_cond
-        cc = [f"mv_cond{sidc}_aep{aep_target:02d}_{sid}_smp"
-              for sid in stationids if sid != sidc]
-        res.loc[i, cc] = s
-
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
+        LOGGER.info(f"CMEXS for group {gname}", ntab=1)
         grp_idx = [get_station_index(sid) for sid in grp_stationids]
+        nsids = len(grp_stationids)
+        cop = mes.GaussianCopula(nsids)
+        cop.logger = LOGGER
 
-        for aep_target in aep_targets:
-            # All above threshold, hence survival copula
-            prob = 1 - aep_target / 100
-            zcdf = copulas.copula_marginal_ppf(copula_type, copula_shape, prob)
-            z = zcdf * np.ones(ccs.nstations)
-            sall = ccs.survival_given_partition(ipartition, z, grp_idx)
-            lsall = math.log10(sall) if sall > 0 else np.nan
-            res.loc[i, f"{gname}_all_log10aep{aep_target:02d}"] = lsall
+        idx = [get_station_index(sid) for sid in grp_stationids]
+        cop.params = corr[idx][:, idx]
 
-            # Any above threshold, hence 1 - cdf
-            z = zcdf * np.ones(ccs.nstations)
-            sany = 1 - ccs.cdf_given_partition(ipartition, z, grp_idx)
-            lsany = math.log10(sany) if sany > 0 else np.nan
-            res.loc[i, f"{gname}_any_log10aep{aep_target:02d}"] = lsany
+        for kind in MEXS_KINDS:
+            mex = mes.MarginalExceedanceScore(kind, cop)
+            mex.logger = LOGGER
+            for maep in maeps:
+                sc, _ = mex.common_marginal_exceedance_score(maep)
+                lsc = math.log10(sc) if sc > 0 else np.nan
+                res.loc[i, f"{gname}_CMEXS_{kind}_log10aep{1./maep:0.0f}"] = lsc
 
         # Obs aep
-        events = obs if gname == "GALL" else obs_main
-        for event in events:
+        for event in obs_main:
+            LOGGER.info(f"AEP for event {event}", ntab=1)
             # Get peak flow data
             if event == "MAX-17-08":
                 e17 = next(e for e in obs if re.search("2017-03", e))
@@ -305,12 +278,12 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
             else:
                 pp = potpeaks.loc[event].squeeze()
 
-            zev = np.nan * np.zeros(ccs.nstations)
 
             # Compute cdf for each station
             # Careful here, don't mix up the station
             # index sid within the stan data list
             # and the number k used to order them within zstd
+            marg_cdfs = np.nan * np.zeros(ccs.nstations)
             for k, sid in enumerate(grp_stationids):
                 isid = get_station_index(sid) + 1
                 ylocn = smp.loc[f"ylocn[{isid}]"]
@@ -323,16 +296,14 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                     # Store individual estimate of event
                     if gname == "GALL" and event in obs_main:
                         lc = math.log10(1 - cdf) if 1 - cdf > 0 else np.nan
-                        res.loc[i, f"G{sid}_obs_{event}_log10aep"] = lc
+                        res.loc[i, f"G{sid}_obs_UNIV_{event}_log10aep"] = lc
 
-                    zev[isid - 1] = copulas.copula_marginal_ppf(copula_type,
-                                                                copula_shape,
-                                                                cdf)
+                    marg_cdfs[isid - 1] = cdf
 
-            sevent = ccs.survival_given_partition(ipartition, zev, grp_idx)
-
-            lsev = math.log10(sevent) if sevent > 0 else np.nan
-            res.loc[i, f"{gname}_obs_{event}_log10aep"] = lsev
+            for kind in MEXS_KINDS:
+                aep_event = cop.aep(marg_cdfs, kind)
+                lsev = math.log10(aep_event) if aep_event > 0 else np.nan
+                res.loc[i, f"{gname}_obs_{kind}_{event}_log10aep"] = lsev
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"
@@ -344,7 +315,7 @@ comments = {
     "rho_min": rho_min,
     "fit_taskid": fit_taskid,
     "stationid_cond": stationid_cond,
-    "aep_targets": aep_targets
+    "maeps": maeps
 
     }
 if not debug:
