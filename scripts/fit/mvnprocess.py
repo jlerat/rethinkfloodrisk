@@ -167,17 +167,9 @@ LOGGER.info("Load data")
 
 # Obs events
 ams, _, _, stations = datahub.get_ams_concat()
-potpeaks, _, _ = datahub.get_potpeaks()
 
-obs = potpeaks.index.astype(str).tolist()
-obs.append("MAX-17-08")
-obs_main = ["2008-01-04", "2017-03-31", "2022-02-27", "2022-03-30",
-            "MAX-17-08"]
-
-if debug:
-    obs = obs_main.copy()
-    obs.append("1991-03-13")
-    obs.append("2009-06-22")
+ams_selected = [2021, 2016, 2000, 2007]
+ams = ams.loc[ams_selected, :]
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:
@@ -220,20 +212,20 @@ gev = GEV()
 nsamples = len(samples)
 
 gsta = [f"G{sid}" for sid in stationids]
-cols_obs = [f"G{sid}_obs_UNIV_{event}_log10aep"
+cols_ams = [f"G{sid}_ams_UNIV_{year}_log10aep"
             for sid in stationids
-            for event in obs_main]
+            for year in ams_selected]
 
-cols_obs += [f"{g}_obs_{kd}_{event}_log10aep"
+cols_ams += [f"{g}_ams_{kd}_{year}_log10aep"
              for g in list(groups_mvn_cdf.keys())
              for kd in MEXS_KINDS
-             for event in obs_main]
+             for year in ams_selected]
 
 stats = [f"CMEXS_{kd}_log10aep{1./aep:0.0f}"
          for kd in MEXS_KINDS
          for aep in maeps]
 cols = [f"{g}_{v}" for g in groups_mvn_cdf for v in stats]\
-       + cols_obs
+       + cols_ams
 
 res = pd.DataFrame(np.nan, index=samples.index,
                    columns=cols)
@@ -265,19 +257,9 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 res.loc[i, f"{gname}_CMEXS_{kind}_log10aep{1./maep:0.0f}"] = lsc
 
         # Obs aep
-        for event in obs_main:
-            LOGGER.info(f"AEP for event {event}", ntab=1)
-            # Get peak flow data
-            if event == "MAX-17-08":
-                e17 = next(e for e in obs if re.search("2017-03", e))
-                pp17 = potpeaks.loc[e17].squeeze()
-
-                e08 = next(e for e in obs if re.search("2008-01", e))
-                pp08 = potpeaks.loc[e08].squeeze()
-                pp = np.maximum(pp17, pp08)
-            else:
-                pp = potpeaks.loc[event].squeeze()
-
+        for year in ams_selected:
+            LOGGER.info(f"AEP for ams {year}", ntab=1)
+            pp = ams.loc[year].squeeze()
 
             # Compute cdf for each station
             # Careful here, don't mix up the station
@@ -294,16 +276,16 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                 if ~np.isnan(qo):
                     cdf = gev.cdf(qo)
                     # Store individual estimate of event
-                    if gname == "GALL" and event in obs_main:
+                    if gname == "GALL":
                         lc = math.log10(1 - cdf) if 1 - cdf > 0 else np.nan
-                        res.loc[i, f"G{sid}_obs_UNIV_{event}_log10aep"] = lc
+                        res.loc[i, f"G{sid}_ams_UNIV_{year}_log10aep"] = lc
 
                     marg_cdfs[isid - 1] = cdf
 
             for kind in MEXS_KINDS:
                 aep_event = cop.aep(marg_cdfs, kind)
                 lsev = math.log10(aep_event) if aep_event > 0 else np.nan
-                res.loc[i, f"{gname}_obs_{kind}_{event}_log10aep"] = lsev
+                res.loc[i, f"{gname}_ams_{kind}_{year}_log10aep"] = lsev
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

@@ -97,13 +97,13 @@ def process(config, script_paths, logger, data):
 
         logger.info(f"-- Plotting {rn_isin.text} --", nret=1)
 
+        ams = obs_data[rn_isin].set_index("WATER_YEAR")
+        stationids = ams.columns
+
         mvnproc_in = mvnproc[rn_isin]
         mvnproc_out = mvnproc[rn_isout]
         expected_in = expected[rn_isin]
         expected_out = expected[rn_isout]
-
-        ams, _, _, _ = datahub.get_ams_concat()
-        potpeaks, _, _ = datahub.get_potpeaks()
 
         # Dependence
         nstations = potpeaks.shape[1]
@@ -117,9 +117,9 @@ def process(config, script_paths, logger, data):
         cop_out.params = cor
 
         ncols = config.ncols
-        nev = len(config.events)
+        nev = len(config.years)
         nrows = nev // ncols + (nev % ncols != 0)
-        mosaic = [[config.events[ir * ncols + ic] for ic in range(ncols)]
+        mosaic = [[config.years[ir * ncols + ic] for ic in range(ncols)]
                   for ir in range(nrows)]
         nrows = len(mosaic)
         plt.close("all")
@@ -128,8 +128,8 @@ def process(config, script_paths, logger, data):
         kw = dict(hspace=0.05, wspace=0.05)
         axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
 
-        for event, ax in axs.items():
-            logger.info(f"Plotting {event}", ntab=1)
+        for year, ax in axs.items():
+            logger.info(f"Plotting {year}", ntab=1)
 
             # River lines
             for rname, pts in RIVERS.items():
@@ -141,7 +141,7 @@ def process(config, script_paths, logger, data):
             # Stations
             for sid, pts in STATIONS.items():
                 # AEP data
-                cn = f"G{sid}_obs_{event}_log10aep"
+                cn = f"G{sid}_obs_{year}_log10aep"
                 p_in = 10**mvnproc_in.loc[:, cn]
                 pm_in = p_in.mean()
                 ps_in = p_in.std()
@@ -156,7 +156,7 @@ def process(config, script_paths, logger, data):
 
                 xy = [x, y]
                 delta = 18
-                txt = f"({sid})\n" if event == config.events[0] else ""
+                txt = f"({sid})\n" if event == config.years[0] else ""
                 txt += f"{pm_in * 100:0.1f}% $\\pm$ {ps_in * 100:0.1f}%"
                 #txt += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
 
@@ -181,17 +181,11 @@ def process(config, script_paths, logger, data):
 
             ax.axis("off")
 
-
-            if re.search("MAX", event):
-                dt = "Max 2017/2008"
-                title = f"{dt}\n"
-            else:
-                dt = pd.to_datetime(event).strftime("%b %Y")
-                title = f"{dt} flood\n"
+            title = f"{year} flood\n"
 
             # Marginals
             marg_cdfs = np.zeros((1, nstations))
-            obs = potpeaks.loc[event]
+            obs = ams.loc[event]
             ex = expected_in
             for isite in range(nstations):
                 gev = marginals.GEV()
@@ -251,20 +245,19 @@ if __name__ == "__main__":
                                "load_mvnproc",
                                "load_expected_params",
                                "load_postpred_checks",
-                               "events", "exclude",
+                               "years", "exclude",
                                "river_color"])
     awidth = 6
     aheight = 5
     fdpi = 300
     ncols = 2
     load_ffa = False
-    load_obs_data = False
+    load_obs_data = True
     load_mvnproc = True
     load_expected_params = True
     load_postpred_checks = False
     excludes = ["NONE", "2021"]
-    events = ["2008-01-04", "2017-03-31",
-              "2022-02-27", "2022-03-30"]
+    years = [2008, 2013, 2017, 2022]
 
     river_color = "0.4"
 
@@ -275,7 +268,7 @@ if __name__ == "__main__":
                 args.debug, False,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
-                load_postpred_checks, events,
+                load_postpred_checks, years,
                 excludes, river_color)
 
     # Baseline
