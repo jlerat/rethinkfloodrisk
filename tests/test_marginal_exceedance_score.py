@@ -194,10 +194,11 @@ def test_compute_analytical_and_empirical_marginal_score(kind, nstations, rho, a
     maeps = np.logspace(math.log10(1e-2/5), -1, 10)
     scs = np.zeros((len(maeps), 2))
     for iaep, maep in enumerate(maeps):
-        scs[iaep, 0], _ = mex1.compute_score(maep)
-        scs[iaep, 1], _ = mex2.compute_score(maep)
+        scs[iaep, 0], _ = mex1.common_marginal_exceedance_score(maep)
+        scs[iaep, 1], _ = mex2.common_marginal_exceedance_score(maep)
 
     err = np.abs(np.diff(np.log(scs), axis=1)).squeeze()
+    assert err.min() > 1e-6
     assert err.max() < 1e-1
 
 
@@ -210,7 +211,7 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
     cop.params = rho
 
     mex = mes.MarginalExceedanceScore(kind, cop)
-    df, _ = mex.compute_set(maep)
+    df, _ = mex.marginal_exceedance_set(maep)
 
     check = cop.aep(df.iloc[:, :2], kind)
     assert allclose(check, maep, atol=5e-2)
@@ -219,17 +220,18 @@ def test_compute_marginal_score_set(kind, rho, maep, allclose):
 @pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 @pytest.mark.parametrize("maep", [0.1, 0.01])
-def test_compare_scores(kind, rho, maep, allclose):
+def test_compare_set_and_common(kind, rho, maep, allclose):
     nstations = 2
     cop = mes.GaussianOneFactorCopula(nstations)
     cop.params = rho
 
     mex = mes.MarginalExceedanceScore(kind, cop)
     mex.logger = LOGGER
-    df, _ = mex.compute_set(maep)
+    df, _ = mex.marginal_exceedance_set(maep)
 
     # Check mex0 is in df
-    mex0, _ = mex.compute_score(maep)
-    expected = np.interp(mex0, df.u, df.v)
-    assert allclose(mex0, expected, 1e-3)
+    mex0, err = mex.common_marginal_exceedance_score(maep)
+    imin = np.abs(df.u - df.v).argmin()
+    expected = df.iloc[imin, :2].mean()
+    assert allclose(mex0, expected, 1e-4)
 

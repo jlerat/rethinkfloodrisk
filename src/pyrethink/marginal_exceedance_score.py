@@ -447,19 +447,19 @@ class MarginalExceedanceScore():
         self._samples = None
         self._u_vect = np.ones((1, copula.nstations))
 
-    def objective_function_set(self, u, lmaep):
+    def objective_function(self, u, lmaep):
         c = self.copula.aep(u, self.kind)
         if c == 0:
             return np.inf
         err = (math.log(c) - lmaep)**2
         return err
 
-    def objective_function_diagonal(self, u, lmaep):
+    def objective_function_1d(self, u, lmaep):
         u_vect = self._u_vect
         u_vect.fill(u)
-        return self.objective_function_set(u_vect, lmaep)
+        return self.objective_function(u_vect, lmaep)
 
-    def compute_score_bounds(self, maep):
+    def common_marginal_exceedance_score_bounds(self, maep):
         nsta = self.copula.nstations
 
         match self.kind:
@@ -471,16 +471,16 @@ class MarginalExceedanceScore():
                 ub = (1 - maep) ** (1. / nsta)
             case "KENDALL":
                 copi = self.independence_copula
-                cdf = copi.kendall_function_inverse(1 - maep)
+                cdf = copi.inverse_kendall_function(1 - maep)
                 ua = 1 - cdf ** (1. / nsta)
 
                 copc = self.comonotone_copula
-                cdf = copc.kendall_function_inverse(1 - maep)
-                ub = (1 - cdf) ** (1. / nsta)
+                cdf = copc.inverse_kendall_function(1 - maep)
+                ub = cdf
 
         return ua, ub
 
-    def compute_score(self, maep):
+    def common_marginal_exceedance_score(self, maep):
         """ Marginal exceedance score, i.e. the value alpha such that
         Pr(ex(u, u0)) = maep
         with ex the exceedance operator defined on Rn x Rn -> {0, 1}
@@ -488,26 +488,25 @@ class MarginalExceedanceScore():
         for all i in 1..n,  u0[i] = alpha
         """
         check_aep(maep)
-        bounds = self.compute_score_bounds(maep)
+        bounds = self.common_marginal_exceedance_score_bounds(maep)
         lmaep = math.log(maep)
-        opt = minimize_scalar(self.objective_function_diagonal,
+        opt = minimize_scalar(self.objective_function_1d,
                               bracket=bounds, bounds=bounds,
                               args=(lmaep,))
         return opt.x, opt.fun
 
-    def compute_set(self, maep, npoints=200, nitermax=5):
+    def marginal_exceedance_set(self, maep, npoints=200, u0=1e-5, nitermax=5):
         """ Marginal exceedance set in 2 dimensions,
         i.e.  the set of values (a1, a2) such that
         Pr(ex(u, [a1, a2])) = maep
-        with ex the exceedance operator defined on R2 x R2 -> {0, 1}
+        with ex the exceedance operator defined by the 'kind' parameter.
         """
         check_aep(maep)
         if self.copula.nstations != 2:
             errmsg = "Can only compute set for 2 dimensions"
             raise ValueError(errmsg)
 
-        eps = 1e-4
-        u = np.linspace(eps, 1 - eps, 2 * npoints)
+        u = np.linspace(u0, 1 - u0, 2 * npoints)
         df = []
         niter = 0
         logger = self.logger
@@ -527,7 +526,7 @@ class MarginalExceedanceScore():
 
                 def ofun(v, lmaep):
                     u_vect[0, 1] = v
-                    return self.objective_function_set(u_vect, lmaep)
+                    return self.objective_function(u_vect, lmaep)
 
                 opt = minimize_scalar(ofun, bracket=bounds, bounds=bounds,
                                       args=(lmaep,))
@@ -539,9 +538,9 @@ class MarginalExceedanceScore():
                 errmsg = "Failed to identify set."
                 raise ValueError(errmsg)
 
-            u0 = df.u.iloc[0] - eps
-            u1 = df.u.iloc[-1] + eps
-            u = np.linspace(u0, u1, npoints)
+            ua = df.u.iloc[0] - u0
+            ub = df.u.iloc[-1] + u0
+            u = np.linspace(ua, ub, npoints)
             niter += 1
 
         return df, niter
@@ -553,7 +552,7 @@ class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
         super(MarginalExceedanceScoreEmpirical, self).__init__(kind, copula)
         self.samples = self.copula.sample(nsamples)
 
-    def objective_function_set(self, u, lmaep):
+    def objective_function(self, u, lmaep):
         u = to2d(u, self.copula.nstations)
         u_smp = self.samples
         n_smp = len(u_smp)
