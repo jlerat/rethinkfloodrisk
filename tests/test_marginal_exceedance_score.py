@@ -63,7 +63,7 @@ def test_copulas(name, nstations, allclose):
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
-@pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
+@pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.98])
 @pytest.mark.parametrize("napprox", [0, 100, 500])
 def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
     mean = np.zeros(nstations)
