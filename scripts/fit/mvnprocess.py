@@ -58,7 +58,7 @@ debug = args.debug
 
 # Configure mvn conditional
 stationid_cond = "203002"
-maeps = [1e-1, 1e-2]
+maeps = [1e-2]
 
 # Configure mvn cdf
 
@@ -239,7 +239,7 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
     # Loop on groups
     for gname, grp_stationids in groups_mvn_cdf.items():
-        LOGGER.info(f"CMEXS for group {gname}", ntab=1)
+        LOGGER.info(f"CMEXS for group {gname}", ntab=1, nret=1)
         grp_idx = [get_station_index(sid) for sid in grp_stationids]
         nsids = len(grp_stationids)
         cop = mes.GaussianCopula(nsids)
@@ -258,14 +258,13 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
 
         # Obs aep
         for year in ams_selected:
-            LOGGER.info(f"AEP for ams {year}", ntab=1)
             pp = ams.loc[year].squeeze()
 
             # Compute cdf for each station
             # Careful here, don't mix up the station
             # index sid within the stan data list
             # and the number k used to order them within zstd
-            marg_cdfs = np.nan * np.zeros(ccs.nstations)
+            marg_cdfs = np.nan * np.zeros(nsids)
             for k, sid in enumerate(grp_stationids):
                 isid = get_station_index(sid) + 1
                 ylocn = smp.loc[f"ylocn[{isid}]"]
@@ -280,12 +279,16 @@ for ismp, (i, smp) in enumerate(samples.iterrows()):
                         lc = math.log10(1 - cdf) if 1 - cdf > 0 else np.nan
                         res.loc[i, f"G{sid}_ams_UNIV_{year}_log10aep"] = lc
 
-                    marg_cdfs[isid - 1] = cdf
+                    marg_cdfs[k] = cdf
 
             for kind in MEXS_KINDS:
                 aep_event = cop.aep(marg_cdfs, kind)
                 lsev = math.log10(aep_event) if aep_event > 0 else np.nan
                 res.loc[i, f"{gname}_ams_{kind}_{year}_log10aep"] = lsev
+
+            lsev = res.loc[i, f"{gname}_ams_KENDALL_{year}_log10aep"]
+            ken = 10**(lsev + 2)
+            LOGGER.info(f"AEP kendall for ams {year} = {ken:0.1f}%", ntab=1)
 
 # Save data to disk
 fr = fwrite / f"copulafit_mvnprocess_TASK{fit_taskid}_BATCH{batch}.csv"

@@ -178,7 +178,7 @@ LOGGER.info(f"nobs    = {stan_data['Nobs']}", ntab=1, nret=1)
 LOGGER.info(f"ncens   = {stan_data['Ncens']}", ntab=1)
 LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
 LOGGER.info(f"rho_min = {stan_data['rho_min']}", ntab=1)
-LOGGER.info(f"ho_max = {stan_data['rho_max']}", ntab=1)
+LOGGER.info(f"rho_max = {stan_data['rho_max']}", ntab=1)
 
 pcensors = (ams - censors < 0).sum() / ams.notnull().sum()
 for ipn, (pname, pcensor) in enumerate(pcensors.items()):
