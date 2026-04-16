@@ -49,7 +49,7 @@ parser.add_argument("-t", "--taskid", help="JobID",
 parser.add_argument("-d", "--debug", help="Debug mode",
                     action="store_true", default=False)
 parser.add_argument("-n", "--nbatch", help="Number of batches",
-                    type=int, default=20)
+                    type=int, default=100)
 args = parser.parse_args()
 version = args.version
 taskid = args.taskid

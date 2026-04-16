@@ -23,7 +23,7 @@ fi
 NTASKS=12
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
 ARRAYS_PROC="0-$((3*$NTASKS - 1))"
-ARRAYS_MVN="0-119"
+ARRAYS_MVN="0-599"
 
 # Job config
 JOBSCRIPT=$FROOT/scripts/fit/job_script.job
