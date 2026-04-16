@@ -44,8 +44,8 @@ def to2d(x, nstations):
         raise ValueError(errmsg)
 
     if x.shape[1] != nstations:
-        errmsg = "Expected second dimension of array of size {nstations}."\
-                 + " Got {x.shape[1]}."
+        errmsg = f"Expected second dimension of array of size {nstations}."\
+                 + f" Got {x.shape[1]}."
         raise ValueError(errmsg)
 
     return x
