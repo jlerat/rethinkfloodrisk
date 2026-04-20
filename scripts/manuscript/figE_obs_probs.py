@@ -37,6 +37,8 @@ from hydrodiy.plot import putils
 from pyrethink import datahub
 from pyrethink import sample
 from pyrethink import marginal_exceedance_score as mes
+from pyrethink.marginal_exceedance_score import MARGINAL_EXCEEDANCE_SCORE_KINDS\
+    as MEXS_KINDS
 from floodstan import marginals
 
 import figA_impact_of_period_on_FFA
@@ -90,31 +92,24 @@ def process(config, script_paths, logger, data):
         if len(mvnproc) == 0:
             continue
 
-        assert len(mvnproc) == 2
+        assert len(mvnproc) == 1
 
-        rn_isin = next(rn for rn in mvnproc if rn.exclude == "NONE")
-        rn_isout = next(rn for rn in mvnproc if rn.exclude != "NONE")
+        rn = next(rn for rn in mvnproc if rn.exclude == "NONE")
 
-        logger.info(f"-- Plotting {rn_isin.text} --", nret=1)
+        logger.info(f"-- Plotting {rn.text} --", nret=1)
 
-        ams = obs_data[rn_isin].set_index("WATER_YEAR")
+        ams = obs_data[rn].set_index("WATER_YEAR")
         stationids = ams.columns
+        nstations = len(stationids)
 
-        mvnproc_in = mvnproc[rn_isin]
-        mvnproc_out = mvnproc[rn_isout]
-        expected_in = expected[rn_isin]
-        expected_out = expected[rn_isout]
+        mvnproc = mvnproc[rn]
+        expected_in = expected[rn]
 
         # Dependence
-        nstations = potpeaks.shape[1]
         cop_in = mes.GaussianCopula(nstations)
         cor = pd.Series(expected_in["corr_IW"]).values.reshape((nstations, nstations))
         cop_in.params = cor
         cop_in.logger = logger
-
-        cop_out = mes.GaussianCopula(nstations)
-        cor = pd.Series(expected_out["corr_IW"]).values.reshape((nstations, nstations))
-        cop_out.params = cor
 
         ncols = config.ncols
         nev = len(config.years)
@@ -128,7 +123,7 @@ def process(config, script_paths, logger, data):
         kw = dict(hspace=0.05, wspace=0.05)
         axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
 
-        for year, ax in axs.items():
+        for iyear, (year, ax) in enumerate(axs.items()):
             logger.info(f"Plotting {year}", ntab=1)
 
             # River lines
@@ -141,24 +136,20 @@ def process(config, script_paths, logger, data):
             # Stations
             for sid, pts in STATIONS.items():
                 # AEP data
-                cn = f"G{sid}_obs_{year}_log10aep"
-                p_in = 10**mvnproc_in.loc[:, cn]
-                pm_in = p_in.mean()
-                ps_in = p_in.std()
-                p_out = 10**mvnproc_out.loc[:, cn]
-                pm_out = p_out.mean()
-                ps_out = p_out.std()
+                cn = f"G{sid}_ams_UNIV_{year - 1}_log10aep"
+                p = 10**mvnproc.loc[:, cn]
+                pm = p.mean() * 100
+                ps = p.std() * 100
 
                 x, y = pts
-                col = cm.Reds_r(Normalize(vmin=0, vmax=20)(pm_in * 100))
+                col = cm.Reds_r(Normalize(vmin=0, vmax=10)(pm))
                 ax.plot(x, y, "o",
                         ms=12, mec="k", mfc=col)
 
                 xy = [x, y]
                 delta = 18
-                txt = f"({sid})\n" if event == config.years[0] else ""
-                txt += f"{pm_in * 100:0.1f}% $\\pm$ {ps_in * 100:0.1f}%"
-                #txt += f"{pm_out * 100:0.1f}% $\pm$ {ps_out * 100:0.1f}%"
+                txt = f"({sid})\n" if year == config.years[0] else ""
+                txt += f"{pm:0.1f}% $\\pm$ {ps:0.1f}%"
 
                 if sid == "203014":
                     xytext = [delta, -1.5 * delta]
@@ -181,39 +172,28 @@ def process(config, script_paths, logger, data):
 
             ax.axis("off")
 
-            title = f"{year} flood\n"
+            txt = f"({letters[iyear]}) {year}"
+            x0 = 0.08
+            y0 = 0.26
+            ax.annotate(txt, (x0, y0),
+                        xycoords="axes fraction",
+                        fontweight="bold",
+                        ha="left", va="top",
+                        fontsize="x-large")
 
-            # Marginals
-            marg_cdfs = np.zeros((1, nstations))
-            obs = ams.loc[event]
-            ex = expected_in
-            for isite in range(nstations):
-                gev = marginals.GEV()
-                gev.locn = ex["ylocs"][f"ylocn[{isite + 1}]"]
-                gev.logscale = ex["ylogscales"][f"ylogscale[{isite + 1}]"]
-                gev.shape1 = ex["yshape1"][f"yshape1[{isite + 1}]"]
-                marg_cdfs[0, isite] = gev.cdf(obs.iloc[isite])
-
-            logger.info("MEXS - Kendall", ntab=2)
-            c0 = cop_in.cdf(marg_cdfs)
-            nkendall = 30000
-            pm_kendall = 1 - cop_in.kendall_function(c0, nkendall=nkendall)
-            pm_and = cop_in.cdf(1 - marg_cdfs)
-            pm_or = 1 - c0
-
-
-            dt = pd.to_datetime(event).strftime("%b %Y")
-            title = f"{dt} flood\n"
-            title += f"AND {pm_and * 100:0.1f}%\n"
-            title += f"OR  {pm_or * 100:0.1f}%\n"
-            title += f"KEN {pm_kendall * 100:0.1f}%\n"
-
-            ax.set_title(title, x=0.3, y=0.12,
-                         fontsize="large",
-                         fontweight="bold")
+            kind = "KENDALL"
+            cn = f"GALL_ams_{kind}_{year - 1}_log10aep"
+            p = 10**mvnproc.loc[:, cn]
+            pm = p.mean() * 100
+            ps = p.std() * 100
+            txt = f"{pm:4.1f}% $\\pm$ {ps:4.1f}%"
+            ax.annotate(txt, (x0, y0 - 0.07),
+                        xycoords="axes fraction",
+                        ha="left", va="top",
+                        fontsize="x-large")
 
         basename = script_paths.basename
-        fp = f"{basename}_{rn_isin.text}_v{config.version}.png"
+        fp = f"{basename}_{rn.text}_v{config.version}.png"
         fp = script_paths.fimg / fp
         fig.savefig(fp, dpi=config.fdpi)
 
@@ -256,8 +236,8 @@ if __name__ == "__main__":
     load_mvnproc = True
     load_expected_params = True
     load_postpred_checks = False
-    excludes = ["NONE", "2021"]
-    years = [2008, 2013, 2017, 2022]
+    excludes = ["NONE"]
+    years = [2001, 2008, 2017, 2022]
 
     river_color = "0.4"
 

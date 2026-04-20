@@ -288,8 +288,7 @@ def process(config, script_paths, logger, data):
             logger.info(f"Plotting {stationid}", ntab=1)
 
             plt.close("all")
-            mosaic = [["ffa-isin", "ffa-isout"],
-                      ["obs-isin", "obs-isout"]]
+            mosaic = [["ffa-isin", "ffa-isout"]]
 
             nrows = len(mosaic)
             ncols = len(mosaic[0])
@@ -307,6 +306,8 @@ def process(config, script_paths, logger, data):
             rc_q = rc_q.loc[ipos]
 
             # Plot ffa
+            fptype = config.freq_plot_type
+
             for iax, (aname, ax) in enumerate(axs.items()):
                 ptype, dsrc = aname.split("-")
                 rn = rn_isin if dsrc == "isin" else rn_isout
@@ -315,7 +316,7 @@ def process(config, script_paths, logger, data):
                     # Plot data
                     peaks = obs_data[rn].loc[:, str(stationid)]
 
-                    x, y = freqplots.plot_data(ax, peaks, ptype, zorder=10)
+                    x, y = freqplots.plot_data(ax, peaks, fptype, zorder=10)
                     same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
                     _, same = np.where(same)
                     time = obs_data[rn].WATER_YEAR.iloc[same]
@@ -351,7 +352,7 @@ def process(config, script_paths, logger, data):
                     inocens = 1 - 1./aris >= pcensor
                     quantiles = quantiles.loc[inocens]
                     aris = aris[inocens]
-                    freqplots.plot_marginal_quantiles(ax, aris, quantiles, ptype,
+                    freqplots.plot_marginal_quantiles(ax, aris, quantiles, fptype,
                                                       center_column="POSTERIOR_PREDICTIVE",
                                                       q0_column="5%",
                                                       q1_column="95%",
@@ -360,9 +361,9 @@ def process(config, script_paths, logger, data):
                                                       edgecolor="k")
 
                     retp = [10, 100, 500]
-                    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, True, retp)
+                    aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
 
-                    if aname == "isin":
+                    if dsrc == "isin":
                         exctxt = "All data"
                     else:
                         ev = int(re.sub("-.*", "", rn.exclude)) + 1
@@ -375,7 +376,7 @@ def process(config, script_paths, logger, data):
 
                     q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
 
-                    txt = "Uncertainty in 1:100 event\n\n"
+                    txt = "Uncertainty in the 1:100 event\n\n"
                     kw = dict(va="top", ha="left", transform=ax.transAxes)
                     ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
 
@@ -393,11 +394,10 @@ def process(config, script_paths, logger, data):
                         ax.text(0.18, ytxt, txt, **kw)
 
                 else:
-                    mvn = mvnproc[rn]
-                    import pdb; pdb.set_trace()
+                    pass
 
-            #ftitle = f"{sinfo.NAME} ({stationid})"
-            #fig.suptitle(ftitle, fontweight="bold")
+            ftitle = f"{sinfo.NAME} ({stationid})"
+            fig.suptitle(ftitle, fontweight="bold")
 
             basename = script_paths.basename
             fp = f"{basename}_{stationid}_{rtxt}_v{config.version}.png"
@@ -422,7 +422,7 @@ if __name__ == "__main__":
     parser.add_argument("-r", "--rho_mins", help="Minimum rho values",
                         type=str, default="-1|0")
     parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
-                        type=str, default="0|3")
+                        type=str, default="0")
     args = parser.parse_args()
     assert not args.debug
 
@@ -435,7 +435,8 @@ if __name__ == "__main__":
                                "load_ffa",
                                "load_mvnproc",
                                "load_expected_params",
-                               "load_postpred_checks"])
+                               "load_postpred_checks",
+                               "freq_plot_type"])
     awidth = 6
     aheight = 5
     fdpi = 300
@@ -447,6 +448,8 @@ if __name__ == "__main__":
     load_mvnproc = True
     load_expected_params = False
     load_postpred_checks = False
+    freq_plot_type = "gumbel"
+
     config = CF(args.version, args.pcensor,
                 args.rho_mins.split("|"),
                 awidth, aheight, fdpi, ptype, ari_max,
@@ -455,7 +458,8 @@ if __name__ == "__main__":
                 args.diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
-                load_postpred_checks)
+                load_postpred_checks,
+                freq_plot_type)
 
     # Baseline
     source_file = Path(__file__).resolve()

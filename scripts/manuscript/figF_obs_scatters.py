@@ -147,8 +147,8 @@ if __name__ == "__main__":
                                "load_expected_params",
                                "load_postpred_checks",
                                "exclude"])
-    awidth = 6
-    aheight = 5
+    awidth = 5
+    aheight = 4
     fdpi = 300
     ncols = 4
     excludes = ["NONE"]
