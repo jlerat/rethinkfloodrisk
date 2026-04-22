@@ -60,8 +60,9 @@ debug = args.debug
 stationid_cond = "203002"
 maeps = [1e-2]
 
-# Configure mvn cdf
+ams_selected = "ALL"
 
+# Configure mvn cdf
 groups_mvn_cdf = {
     "GALL": ["203002", "203004", "203005", "203010",
              "203012", "203014"],
@@ -168,8 +169,10 @@ LOGGER.info("Load data")
 # Obs events
 ams, _, _, stations = datahub.get_ams_concat()
 
-ams_selected = [2021, 2016, 2000, 2007]
-ams = ams.loc[ams_selected, :]
+if ams_selected != "ALL":
+    ams = ams.loc[ams_selected, :]
+else:
+    ams_selected = ams.index.to_list()
 
 fd = ftask / f"copulafit_diagnostic_TASK{fit_taskid}.json"
 with fd.open("r") as fo:

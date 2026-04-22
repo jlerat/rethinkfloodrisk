@@ -103,29 +103,81 @@ def process(config, script_paths, logger, data):
         nstations = len(stationids)
 
         mvnproc = mvnproc[rn]
-        expected_in = expected[rn]
+        expected = expected[rn]
 
         # Dependence
-        cop_in = mes.GaussianCopula(nstations)
-        cor = pd.Series(expected_in["corr_IW"]).values.reshape((nstations, nstations))
-        cop_in.params = cor
-        cop_in.logger = logger
+        cop = mes.GaussianCopula(nstations)
+        cor = pd.Series(expected["corr_IW"]).values.reshape((nstations, nstations))
+        cop.params = cor
+        cop.logger = logger
 
-        ncols = config.ncols
+        # Historical grid
+        # nstations + multivar
+        nval = len(ams)
+        marg_cdf = np.nan * np.zeros((nval, nstations))
+        aep = np.zeros(nval)
+        gev = marginals.GEV()
+
+        for k in range(nstations):
+            gev.locn = expected["ylocs"][f"ylocn[{k + 1}]"]
+            gev.logscale = expected["ylogscales"][f"ylogscale[{k + 1}]"]
+            gev.shape1 = expected["yshape1"][f"yshape1[{k + 1}]"]
+            marg_cdf[:, k] = gev.cdf(ams.iloc[:, k])
+
+        aeps = np.nan * np.zeros((nval, nstations + 2))
+        # .. marginal aeps
+        aeps[:, :nstations] = (1 - marg_cdf) * 1e2
+        # .. joint aep
+        aeps[:, -1] = cop.aep(marg_cdf, "KENDALL") * 1e2
+
+        # Configure
+        ncols_years = config.ncols_years
         nev = len(config.years)
-        nrows = nev // ncols + (nev % ncols != 0)
-        mosaic = [[config.years[ir * ncols + ic] for ic in range(ncols)]
+        nrows = nev // ncols_years + (nev % ncols_years != 0)
+        mosaic = [["grid"] + [config.years[ir * ncols_years + ic]
+                              for ic in range(ncols_years)]
                   for ir in range(nrows)]
         nrows = len(mosaic)
         plt.close("all")
-        fig = plt.figure(figsize=(ncols * awidth, nrows * aheight),
+        fig = plt.figure(figsize=((ncols_years + 1) * awidth,
+                                  nrows * aheight),
                          layout="constrained")
-        kw = dict(hspace=0.05, wspace=0.05)
+        wr = [1] + [1.5] * ncols_years
+        kw = dict(hspace=0.05, wspace=0.05, width_ratios=wr)
         axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
 
-        for iyear, (year, ax) in enumerate(axs.items()):
-            logger.info(f"Plotting {year}", ntab=1)
+        for iax, (aname, ax) in enumerate(axs.items()):
+            logger.info(f"Plotting {aname}", ntab=1)
 
+            if aname == "grid":
+                im = ax.imshow(aeps, cmap="Reds_r",
+                               vmin=0, vmax=config.aep_max)
+
+                # Show AEP values
+                #for i in np.arange(nval):
+                #    a = aeps[i, -1]
+                #    if a > 20:
+                #        continue
+                #    ax.text(nstations + 1, i, f"{a:0.1f}",
+                #            color="w", ha="center",
+                #            va="center", fontweight="bold",
+                #            fontsize="x-small")
+
+                labs = ams.columns.to_list() + ["", "Multiv. K."]
+
+                ax.set_xticks(np.arange(nstations + 2),
+                              labels=labs,
+                              rotation=90)
+                ax.set_yticks(np.arange(nval), labels=ams.index)
+
+                cbar = fig.colorbar(im,
+                                    ticks=np.arange(10, config.aep_max, 10),
+                                    shrink=0.5)
+                cbar.ax.set(title="AEP\n[%]")
+                ax.set(title=f"({letters[iax]}) Expected AEP")
+                continue
+
+            year = aname
             # River lines
             for rname, pts in RIVERS.items():
                 pts = np.array(pts)
@@ -142,9 +194,10 @@ def process(config, script_paths, logger, data):
                 ps = p.std() * 100
 
                 x, y = pts
-                col = cm.Reds_r(Normalize(vmin=0, vmax=10)(pm))
+                col = cm.Reds_r(Normalize(vmin=0, vmax=config.aep_max)(pm))
                 ax.plot(x, y, "o",
-                        ms=12, mec="k", mfc=col)
+                        ms=14, mec="w", mfc=col,
+                        markeredgewidth=2)
 
                 xy = [x, y]
                 delta = 18
@@ -167,30 +220,26 @@ def process(config, script_paths, logger, data):
                 ax.annotate(txt, xy,
                             ha=ha, va=va,
                             xytext=xytext,
-                            fontsize="large",
                             textcoords="offset pixels")
 
             ax.axis("off")
-
-            txt = f"({letters[iyear]}) {year}"
-            x0 = 0.08
-            y0 = 0.26
-            ax.annotate(txt, (x0, y0),
-                        xycoords="axes fraction",
-                        fontweight="bold",
-                        ha="left", va="top",
-                        fontsize="x-large")
 
             kind = "KENDALL"
             cn = f"GALL_ams_{kind}_{year - 1}_log10aep"
             p = 10**mvnproc.loc[:, cn]
             pm = p.mean() * 100
             ps = p.std() * 100
-            txt = f"{pm:4.1f}% $\\pm$ {ps:4.1f}%"
-            ax.annotate(txt, (x0, y0 - 0.07),
+            txt = "Multivariate 'KENDALL'\n"\
+                  + f"AEP = {pm:4.1f}% $\\pm$ {ps:4.1f}%"
+            x0 = 0.65
+            y0 = 0.35
+            ax.annotate(txt, (x0, y0),
                         xycoords="axes fraction",
                         ha="left", va="top",
-                        fontsize="x-large")
+                        fontsize="large")
+
+            ax.set_title(f"({letters[iax]}) Details of {year} AEPs",
+                         x=0.01, y=1, ha="left", va="top")
 
         basename = script_paths.basename
         fp = f"{basename}_{rn.text}_v{config.version}.png"
@@ -217,7 +266,8 @@ if __name__ == "__main__":
 
     # Config
     CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
-                               "awidth", "aheight", "fdpi", "ncols",
+                               "awidth", "aheight", "fdpi",
+                               "ncols_years",
                                "excludes", "copula_shapes",
                                "debug", "diag",
                                "load_obs_data",
@@ -226,30 +276,32 @@ if __name__ == "__main__":
                                "load_expected_params",
                                "load_postpred_checks",
                                "years", "exclude",
-                               "river_color"])
-    awidth = 6
+                               "river_color",
+                               "aep_max"])
+    awidth = 4
     aheight = 5
     fdpi = 300
-    ncols = 2
+    ncols_years = 1
     load_ffa = False
     load_obs_data = True
     load_mvnproc = True
     load_expected_params = True
     load_postpred_checks = False
     excludes = ["NONE"]
-    years = [2001, 2008, 2017, 2022]
+    years = [2017, 2022]
+    aep_max = 40
 
-    river_color = "0.4"
+    river_color = "0.5"
 
     config = CF(args.version, args.pcensor,
                 args.rho_mins.split("|"),
-                awidth, aheight, fdpi, ncols, excludes,
+                awidth, aheight, fdpi, ncols_years, excludes,
                 args.copula_shapes.split("|"),
                 args.debug, False,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
                 load_postpred_checks, years,
-                excludes, river_color)
+                excludes, river_color, aep_max)
 
     # Baseline
     source_file = Path(__file__).resolve()
