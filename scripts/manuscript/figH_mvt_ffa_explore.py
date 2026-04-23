@@ -189,27 +189,30 @@ def process(config, script_paths, logger, data):
                         color = config.col_aep100
 
                     # Plot MAEP solution set
-                    npoints = 200
+                    npoints = 1000
                     df, _ = mex.marginal_exceedance_set(maep, npoints=npoints)
                     x = gevs[0].ppf(df.u)
                     y = gevs[1].ppf(df.v)
-                    label = f"Solution\nset 1:{1./maep:0.0f}"
+                    label = f"Solution\nset AEP=1:{1./maep:0.0f}"
                     ax.plot(x, y, "-", lw=3, color=color,
                             label=label)
 
                     line = LineString([(xx, yy) for xx, yy in zip(x, y)])
                     pol = Polygon([(x0, y0), (x0, y1), (x1, y1),
                                    (x1, y0), (x0, y0)])
-                    pol = shapely.difference(pol, line.buffer(1))
+                    pol = shapely.difference(pol, line.buffer(10.))
                     topright = Point(x1 - 5, y1 - 5)
-                    pol = next(p for p in pol.geoms if p.contains(topright))
+                    try:
+                        pol = next(p for p in pol.geoms if p.contains(topright))
+                    except AttributeError:
+                        pass
                     xy = np.array(pol.exterior.xy)[:2].T
                     pp = MPLPolygon(xy, closed=True,
                                     hatch="//", ec=color, fc="none",
                                     alpha=0.2)
                     ax.add_patch(pp)
 
-                    txt = f"AEP < 1:{1./maep:0.0f}"
+                    txt = f"AEP<1:{1./maep:0.0f}"
                     mex0, _ = mex.common_marginal_exceedance_score(maep)
                     x_mex = gevs[0].ppf(mex0)
                     y_mex = gevs[1].ppf(mex0)
@@ -229,7 +232,11 @@ def process(config, script_paths, logger, data):
                     ax.plot([x_mex]*2, [y0, y_mex], "--", lw=0.9, color=color)
                     ax.plot([x0, x_mex], [y_mex] * 2, "--", lw=0.9, color=color)
                     txt = f"1:{1. / (1 - mex0):0.0f}"
-                    ax.annotate(txt, xy=(x_mex, y0), xytext=(7, 15),
+
+                    xt = x_mex
+                    yt = y0**0.95 * y_mex**0.05
+                    ax.annotate(txt, xy=(xt, yt), xytext=(-20, 5),
+                                va="bottom", ha="right",
                                 textcoords="offset pixels",
                                 color=color, fontweight="bold",
                                 path_effects=[pe.withStroke(linewidth=7,
@@ -288,7 +295,7 @@ def process(config, script_paths, logger, data):
                 tk = [1./a for a in aep]
 
                 if kind == "AND":
-                    ax.legend(loc=2, ncol=2)
+                    #ax.legend(loc=2, ncol=2)
                     ylabel = f"CMEXT exceedance probability [-]"
                     tkl = [f"1:{a}" for a in aep]
                 else:
@@ -296,7 +303,7 @@ def process(config, script_paths, logger, data):
                     tkl = []
 
                 x0, x1 = 1. / 2000, 1.
-                title = f"({letters[iax]}) CMEXT marginal probability\n"\
+                title = f"({letters[iax]}) CMEXT marginal probability - 1:100 AEP\n"\
                         + f"'{kind}' exceedance"
                 ax.set(ylim=(x0, x1), ylabel=ylabel,
                        yscale="log",

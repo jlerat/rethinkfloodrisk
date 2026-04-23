@@ -63,7 +63,44 @@ def process(config, script_paths, logger, data):
         logger.info(f"-- Plotting {rn.text} --", nret=1)
 
         postpred = postpred[rn]
-        obs_data = obs_data[rn]
+        obs_data = obs_data[rn].set_index("WATER_YEAR")
+
+        stationids = obs_data.columns
+        univ = postpred["univ"]
+        mname = "lskewness2"
+        stats = pd.DataFrame(np.nan, index=stationids,
+                             columns=["ams_min", "ams_max",
+                                      "lh_skew_obs", "lh_skew_sim",
+                                      "lh_skew_pval"])
+
+        idx = univ.VARIABLE == mname
+        for ista, stationid in enumerate(stationids):
+            istap = ista + 1
+
+            stats.loc[stationid, "ams_min"] = int(obs_data.loc[:, stationid].min())
+            stats.loc[stationid, "ams_max"] = int(obs_data.loc[:, stationid].max())
+
+            stats.loc[stationid, "lh_skew_obs"] = \
+                univ.loc[idx, f"obs[{istap}]"].values
+
+            stats.loc[stationid, "lh_skew_sim"] = \
+                univ.loc[idx, f"simmean[{istap}]"].values
+
+            stats.loc[stationid, "lh_skew_pval"] = \
+                univ.loc[idx, f"pvalue[{istap}]"].values
+
+        for cn in ["ams_min", "ams_max"]:
+            stats.loc[:, cn] = stats.loc[:, cn].apply(lambda x: f"{int(x):,d}")
+
+        basename = script_paths.basename
+        fs = f"{basename}_{rn.text}_v{config.version}_{mname}.csv"
+        fs = script_paths.fimg / fs
+        stats = stats.round(2)
+        csv.write_csv(stats, fs,
+                      f"Statistics {mname} for posterior",
+                      source_file, compress=False,
+                      write_index=True,
+                      lineterminator="\n")
 
         # Generic postpredictive checks
         stationids = [cn for cn in obs_data.columns if not cn.startswith("WATER")]
@@ -102,45 +139,6 @@ def process(config, script_paths, logger, data):
 
                 df.squeeze().plot(ax=ax, kind="barh")
 
-            #elif ppt == "biv":
-            #    df = df.loc[df.VARIABLE == varname]
-            #    obj = putils.ecdfplot(ax, df.T)
-            #    obj = obj[df.index[0]]
-
-            #    ax.legend(loc=2, fontsize="small",
-            #              framealpha=0.)
-
-            #    idx = obj["index"]
-            #    x = obj["values"]
-            #    y = obj["position"]
-            #    out = {
-            #        "low": x < 0.05,
-            #        "high": x > 0.95
-            #        }
-
-            #    for name, ipb in out.items():
-            #        npb = ipb.sum()
-            #        if npb == 0:
-            #            continue
-
-            #        xpb, ypb, idxp = x[ipb], y[ipb], idx[ipb]
-            #        col = "tab:red"
-            #        for cnt, (xx, yy, ii) in enumerate(zip(xpb, ypb, idxp)):
-            #            ax.plot(xx, yy, "o", color=col)
-            #            i1 = int(re.sub(".*\\[|,.*", "", ii)) - 1
-            #            sta1 = stationids[i1]
-            #            i2 = int(re.sub(".*,|\\].*", "", ii)) - 1
-            #            sta2 = stationids[i2]
-            #            txt = f"{sta1}\n{sta2}"
-
-            #            xt = 0.2 if name == "low" else 0.8
-            #            ha = "left" if name == "low" else "right"
-            #            yt = np.linspace(0, 1,  2 * npb)[1 + cnt]
-            #            ax.annotate(txt, xy=(xx, yy),
-            #                        xytext=(xt, yt),
-            #                        textcoords="axes fraction",
-            #                        va="bottom", ha=ha,
-            #                        arrowprops=arrowprops)
             else:
                 idx = df.VARIABLE.str.startswith(varname + "_")
                 q = df.VARIABLE.loc[idx].str.replace(varname + "_q", "")

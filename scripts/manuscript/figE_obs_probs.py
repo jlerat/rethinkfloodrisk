@@ -103,32 +103,42 @@ def process(config, script_paths, logger, data):
         nstations = len(stationids)
 
         mvnproc = mvnproc[rn]
-        expected = expected[rn]
+        #expected = expected[rn]
 
-        # Dependence
-        cop = mes.GaussianCopula(nstations)
-        cor = pd.Series(expected["corr_IW"]).values.reshape((nstations, nstations))
-        cop.params = cor
-        cop.logger = logger
+        ## Dependence
+        #cop = mes.GaussianCopula(nstations)
+        #cor = pd.Series(expected["corr_IW"]).values.reshape((nstations, nstations))
+        #cop.params = cor
+        #cop.logger = logger
 
-        # Historical grid
-        # nstations + multivar
+        ## Historical grid
+        ## nstations + multivar
+        #nval = len(ams)
+        #marg_cdf = np.nan * np.zeros((nval, nstations))
+        #aep = np.zeros(nval)
+        #gev = marginals.GEV()
+
+        #for k in range(nstations):
+        #    gev.locn = expected["ylocs"][f"ylocn[{k + 1}]"]
+        #    gev.logscale = expected["ylogscales"][f"ylogscale[{k + 1}]"]
+        #    gev.shape1 = expected["yshape1"][f"yshape1[{k + 1}]"]
+        #    marg_cdf[:, k] = gev.cdf(ams.iloc[:, k])
+
+        #aeps = np.nan * np.zeros((nval, nstations + 2))
+        ## .. marginal aeps
+        #aeps[:, :nstations] = (1 - marg_cdf) * 1e2
+        ## .. joint aep
+        #aeps[:, -1] = cop.aep(marg_cdf, "KENDALL") * 1e2
+
         nval = len(ams)
-        marg_cdf = np.nan * np.zeros((nval, nstations))
-        aep = np.zeros(nval)
-        gev = marginals.GEV()
-
-        for k in range(nstations):
-            gev.locn = expected["ylocs"][f"ylocn[{k + 1}]"]
-            gev.logscale = expected["ylogscales"][f"ylogscale[{k + 1}]"]
-            gev.shape1 = expected["yshape1"][f"yshape1[{k + 1}]"]
-            marg_cdf[:, k] = gev.cdf(ams.iloc[:, k])
-
         aeps = np.nan * np.zeros((nval, nstations + 2))
-        # .. marginal aeps
-        aeps[:, :nstations] = (1 - marg_cdf) * 1e2
-        # .. joint aep
-        aeps[:, -1] = cop.aep(marg_cdf, "KENDALL") * 1e2
+        for iyear, year in enumerate(ams.index):
+            for ista, stationid in enumerate(stationids):
+                lp = mvnproc.loc[:, f"G{stationid}_ams_UNIV_{year - 1}_log10aep"]
+                aeps[iyear, ista] = (10**lp).mean() * 1e2
+
+            lp = mvnproc.loc[:, f"GALL_ams_KENDALL_{year - 1}_log10aep"]
+            aeps[iyear, -1] = (10**lp).mean() * 1e2
 
         # Configure
         ncols_years = config.ncols_years
