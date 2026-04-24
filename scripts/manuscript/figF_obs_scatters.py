@@ -88,21 +88,33 @@ def process(config, script_paths, logger, data):
 
             # plot
             ax = axs.flat[iplot]
-            unorm, rho, _, _, _ = putils.bivarnplot(ax, xy, False,
-                                                    mec="w", mfc="0.5",
-                                                    ms=8)
 
-            xx, yy, zz = putils.kde(unorm)
+            lxy = np.log10(xy)
+            ax.plot(lxy[:, 0], lxy[:, 1], "o",
+                    mec="w", mfc="0.5",
+                    ms=8)
+
+            lm0, lm1 = config.lims
+            lxy = np.row_stack([lxy, [[lm0, lm0], [lm1, lm1]]])
+            xx, yy, zz = putils.kde(lxy)
+
             ax.contourf(xx, yy, zz, cmap="Blues")
 
-            ax.set(xlabel="", ylabel="")
-            ax.xaxis.set_major_locator(ticker.MaxNLocator(5))
-            ax.yaxis.set_major_locator(ticker.MaxNLocator(5))
+            ax.set(xlabel="", ylabel="",
+                   xlim=config.lims, ylim=config.lims)
+            tk = [1, 2, 3]
+            tkl = ["$10^1$", "$10^2$", "$10^3$"]
+            stk = [i * 10**j for j in tk for i in range(1, 10)]
+            stk = [math.log10(s) for s in stk if s < 3000]
+            ytkl = [] if iplot % nc != 0 else tkl
+            xtkl = [] if iplot < nc * (nr - 1) else tkl
+            ax.set_xticks(tk, labels=xtkl)
+            ax.set_xticks(stk, minor=True)
+            ax.set_yticks(tk, labels=ytkl)
+            ax.set_yticks(stk, minor=True)
 
-            if iplot % nc != 0:
-                ax.set_yticks([])
-            if iplot < nc * (nr - 1):
-                ax.set_xticks([])
+
+            ax.grid(axis="both", color="0.5", lw=0.5)
 
             title = f"({iplot + 1}) {sidx} vs\n{sidy}"
             ax.set_title(title, x=0.02, y=0.96,
@@ -112,12 +124,9 @@ def process(config, script_paths, logger, data):
         for i in [-1]:
             axs.flat[i].axis("off")
 
-        lab = "Standard Normal Score [-]"
+        lab = r"Annual streamflow maximum [$m^3.s^{-1}$]"
         fig.supxlabel(lab, fontsize=25)
         fig.supylabel(lab, fontsize=25)
-
-        fig.suptitle("(b) Normal scores plots of streamflow annual maxima\n",
-                     fontsize=30)
 
         basename = script_paths.basename
         fp = f"{basename}_v{config.version}.png"
@@ -146,9 +155,9 @@ if __name__ == "__main__":
                                "load_mvnproc",
                                "load_expected_params",
                                "load_postpred_checks",
-                               "exclude"])
-    awidth = 5
-    aheight = 4
+                               "exclude", "lims"])
+    awidth = 4
+    aheight = 3
     fdpi = 300
     ncols = 4
     excludes = ["NONE"]
@@ -158,6 +167,7 @@ if __name__ == "__main__":
     load_expected_params = False
     load_postpred_checks = False
     exclude = "NONE"
+    lims = [math.log10(10), math.log10(3e3)]
 
     pcensor = 0.3
     rho_mins = "-1"
@@ -172,7 +182,7 @@ if __name__ == "__main__":
                 diag, args.debug,
                 load_obs_data, load_ffa,
                 load_mvnproc, load_expected_params,
-                load_postpred_checks, exclude)
+                load_postpred_checks, exclude, lims)
 
     # Baseline
     source_file = Path(__file__).resolve()

@@ -36,6 +36,7 @@ from hydrodiy.plot import putils
 
 from pyrethink import datahub
 from pyrethink import sample
+from pyrethink import postpredchecks as ppc
 
 from floodstan import marginals
 
@@ -47,6 +48,7 @@ from figA_impact_of_period_on_FFA import get_script_paths
 from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
 from figA_impact_of_period_on_FFA import get_iter_options, select_data
 
+importlib.reload(ppc)
 
 def process(config, script_paths, logger, data):
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
@@ -67,30 +69,38 @@ def process(config, script_paths, logger, data):
 
         stationids = obs_data.columns
         univ = postpred["univ"]
-        mname = "lskewness2"
-        stats = pd.DataFrame(np.nan, index=stationids,
+        multi = postpred["multi"]
+
+        stats = pd.DataFrame("", index=stationids,
                              columns=["ams_min", "ams_max",
                                       "lh_skew_obs", "lh_skew_sim",
-                                      "lh_skew_pval"])
+                                      "tau_q80_obs", "tau_q80_sim"])
 
+        s = stationids[len(stationids) // 2]
+        idx = multi.VARIABLE == "tau_q80"
+        x = multi.loc[idx, f"obs"].squeeze()
+        stats.loc[s, "tau_q80_obs"] = f"{x:0.2f}"
+        x = multi.loc[idx, "simmean"].squeeze()
+        xs = multi.loc[idx, "simstd"].squeeze()
+        stats.loc[s, "tau_q80_sim"] = f"{x:0.2f} ±{xs:0.2f}"
+
+        mname = "lskewness2"
         idx = univ.VARIABLE == mname
         for ista, stationid in enumerate(stationids):
             istap = ista + 1
 
-            stats.loc[stationid, "ams_min"] = int(obs_data.loc[:, stationid].min())
-            stats.loc[stationid, "ams_max"] = int(obs_data.loc[:, stationid].max())
+            x = obs_data.loc[:, stationid].min()
+            stats.loc[stationid, "ams_min"] = f"{int(x):,d}"
 
-            stats.loc[stationid, "lh_skew_obs"] = \
-                univ.loc[idx, f"obs[{istap}]"].values
+            x = obs_data.loc[:, stationid].max()
+            stats.loc[stationid, "ams_max"] = f"{int(x):,d}"
 
-            stats.loc[stationid, "lh_skew_sim"] = \
-                univ.loc[idx, f"simmean[{istap}]"].values
+            x = univ.loc[idx, f"obs[{istap}]"].squeeze()
+            stats.loc[stationid, "lh_skew_obs"] = f"{x:0.2f}"
 
-            stats.loc[stationid, "lh_skew_pval"] = \
-                univ.loc[idx, f"pvalue[{istap}]"].values
-
-        for cn in ["ams_min", "ams_max"]:
-            stats.loc[:, cn] = stats.loc[:, cn].apply(lambda x: f"{int(x):,d}")
+            x = univ.loc[idx, f"simmean[{istap}]"].squeeze()
+            xs = univ.loc[idx, f"simstd[{istap}]"].squeeze()
+            stats.loc[stationid, "lh_skew_sim"] = f"{x:0.2f} ±{xs:0.2f}"
 
         basename = script_paths.basename
         fs = f"{basename}_{rn.text}_v{config.version}_{mname}.csv"
