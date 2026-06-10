@@ -1,5 +1,3 @@
-from itertools import combinations
-
 import numpy as np
 
 from floodstan.data_processing import univariate2cases

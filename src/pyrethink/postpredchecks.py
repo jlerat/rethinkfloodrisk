@@ -8,7 +8,7 @@ from scipy.interpolate import RBFInterpolator
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
-from pyrethink.copulas import Copula
+from pyrethink.copulas import copula_factory
 
 
 PERC_TAILS_DEFAULT = np.arange(50, 95, 5)
@@ -176,7 +176,7 @@ def posterior_predictive_checks(yobs, params,
     nsamples = len(params)
 
     # copula sampling tools
-    cop = copula_factory(copula_name, nstations, df=df)
+    cop = copula_factory(copula_name, nsta, df=df)
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
