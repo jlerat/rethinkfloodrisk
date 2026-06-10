@@ -624,7 +624,7 @@ class MarginalExceedanceScore():
         self._u_vect = np.ones((1, copula.nstations))
 
     def objective_function(self, u, lmaep):
-        c = self.copula.aep(u, self.kind)
+        c = self.copula.aep(u, self.mex_kind).squeeze()
         if c == 0:
             return np.inf
         err = (math.log(c) - lmaep)**2
@@ -638,7 +638,7 @@ class MarginalExceedanceScore():
     def common_marginal_exceedance_score_bounds(self, maep):
         nsta = self.copula.nstations
 
-        match self.kind:
+        match self.mex_kind:
             case "AND":
                 ua = 1 - maep ** (1. / nsta)
                 ub = 1 - maep
@@ -740,7 +740,7 @@ class MarginalExceedanceScoreEmpirical(MarginalExceedanceScore):
         u_smp = self.samples
         n_smp = len(u_smp)
 
-        match self.kind:
+        match self.mex_kind:
             case "AND":
                 c = np.all(u_smp > u, axis=1).sum() / n_smp
             case "OR":
