@@ -6,7 +6,6 @@ from floodstan.data_processing import univariate2cases
 from floodstan.marginals import GEV
 
 from pyrethink import copulas
-from pyrethink.partitions import Partitions
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.
@@ -18,16 +17,16 @@ DELTA_DAYS_MAX_DEFAULT = 10
 
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year,
-                 copula_type,
+                 copula_id,
                  copula_shape,
                  censors=None,
-                 skip_clusters=False,
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
         # Check data
-        copulas.check_copula(copula_type, copula_shape)
+        nstations = data.shape[1]
+        self.copula = copulas.copula_factory(copula_id, nstations, copula_shape)
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -37,15 +36,13 @@ class StanSamplingMultivariate():
             errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
             raise ValueError(errmsg)
 
-        self.copula_type = int(copula_type)
+        self.copula_id = int(copula_id)
         self.copula_shape = float(copula_shape)
         self.rho_min = float(rho_min)
         self.rho_max = float(rho_max)
 
         self.set_data(data, day_of_year, censors)
-
         self.delta_days_max = delta_days_max
-        self.set_clusters(skip_clusters)
         self.set_initial_parameters()
 
     @property
@@ -98,66 +95,6 @@ class StanSamplingMultivariate():
         self.idx_cens = np.array(np.where(cases == 2)).T + 1
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
-    def set_clusters(self, skip_clusters):
-        dmax = self.delta_days_max
-        N, P = self.data.shape
-
-        clusters = np.zeros((N, P, P), dtype=int)
-        miss = np.zeros(N, dtype=int)
-        counts = np.zeros(N, dtype=int)
-        partitions_id = np.zeros(N, dtype=int)
-        insame = np.zeros((N, P * (P - 1) // 2), dtype=int)
-        day_of_year = self.day_of_year
-
-        parts = Partitions(P)
-        parts_psc = parts.pair_in_same_cluster
-
-        for i in range(N):
-            doy = day_of_year[i]
-            is_valid = np.where(doy >= 0)[0]
-            clusters[i, :, doy < 0] = -1
-
-            doy = doy[is_valid]
-            if len(doy) == 1:
-                clusters[i, 0, is_valid] = 1
-            else:
-                if skip_clusters:
-                    clust = np.zeros(len(doy), dtype=int)
-                else:
-                    rk = np.argsort(np.argsort(doy))
-                    doys = np.sort(doy)
-                    clust = np.cumsum(np.insert(np.diff(doys), 0, 0) > dmax)
-                    clust = clust[rk]
-
-                for icl, cl in enumerate(np.unique(clust)):
-                    isin = is_valid[cl == clust]
-                    clusters[i, icl, isin] = 1
-
-            # count missing events
-            miss[i] = P - len(is_valid)
-
-            cl = clusters[i]
-            counts[i] = np.any(cl[:, is_valid] > 0, axis=1).sum()
-
-            # check if pairs are in the same cluster
-            ins = [[int(comb[a]*comb[b] and comb[a] >= 0 and comb[b] >= 0)
-                    for ic, (a, b) in enumerate(combinations(range(P), 2))]
-                   for comb in cl]
-            insame[i] = (np.sum(ins, axis=0) > 0).astype(int)
-
-            if miss[i] == 0:
-                delta = parts_psc - insame[[i]]
-                pid = np.where(np.abs(delta).sum(axis=1) == 0)[0][0]
-            else:
-                pid = -1
-            partitions_id[i] = pid
-
-        self.clusters = clusters
-        self.clusters_counts = counts
-        self.clusters_missing = miss
-        self.pair_in_same_cluster = insame
-        self.partitions_id = partitions_id
-
     def set_initial_parameters(self):
         # GEV parameters and priors
         P = self.data.shape[1]
@@ -203,10 +140,7 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
-            "clusters": self.clusters.astype(int),
-            "clusters_counts": self.clusters_counts.astype(int),
-            "partitions_id": self.partitions_id,
-            "copula_type": int(self.copula_type),
+            "copula_id": int(self.copula_id),
             "copula_shape": float(self.copula_shape),
             "ylocn_prior": MARGINAL.locn_prior.to_list(),
             "ylogscale_prior": MARGINAL.logscale_prior.to_list(),

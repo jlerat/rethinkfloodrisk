@@ -165,9 +165,8 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 
 def posterior_predictive_checks(yobs, params,
-                                copula_type,
-                                copula_shape,
-                                dirichlet_alpha,
+                                copula_name,
+                                df=4.,
                                 logger=None,
                                 iterlog=500):
     yobs = np.array(yobs)
@@ -177,7 +176,7 @@ def posterior_predictive_checks(yobs, params,
     nsamples = len(params)
 
     # copula sampling tools
-    cop = Copula(copula_type, copula_shape, nsta)
+    cop = copula_factory(copula_name, nstations, df=df)
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)

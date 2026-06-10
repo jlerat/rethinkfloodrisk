@@ -10,12 +10,9 @@ from scipy.stats import multivariate_normal as mvn
 from scipy.stats import t as student_t
 
 from pyrethink import datahub
-from pyrethink.partitions import Partitions
 from pyrethink import postpredchecks as ppc
 
 from floodstan.marginals import GEV
-
-from test_copulas import get_type
 
 FTESTS = Path(__file__).resolve().parent
 
@@ -164,9 +161,6 @@ def test_bivariate_statistics(repeat, rho, allclose):
 def test_posterior_predictive_checks(copula_shape):
     copula_type = get_type(copula_shape)
 
-    parts = Partitions(DATA.shape[1])
-    parts_id = np.random.randint(0, parts.nsubsets,
-                                 len(DATA))
     dalpha = 1.
 
     with pytest.raises(ValueError, match="Expected 'copula_shape' in"):
@@ -176,7 +170,6 @@ def test_posterior_predictive_checks(copula_shape):
     ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
                                                           copula_type,
                                                           copula_shape,
-                                                          parts_id,
                                                           dalpha)
     assert ppu.shape == (9, 21)
     assert ppb.shape == (32, 21)

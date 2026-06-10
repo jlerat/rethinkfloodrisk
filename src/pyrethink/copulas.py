@@ -14,9 +14,9 @@ from scipy.optimize import minimize_scalar
 
 from hydrodiy.stat import sutils
 
-COPULA_NAMES = ["Independence", "Comonotone",
-           "Gaussian", "GaussianOneFactor",
-           "Gumbel", "Student"]
+COPULA_NAMES = ["Gaussian", "Student",
+                "GaussianOneFactor", "Independence",
+                "Comonotone", "Gumbel"]
 
 SYMETRICAL_COPULAS = ["Independence", "Comonotone",
                       "Gaussian", "GaussianOneFactor",
@@ -54,22 +54,12 @@ def random_correlation_matrix(nstations, corr0=None, corr1=None):
         return corr0 + (corr1 - corr0) * (corr + 1.) / 2
 
 
-def check_copula_name(copula_name, copula_shape=0):
+def check_copula_name(copula_name):
     if copula_name not in COPULA_NAMES:
         txt = "/".join(COPULA_NAMES)
         errmsg = f"Expected 'copula_name' in {txt}, got {copula_name}."
         raise ValueError(errmsg)
-
-    if copula_shape > 0:
-        mini = STUDENT_DF_MIN
-        maxi = STUDENT_DF_MAX
-        if copula_shape < mini or copula_shape > maxi:
-            errmsg = f"Expected 'copula_shape' in [{mini}, {maxi}]."
-            raise ValueError(errmsg)
-
-    elif copula_shape < 0:
-        errmsg = "Expected 'copula_shape' >= 0."
-        raise ValueError(errmsg)
+    return COPULA_NAMES.index(copula_name)
 
 
 def check_aep(aep):
@@ -127,8 +117,10 @@ def to2d(x, nstations):
     return x
 
 
-def copula_factory(name, nstations, df=4.):
-    check_copula_name(name, df)
+def copula_factory(name, nstations, copula_shape=4.):
+    # Copula id supplied
+    if isinstance(name, int):
+        name = COPULA_NAMES[name]
 
     if name == "Independence":
         return IndependenceCopula(nstations)
@@ -137,7 +129,7 @@ def copula_factory(name, nstations, df=4.):
     elif name == "Gaussian":
         return GaussianCopula(nstations)
     elif name == "Student":
-        return StudentCopula(nstations, df)
+        return StudentCopula(nstations, copula_shape)
     elif name == "GaussianOneFactor":
         return GaussianOneFactorCopula(nstations)
     elif name == "Gumbel":
@@ -146,6 +138,7 @@ def copula_factory(name, nstations, df=4.):
 
 class Copula():
     def __init__(self, name, nstations):
+        self.copula_id = check_copula_name(name)
         self.name = name
         self.symetrical = name in SYMETRICAL_COPULAS
         self.nstations = nstations

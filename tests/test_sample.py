@@ -31,8 +31,6 @@ from pyrethink import sample
 from pyrethink import datahub
 from pyrethink import mv_censored_no_missing_sampling
 
-from test_copulas import get_type
-
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
@@ -69,32 +67,16 @@ def test_sample_data(pcensor, no_missing, allclose):
 
     data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
-    copula_type = 1
+    copula_id = 1
     copula_shape = 2.5
 
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type=copula_type,
+                                         copula_id=copula_id,
                                          copula_shape=copula_shape,
                                          censors=censors)
 
-    pisc = sv.pair_in_same_cluster
-    miss = sv.clusters_missing
-    s = pisc.sum(axis=1)
-    P = sv.data.shape[1]
-    s0 = (P * (P - 1) // 2) / 3
-    s1 = 2 * s0
-    for idx in np.where((miss == 0) & (s >= s0) & (s <= s1))[0]:
-        cl = sv.clusters[idx]
-        pi = pisc[idx]
-        M = np.zeros((P, P))
-        M[np.triu_indices(P, 1)] = pi
-        for i, j in combinations(range(P), 2):
-            same = M[i, j] == 1
-            expected = np.prod(cl[:, [i, j]], axis=1).sum() > 0
-            assert same == expected
-
     stan_data = sv.to_dict()
-    assert len(stan_data) == 26
+    assert len(stan_data) == 23
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -102,12 +84,6 @@ def test_sample_data(pcensor, no_missing, allclose):
                         columns=data.columns)
     assert data.shape == (N, P)
     assert data.notnull().any(axis=1).all()
-
-    clust = stan_data["clusters"]
-    assert clust.shape == (N, P, P)
-
-    pid = stan_data["partitions_id"]
-    assert pid.shape == (N, )
 
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
@@ -129,17 +105,17 @@ def test_sample_data(pcensor, no_missing, allclose):
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
         sv = sample.StanSamplingMultivariate(data, dows,
-                                             copula_type,
+                                             copula_id,
                                              copula_shape)
 
 
 def test_inits(allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    copula_type = 0.
+    copula_id = 0.
     copula_shape = 0.
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type,
+                                         copula_id,
                                          copula_shape,
                                          censors=censors)
     inits = sv.initial_parameters
@@ -161,9 +137,9 @@ def test_sampler(config, nvars, copula_shape, allclose):
     else:
         censors = np.zeros(data.shape[1])
 
-    copula_type = get_type(copula_shape)
+    copula_id = 1 if copula_shape > 0 else 0
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type,
+                                         copula_id,
                                          copula_shape,
                                          censors=censors)
     stan_data = sv.to_dict()
@@ -201,7 +177,7 @@ def test_sampler(config, nvars, copula_shape, allclose):
     kw["data"]["Ncens"] -= 1
 
     # Test copula shape error
-    if copula_type == 1:
+    if copula_id == 1:
         kw["data"]["copula_shape"] = 1.9
         with pytest.raises(RuntimeError):
             mv_censored_no_missing_sampling(**kw)
@@ -285,7 +261,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     rho_max = 1.
     sv = sample.StanSamplingMultivariate(data,
                                          dows,
-                                         copula_type=0.,
+                                         copula_id=0.,
                                          copula_shape=0,
                                          censors=censors,
                                          skip_clusters=True,
