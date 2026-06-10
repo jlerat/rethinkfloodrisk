@@ -2,8 +2,6 @@ from pathlib import Path
 
 from floodstan import load_stan_model
 
-__version__ = "0.1"
-
 STAN_FILES_FOLDER = Path(__file__).parent / "stan"
 
 # Tests

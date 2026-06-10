@@ -1,249 +1,237 @@
-import re
-import json
 from pathlib import Path
-from itertools import combinations
 import math
-import warnings
+import numpy as np
+
+from scipy.stats import kstest
+from scipy.stats import norm
+from scipy.stats import multivariate_normal as mvt
+from scipy.stats import gamma
+from scipy.special import gamma as gamma_fun
+from scipy.special import expit
 
 import pytest
 
-import numpy as np
-import pandas as pd
-from scipy.linalg import toeplitz
+from hydrodiy.io import iutils
+from hydrodiy.stat import sutils
 
-from scipy.stats import norm
-from scipy.stats import multivariate_normal as mvn
-
-from scipy.stats import t as student_t
-from scipy.stats import multivariate_t as mvt
-
-from scipy.stats import invwishart
-from scipy.stats import ttest_ind, ks_2samp
-from scipy.stats import kstest
-import matplotlib.pyplot as plt
-
-from floodstan import report
-from floodstan import sample as fsample
-from floodstan import marginals
-from floodstan import bivariate_censored_sampling
-
-from pyrethink import datahub
-from pyrethink import copulas
-
-FTESTS = Path(__file__).resolve().parent
-
-def get_type(copula_shape):
-    return 0 if abs(copula_shape) < 1e-10 else 1
-
-@pytest.mark.parametrize("copula_shape", [0., 3., 6., 10.])
-def test_copula_marginals(copula_shape, allclose):
-    copula_type = get_type(copula_shape)
-
-    n = 10000
-    u1 = np.linspace(1./n, 1 - 1./n, n)
-    z1 = copulas.copula_marginal_ppf(copula_type, copula_shape, u1)
-
-    u2 = copulas.copula_marginal_cdf(copula_type, copula_shape, z1)
-    assert allclose(u1, u2)
-
-    z2 = copulas.copula_marginal_ppf(copula_type, copula_shape, u2)
-    assert allclose(z1, z2)
-
-    n = 1000000
-    u = np.random.uniform(size=n)
-    z = copulas.copula_marginal_ppf(copula_type, copula_shape, u)
-    assert allclose(z.mean(), 0, atol=5e-3)
-    assert allclose(z.std(), 1, atol=5e-2)
+from pyrethink import marginal_exceedance_score as mes
 
 
-@pytest.mark.parametrize("repeat", range(10))
-def test_cov2corr(repeat, allclose):
-    nsta = 6
-    cov = invwishart.rvs(df=nsta+1, scale=np.eye(nsta))
-    corr = copulas.cov2corr(cov)
-    d = np.diag(1./np.sqrt(np.diag(cov)))
-    assert allclose(corr, d @ cov @ d)
+LOGGER = iutils.get_logger("test")
 
 
-@pytest.mark.parametrize("repeat", range(10))
-def test_random_corr(repeat, allclose):
-    nsta = 6
-    z1 = []
+@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("name", mes.COPULAS)
+def test_copulas(name, nstations, allclose):
+    if name == "Gumbel":
+        pytest.skip("Gumbel not ready yet.")
 
-    z2 = []
-    rho0, rho1 = 0.2, 0.8
-    c0 = copulas.corr_ref(nsta, rho0)
-    c1 = copulas.corr_ref(nsta, rho1)
+    cop = mes.copula_factory(name, nstations)
 
-    nrepeat = 100
-    for i in range(nrepeat):
-        idx = np.triu_indices(nsta, 1)
-        x = copulas.random_corr(nsta)[idx]
-        z1.append(x)
+    rho = 0.8
+    if name == "Gaussian":
+        cop.params = (1 - rho) * np.eye(nstations) \
+                     + rho * np.ones((nstations, nstations))
+    else:
+        cop.params = rho
 
-        x = copulas.random_corr(nsta, c0, c1)[idx]
-        z2.append(x)
+    smp = cop.sample(100)
+    assert len(smp) == 100
+    assert np.all(np.isfinite(smp))
 
-    z1 = (np.array(z1) + 1) / 2
-    pv1 = np.array([kstest(zi, "uniform").pvalue for zi in z1.T])
-    assert np.percentile(pv1, 10) > 1e-3
+    pdf = cop.pdf(smp)
+    assert len(pdf) == 100
+    assert np.all(np.isfinite(pdf))
 
-    z2 = (np.array(z2) - rho0) / (rho1 - rho0)
-    pv2 = np.array([kstest(zi, "uniform").pvalue for zi in z2.T])
-    assert np.percentile(pv2, 10) > 1e-3
+    cdf = cop.cdf(smp)
+    assert len(cdf) == 100
+    assert np.all(np.isfinite(cdf))
 
+    surv = cop.survival(smp)
+    assert len(surv) == 100
+    assert np.all(np.isfinite(surv))
 
-@pytest.mark.parametrize("copula_shape", [0., 3., 4.])
-def test_conditional_sample(copula_shape, allclose):
-    copula_type = get_type(copula_shape)
-    nsta = 4
-    ccs = copulas.Copula(copula_type, copula_shape, nsta)
+    for kind in mes.MARGINAL_EXCEEDANCE_SCORE_KINDS:
+        aep = cop.aep(smp, kind)
 
-    rho0, rho1 = 0.8, 0.99
-    c0 = copulas.corr_ref(nsta, rho0)
-    c1 = copulas.corr_ref(nsta, rho1)
-    ccs.corr = copulas.random_corr(nsta, c0, c1)
+        assert len(aep) == 100
 
-    icond = np.array([0])
-    itarget = np.array([1, 2, 3])
-
-    ucond = np.array([0.6])
-
-    zcond = copulas.copula_marginal_ppf(copula_type, copula_shape, ucond)
-    nrepeat = 5000
-
-    atol_mean = 5./math.sqrt(nrepeat)
-    atol_cov = 10./math.sqrt(nrepeat)
-
-    # Check conditional on full cluster
-    z = np.array([ccs.conditional_sample_given_partition(0, icond, zcond, itarget)
-                  for i in range(nrepeat)])
-
-    zz_cond = np.empty(z.shape)
-    zz_target = np.empty(z.shape[0])
-    iok = np.zeros(nrepeat)
-    nok, niter = 0, 0
-
-    while nok < nrepeat:
-        to_sample = np.where(iok == 0)[0]
-        n_to_sample = len(to_sample)
-        if copula_type == 0:
-            zz = mvn.rvs(mean=np.zeros(nsta), cov=ccs.corr_rescaled,
-                         size=10 * n_to_sample)
-        else:
-            zz = mvt.rvs(loc=np.zeros(nsta), shape=ccs.corr_rescaled,
-                         df=copula_shape,
-                         size=10 * n_to_sample)
-        iclose = np.abs(zz[:, icond[0]] - zcond[0]) < 1e-3
-        tmp = zz[iclose]
-        tmp = tmp[:min(len(tmp), n_to_sample)]
-
-        ok = to_sample[:len(tmp)]
-        zz_cond[ok] = tmp[:, itarget]
-        zz_target[ok] = tmp[:, icond[0]]
-        iok[ok] = 1
-        nok = (iok == 1).sum()
-        niter += 1
-
-    cov = np.cov(z.T)
-    expected = np.cov(zz_cond.T)
-    assert np.allclose(cov, expected, atol=3e-2)
-
-    # Check independence of clusters
-    for ipart in range(ccs.partitions.nsubsets):
-        z = [ccs.conditional_sample_given_partition(ipart, icond, zcond, itarget)
-             for i in range(nrepeat)]
-        z = np.array(z)
-
-        sets = ccs.partitions.ipart2sets(ipart)
-        sets_cond = sets[icond]
-        sets_target = sets[itarget]
-
-        # If samples are in different sets, the mean should be 0
-        # and covariance should equal to the corresponding elements in corr
-        # (i.e. indepent from zcond)
-        idiff = sets_target != sets_cond
-        if idiff.sum() > 0:
-            zm = z[:, idiff].mean()
-            assert allclose(zm, 0., atol=atol_mean)
-
-            # WATCH OUT ! THIS IS WEIRD
-            #zc = np.cov(z[:, idiff].T)
-            zc = np.corrcoef(z[:, idiff].T)
-
-            ii = itarget[idiff]
-            expected = ccs.corr[ii][:, ii]
-            assert allclose(zc, expected, atol=atol_cov)
+        if kind == "KENDALL":
+            # The aep computed from kendall should be uniform
+            st, pv = kstest(aep, "uniform")
+            assert pv > 1e-2
 
 
-@pytest.mark.parametrize("copula_shape", [0., 4.])
-def test_copula_sample(copula_shape, allclose):
-    copula_type = get_type(copula_shape)
-    nsta = 4
-    ccs = copulas.Copula(copula_type, copula_shape, nsta)
-    ccs.corr = copulas.random_corr(nsta)
-    nsamples = 500000
+@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.98])
+@pytest.mark.parametrize("napprox", [0, 100, 500])
+def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
+    mean = np.zeros(nstations)
+    cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
 
-    # Sample given ipart
-    for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_partition(ipart, nsamples)
+    if napprox == 0:
+        cop = mes.GaussianCopula(nstations)
+        cop.params = cov
+    else:
+        cop = mes.GaussianOneFactorCopula(nstations)
+        cop.params = rho
+        cop.set_approx(napprox)
 
-        zm = z.mean(axis=0)
-        assert allclose(zm, 0, atol=1e-2)
-        zs = z.std(axis=0)
-        assert allclose(zs, 1, atol=1e-1)
+    rv = mvt(mean=mean, cov=cov)
+    u = expit(np.linspace(-10, 10, 50))
+    atol = 5e-3
+    for iu, uu in enumerate(u):
+        c1 = rv.cdf(norm.ppf(uu) * np.ones((1, nstations)))
+        c2 = cop.cdf_main_diagonal(uu)
+        assert allclose(c1, c2, atol=atol)
 
-        sets = ccs.partitions.ipart2sets(ipart)
-        for iset in np.unique(sets):
-            idx = iset == sets
-            cov = np.cov(z[:, idx].T)
-            expected = ccs.corr[idx][:, idx]
-            assert allclose(cov, expected, atol=5e-2)
+        s1 = rv.cdf(-norm.ppf(uu) * np.ones((1, nstations)))
+        s2 = cop.survival_main_diagonal(uu)
+        assert allclose(s1, s2, atol=atol)
 
-    # Random probs
-    ns = ccs.partitions.nsubsets
-    pp = np.maximum(np.random.uniform(0, 1, size=ns) - 0.2, 0)
-    pp /= pp.sum()
-    pids = np.random.choice(np.arange(ns), p=pp, size=50)
-    probs = ccs.partitions.compute_probabilities(pids, 1)
-
-    # Sample integrating ipart out
-    ns = ccs.partitions.nsubsets
-    ccs.partitions.probabilities = np.random.uniform(0, 1, ns)
-    u, iparts = ccs.sample_u(probs, nsamples)
-
-    pv = np.array([kstest(ui, "uniform").pvalue for ui in u.T])
-    assert np.median(pv) > 1e-2
-
-    pp = pd.Series(iparts).value_counts() / nsamples
-    expected = pd.Series(probs)[pp.index]
-    assert allclose(pp, expected, atol=5e-3)
+        u_vect = uu * np.ones((1, nstations))
+        x = norm.ppf(u_vect)
+        p1 = rv.pdf(x) / np.prod(norm.pdf(x), axis=1)
+        p2 = cop.pdf(u_vect)
+        assert allclose(p1, p2, atol=atol)
 
 
-@pytest.mark.parametrize("copula_shape", [0., 3., 5., 7., 10.])
-@pytest.mark.parametrize("repeat", range(10))
-def test_copula_cdf(repeat, copula_shape, allclose):
-    copula_type = get_type(copula_shape)
-    nsta = 4
-    ccs = copulas.Copula(copula_type, copula_shape, nsta)
-    rho0, rho1 = 0.5, 0.99
-    c0 = copulas.corr_ref(nsta, rho0)
-    c1 = copulas.corr_ref(nsta, rho1)
-    ccs.corr = copulas.random_corr(nsta, c0, c1)
-    nsamples = 500000
+@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
+def test_gaussian_one_factor_sampling(nstations, rho, allclose):
+    mean = np.zeros(nstations)
+    cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
+    rv = mvt(mean=mean, cov=cov)
+    nsamples = 1000000
+    x1 = rv.rvs(size=nsamples)
+    m1 = x1.mean(axis=0)
+    cov1 = np.cov(x1.T)
 
-    z0 = np.random.uniform(-0.5, 0.5, size=nsta)
-    rtol = 5e-2
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+    x2 = norm.ppf(cop.sample(nsamples))
+    m2 = x2.mean(axis=0)
+    cov2 = np.cov(x2.T)
 
-    for ipart in range(ccs.partitions.nsubsets):
-        z = ccs.sample_z_given_partition(ipart, nsamples)
+    assert allclose(m1, m2, atol=1e-2)
+    assert allclose(cov1, cov2, atol=1e-2)
 
-        ce = (z - z0[None, :] < 0).all(axis=1).sum() / nsamples
-        c0 = ccs.cdf_given_partition(ipart, z0)
-        rerr = abs(math.log(ce) - math.log(c0))
-        assert rerr < rtol
 
-        se = (z - z0[None, :] >= 0).all(axis=1).sum() / nsamples
-        s0 = ccs.survival_given_partition(ipart, z0)
-        rerr = abs(math.log(se) - math.log(s0))
-        assert rerr < rtol
+@pytest.mark.parametrize("nstations", [2, 3, 5, 10, 20])
+def test_kendall_function_independence(nstations, allclose):
+    cop = mes.IndependenceCopula(nstations)
+    t = np.linspace(0, 1, 1000)
+    p = cop.kendall_function(t)
+
+    t2 = cop.inverse_kendall_function(p)
+    if nstations < 10:
+        assert allclose(t2, t, atol=2e-3)
+
+    nsamples = 20000
+    u = np.random.uniform(0, 1, size=(nsamples, nstations))
+    ndom = sutils.multivariate_dominance(u)
+    value = np.sort(ndom / nsamples)
+    f = np.linspace(0, 1, nsamples)
+    expected = np.interp(t, value, f)
+    iok = t > 1e-1
+    assert allclose(p[iok], expected[iok], atol=1e-2)
+
+    expected = np.zeros_like(t)
+    nlt = np.log(1./t)
+    for i in range(nstations):
+        expected += nlt**i / math.factorial(i)
+    expected *= t
+    iok = ~np.isnan(expected)
+    assert allclose(p[iok], expected[iok])
+
+    if nstations == 2:
+        # See Joe (2014), page 420
+        expected = t - t * np.log(t)
+        iok = ~np.isnan(expected)
+        assert allclose(p[iok], expected[iok])
+
+
+@pytest.mark.parametrize("nstations", [2, 5, 7])
+@pytest.mark.parametrize("repeat", np.arange(1, 6))
+def test_compute_gaussian_kendall(nstations, repeat, allclose):
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = 1e-4
+    cop.logger = LOGGER
+    cop.printlog = 5000
+
+    if nstations == 2:
+        nkendall = 10000
+    elif nstations >= 5:
+        nkendall = 50000
+
+    pk = cop.compute_kendall_function_data(nkendall)
+
+    # Expected independent
+    copi = mes.IndependenceCopula(nstations)
+    expected = copi.kendall_function(pk.value)
+    err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.p))
+
+    LOGGER.info(f"errmax = {err.max():3.3e}")
+    atol = 2e-2 if nstations <= 5 else 1e-1
+    assert err.max() < atol
+
+
+@pytest.mark.parametrize("kind", ["AND", "OR"])
+@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+def test_compute_analytical_and_empirical_marginal_score(kind, nstations, rho, allclose):
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex1 = mes.MarginalExceedanceScore(kind, cop)
+    mex1.logger = LOGGER
+
+    nsamples = 1000000
+    mex2 = mes.MarginalExceedanceScoreEmpirical(kind, cop,
+                                                nsamples=nsamples)
+    mex2.logger = LOGGER
+
+    maeps = np.logspace(math.log10(1e-2/5), -1, 10)
+    scs = np.zeros((len(maeps), 2))
+    for iaep, maep in enumerate(maeps):
+        scs[iaep, 0], _ = mex1.common_marginal_exceedance_score(maep)
+        scs[iaep, 1], _ = mex2.common_marginal_exceedance_score(maep)
+
+    err = np.abs(np.diff(np.log(scs), axis=1)).squeeze()
+    assert (err > 0).any()  # There must be a little difference
+    assert err.max() < 1e-1  # But it should not be too big (ok, this is quite big)
+
+
+@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+@pytest.mark.parametrize("maep", [0.1, 0.01])
+def test_compute_marginal_score_set(kind, rho, maep, allclose):
+    nstations = 2
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex = mes.MarginalExceedanceScore(kind, cop)
+    df, _ = mex.marginal_exceedance_set(maep)
+
+    check = cop.aep(df.iloc[:, :2], kind)
+    assert allclose(check, maep, atol=5e-2)
+
+
+@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
+@pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
+@pytest.mark.parametrize("maep", [0.1, 0.01])
+def test_compare_set_and_common(kind, rho, maep, allclose):
+    nstations = 2
+    cop = mes.GaussianOneFactorCopula(nstations)
+    cop.params = rho
+
+    mex = mes.MarginalExceedanceScore(kind, cop)
+    mex.logger = LOGGER
+    df, _ = mex.marginal_exceedance_set(maep)
+
+    # Check mex0 is in df
+    mex0, err = mex.common_marginal_exceedance_score(maep)
+    imin = np.abs(df.u - df.v).argmin()
+    expected = df.iloc[imin, :2].mean()
+    assert allclose(mex0, expected, 1e-4)
+
