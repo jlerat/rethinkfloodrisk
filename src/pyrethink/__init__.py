@@ -28,6 +28,3 @@ name = "mv_censored_no_missing_sampling"
 FO = STAN_FILES_FOLDER
 mv_censored_no_missing_sampling = load_stan_model(name, sf_folder=FO)
 
-name = "mv_censored_no_missing_no_clusters_sampling"
-mv_censored_no_missing_no_clusters_sampling = load_stan_model(name,
-                                                              sf_folder=FO)

@@ -10,7 +10,6 @@ functions {
 
     #include marginal.stanfunctions
     #include copula.stanfunctions
-    #include clusters.stanfunctions
 
 }
 
@@ -27,14 +26,9 @@ data {
   int<lower=0> Ncens;
   array[Ncens, 2] int idx_cens;
 
-  // Cluster observed data
-  array[N, P, P] int<lower=0, upper=1> clusters;
-  array[N] int<lower=0, upper=P> clusters_counts;
-
   // Copula model
-  // 0: Gaussian  1: Student
-  int copula_type; 
-  // If student, degrees of freedom
+  // 0 : Gaussian, 1: Student
+  int copula_type;
   real copula_shape; 
 
   // Prior parameters
@@ -75,10 +69,6 @@ transformed data {
   real lam = (rho_max - rho_min) / 2;
   matrix[P, P] Id = identity_matrix(P);
   matrix[P, P] corr0 = (1 - rho_max) * Id + (rho_max + rho_min) / 2 * rep_matrix(1., P, P);
-
-  // Process observed cluster data
-  array[N, P, P + 1] int clusters_indexes = 
-    cluster_data_processing(clusters, clusters_counts);
 }
 
 parameters {
@@ -144,16 +134,14 @@ model {
 
     real obs = y[ival][ivar];
     real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), 
-                                         copula_type,
-                                         copula_shape);
+                                         copula_type, copula_shape);
     z[ival][ivar] = zval;
 
     // log-Jacobian of z = inv_Phi(gev_cdf(obs))
     // dz/dobs = gev_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
-    target += gev_lpdf(obs | tau, alpha, kappa) + copula_marginal_quantile_log_jac(zval, 
-                                                                                   copula_type,
-                                                                                   copula_shape);
+    target += gev_lpdf(obs | tau, alpha, kappa) 
+        + copula_marginal_quantile_log_jac(zval, copula_type, copula_shape);
   }
 
   // Set censored latent variables
@@ -166,27 +154,11 @@ model {
     z[ival][ivar] = zcens;
     
     // log-Jacobian of censored latent variable transform
-    target += log(ucensors[ivar]) + copula_marginal_quantile_log_jac(zcens,
-                                                                     copula_type, 
-                                                                     copula_shape);
+    target += log(ucensors[ivar]) 
+        + copula_marginal_quantile_log_jac(zcens, copula_type, copula_shape);
   }
 
-  // --- Likelihood computed separately for each year ---
-  // cannot vectorize because of clusters
-  int nsta;
-  for(i in 1:N) {
-
-    // Loop on clusters for the particular year
-    for(icl in 1:clusters_counts[i]) {
-        // Number of stations in the particular cluster
-        nsta = clusters_indexes[i, icl, 1]; 
-
-        // Indexes of stations belonging to the cluster
-        array[nsta] int idxm = clusters_indexes[i, icl, 2:nsta + 1];
-
-        // Compute likelihood within cluster
-        target += copula_log_pdf(z[i, idxm], copula_type, copula_shape, corr_IW[idxm, idxm]);
-    }
-
-  }
+  // --- Likelihood ---
+  for(i in 1:N)
+    target += copula_log_pdf(z[i], copula_type, copula_shape, corr_IW);
 }

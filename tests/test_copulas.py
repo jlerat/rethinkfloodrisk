@@ -14,22 +14,21 @@ import pytest
 from hydrodiy.io import iutils
 from hydrodiy.stat import sutils
 
-from pyrethink import marginal_exceedance_score as mes
-
+from pyrethink import copulas
 
 LOGGER = iutils.get_logger("test")
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
-@pytest.mark.parametrize("name", mes.COPULAS)
+@pytest.mark.parametrize("name", copulas.COPULA_NAMES)
 def test_copulas(name, nstations, allclose):
     if name == "Gumbel":
         pytest.skip("Gumbel not ready yet.")
 
-    cop = mes.copula_factory(name, nstations)
+    cop = copulas.copula_factory(name, nstations)
 
     rho = 0.8
-    if name == "Gaussian":
+    if name in ["Gaussian", "Student"]:
         cop.params = (1 - rho) * np.eye(nstations) \
                      + rho * np.ones((nstations, nstations))
     else:
@@ -51,12 +50,12 @@ def test_copulas(name, nstations, allclose):
     assert len(surv) == 100
     assert np.all(np.isfinite(surv))
 
-    for kind in mes.MARGINAL_EXCEEDANCE_SCORE_KINDS:
-        aep = cop.aep(smp, kind)
+    for mex_kind in copulas.MARGINAL_EXCEEDANCE_SCORE_KINDS:
+        aep = cop.aep(smp, mex_kind)
 
         assert len(aep) == 100
 
-        if kind == "KENDALL":
+        if mex_kind == "KENDALL":
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
             assert pv > 1e-2
@@ -70,10 +69,10 @@ def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
 
     if napprox == 0:
-        cop = mes.GaussianCopula(nstations)
+        cop = copulas.GaussianCopula(nstations)
         cop.params = cov
     else:
-        cop = mes.GaussianOneFactorCopula(nstations)
+        cop = copulas.GaussianOneFactorCopula(nstations)
         cop.params = rho
         cop.set_approx(napprox)
 
@@ -107,7 +106,7 @@ def test_gaussian_one_factor_sampling(nstations, rho, allclose):
     m1 = x1.mean(axis=0)
     cov1 = np.cov(x1.T)
 
-    cop = mes.GaussianOneFactorCopula(nstations)
+    cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = rho
     x2 = norm.ppf(cop.sample(nsamples))
     m2 = x2.mean(axis=0)
@@ -119,7 +118,7 @@ def test_gaussian_one_factor_sampling(nstations, rho, allclose):
 
 @pytest.mark.parametrize("nstations", [2, 3, 5, 10, 20])
 def test_kendall_function_independence(nstations, allclose):
-    cop = mes.IndependenceCopula(nstations)
+    cop = copulas.IndependenceCopula(nstations)
     t = np.linspace(0, 1, 1000)
     p = cop.kendall_function(t)
 
@@ -154,7 +153,7 @@ def test_kendall_function_independence(nstations, allclose):
 @pytest.mark.parametrize("nstations", [2, 5, 7])
 @pytest.mark.parametrize("repeat", np.arange(1, 6))
 def test_compute_gaussian_kendall(nstations, repeat, allclose):
-    cop = mes.GaussianOneFactorCopula(nstations)
+    cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = 1e-4
     cop.logger = LOGGER
     cop.printlog = 5000
@@ -167,7 +166,7 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
     pk = cop.compute_kendall_function_data(nkendall)
 
     # Expected independent
-    copi = mes.IndependenceCopula(nstations)
+    copi = copulas.IndependenceCopula(nstations)
     expected = copi.kendall_function(pk.value)
     err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.p))
 
@@ -176,18 +175,18 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
     assert err.max() < atol
 
 
-@pytest.mark.parametrize("kind", ["AND", "OR"])
+@pytest.mark.parametrize("mex_kind", ["AND", "OR"])
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
-def test_compute_analytical_and_empirical_marginal_score(kind, nstations, rho, allclose):
-    cop = mes.GaussianOneFactorCopula(nstations)
+def test_compute_analytical_and_empirical_marginal_score(mex_kind, nstations, rho, allclose):
+    cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = rho
 
-    mex1 = mes.MarginalExceedanceScore(kind, cop)
+    mex1 = copulas.MarginalExceedanceScore(mex_kind, cop)
     mex1.logger = LOGGER
 
     nsamples = 1000000
-    mex2 = mes.MarginalExceedanceScoreEmpirical(kind, cop,
+    mex2 = copulas.MarginalExceedanceScoreEmpirical(mex_kind, cop,
                                                 nsamples=nsamples)
     mex2.logger = LOGGER
 
@@ -202,30 +201,30 @@ def test_compute_analytical_and_empirical_marginal_score(kind, nstations, rho, a
     assert err.max() < 1e-1  # But it should not be too big (ok, this is quite big)
 
 
-@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
+@pytest.mark.parametrize("mex_kind", ["KENDALL", "AND", "OR"])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 @pytest.mark.parametrize("maep", [0.1, 0.01])
-def test_compute_marginal_score_set(kind, rho, maep, allclose):
+def test_compute_marginal_score_set(mex_kind, rho, maep, allclose):
     nstations = 2
-    cop = mes.GaussianOneFactorCopula(nstations)
+    cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = rho
 
-    mex = mes.MarginalExceedanceScore(kind, cop)
+    mex = copulas.MarginalExceedanceScore(mex_kind, cop)
     df, _ = mex.marginal_exceedance_set(maep)
 
-    check = cop.aep(df.iloc[:, :2], kind)
+    check = cop.aep(df.iloc[:, :2], mex_kind)
     assert allclose(check, maep, atol=5e-2)
 
 
-@pytest.mark.parametrize("kind", ["KENDALL", "AND", "OR"])
+@pytest.mark.parametrize("mex_kind", ["KENDALL", "AND", "OR"])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 @pytest.mark.parametrize("maep", [0.1, 0.01])
-def test_compare_set_and_common(kind, rho, maep, allclose):
+def test_compare_set_and_common(mex_kind, rho, maep, allclose):
     nstations = 2
-    cop = mes.GaussianOneFactorCopula(nstations)
+    cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = rho
 
-    mex = mes.MarginalExceedanceScore(kind, cop)
+    mex = copulas.MarginalExceedanceScore(mex_kind, cop)
     mex.logger = LOGGER
     df, _ = mex.marginal_exceedance_set(maep)
 
