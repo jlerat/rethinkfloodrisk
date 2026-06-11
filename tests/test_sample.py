@@ -67,16 +67,19 @@ def test_sample_data(pcensor, no_missing, allclose):
 
     data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
     censors = datahub.get_censors(pcensor, no_missing=no_missing)
-    copula_id = 1
+    copula_name = "Student"
     copula_shape = 2.5
 
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_id=copula_id,
+                                         copula_name=copula_name,
                                          copula_shape=copula_shape,
                                          censors=censors)
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 23
+    assert len(stan_data) == 24
+
+    assert stan_data["marginal_id"] == 0
+    assert stan_data["copula_id"] == 1
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -105,17 +108,17 @@ def test_sample_data(pcensor, no_missing, allclose):
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
         sv = sample.StanSamplingMultivariate(data, dows,
-                                             copula_id,
+                                             copula_name,
                                              copula_shape)
 
 
 def test_inits(allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    copula_id = 0.
+    copula_name = "Gaussian"
     copula_shape = 0.
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_id,
+                                         copula_name,
                                          copula_shape,
                                          censors=censors)
     inits = sv.initial_parameters
@@ -137,9 +140,9 @@ def test_sampler(config, nvars, copula_shape, allclose):
     else:
         censors = np.zeros(data.shape[1])
 
-    copula_id = 1 if copula_shape > 0 else 0
+    copula_name = "Student" if copula_shape > 0 else "Gaussian"
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_id,
+                                         copula_name,
                                          copula_shape,
                                          censors=censors)
     stan_data = sv.to_dict()
@@ -177,7 +180,7 @@ def test_sampler(config, nvars, copula_shape, allclose):
     kw["data"]["Ncens"] -= 1
 
     # Test copula shape error
-    if copula_id == 1:
+    if copula_name == "Student":
         kw["data"]["copula_shape"] = 1.9
         with pytest.raises(RuntimeError):
             mv_censored_no_missing_sampling(**kw)
@@ -261,10 +264,9 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     rho_max = 1.
     sv = sample.StanSamplingMultivariate(data,
                                          dows,
-                                         copula_id=0.,
+                                         copula_name="Gaussian",
                                          copula_shape=0,
                                          censors=censors,
-                                         skip_clusters=True,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
     kw["data"] = sv.to_dict()

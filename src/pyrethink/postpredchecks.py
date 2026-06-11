@@ -8,7 +8,7 @@ from scipy.interpolate import RBFInterpolator
 from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
-from pyrethink.copulas import copula_factory
+from pyrethink.copulas import factory as copula_factory
 
 
 PERC_TAILS_DEFAULT = np.arange(50, 95, 5)
@@ -166,8 +166,9 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 def posterior_predictive_checks(yobs, params,
                                 copula_name,
-                                df=4.,
+                                copula_shape=4.,
                                 logger=None,
+                                marginal=GEV(),
                                 iterlog=500):
     yobs = np.array(yobs)
 
@@ -176,7 +177,7 @@ def posterior_predictive_checks(yobs, params,
     nsamples = len(params)
 
     # copula sampling tools
-    cop = copula_factory(copula_name, nsta, df=df)
+    cop = copula_factory(copula_name, nsta, copula_shape=copula_shape)
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
@@ -198,9 +199,6 @@ def posterior_predictive_checks(yobs, params,
     multi_obs = multivariate_dependence_statistics(yobs)
     multi_obs = dependence2series(multi_obs)
 
-    # Marginal
-    gev = GEV()
-
     # Loop over params
     univ_sim = {ivar: [] for ivar in range(nsta)}
     biv_sim = {(i1, i2): [] for i1, i2 in combs(range(nsta), 2)}
@@ -214,13 +212,14 @@ def posterior_predictive_checks(yobs, params,
         # Sample data with same size as obs
         corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))
         cop.params = corr
-        usim = cop.sample_u(nval)
+        usim = cop.sample(nval)
+
         ysim = np.empty((nval, nsta))
         for ista in range(nsta):
             cc = [f"ylocn[{ista + 1}]", f"ylogscale[{ista + 1}]",
                   f"yshape1[{ista + 1}]"]
-            gev.params = param.loc[cc]
-            ysim[:, ista] = gev.ppf(usim[:, ista])
+            marginal.params = param.loc[cc]
+            ysim[:, ista] = marginal.ppf(usim[:, ista])
 
         # Compute
         for ivar in range(nsta):

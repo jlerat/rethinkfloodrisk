@@ -117,7 +117,7 @@ def to2d(x, nstations):
     return x
 
 
-def copula_factory(name, nstations, copula_shape=4.):
+def factory(name, nstations, copula_shape=4.):
     # Copula id supplied
     if isinstance(name, int):
         name = COPULA_NAMES[name]

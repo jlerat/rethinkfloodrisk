@@ -25,7 +25,7 @@ def test_copulas(name, nstations, allclose):
     if name == "Gumbel":
         pytest.skip("Gumbel not ready yet.")
 
-    cop = copulas.copula_factory(name, nstations)
+    cop = copulas.factory(name, nstations)
 
     rho = 0.8
     if name in ["Gaussian", "Student"]:
@@ -37,6 +37,7 @@ def test_copulas(name, nstations, allclose):
     smp = cop.sample(100)
     assert len(smp) == 100
     assert np.all(np.isfinite(smp))
+    assert np.all((smp >= 0) & (smp <= 1))
 
     pdf = cop.pdf(smp)
     assert len(pdf) == 100
@@ -45,10 +46,12 @@ def test_copulas(name, nstations, allclose):
     cdf = cop.cdf(smp)
     assert len(cdf) == 100
     assert np.all(np.isfinite(cdf))
+    assert np.all((cdf >= 0) & (cdf <= 1))
 
     surv = cop.survival(smp)
     assert len(surv) == 100
     assert np.all(np.isfinite(surv))
+    assert np.all((surv >= 0) & (surv <= 1))
 
     for mex_kind in copulas.MARGINAL_EXCEEDANCE_SCORE_KINDS:
         aep = cop.aep(smp, mex_kind)

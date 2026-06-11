@@ -1,30 +1,30 @@
 import numpy as np
 
 from floodstan.data_processing import univariate2cases
-from floodstan.marginals import GEV
+from floodstan import marginals
 
 from pyrethink import copulas
 
 RHO_MIN_DEFAULT = 0.
 RHO_MAX_DEFAULT = 1.
 
-MARGINAL = GEV()
-
 DELTA_DAYS_MAX_DEFAULT = 10
+
+MARGINALS_ALLOWED = ["GEV"]
 
 
 class StanSamplingMultivariate():
     def __init__(self, data, day_of_year,
-                 copula_id,
+                 copula_name,
                  copula_shape,
                  censors=None,
+                 marginal_name="GEV",
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
                  delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
         # Check data
         nstations = data.shape[1]
-        self.copula = copulas.copula_factory(copula_id, nstations, copula_shape)
 
         if rho_min < -1 or rho_min > 1:
             errmsg = f"Expected rho_min in [-1, 1], got {rho_min}."
@@ -34,14 +34,40 @@ class StanSamplingMultivariate():
             errmsg = f"Expected rho_max in ]{rho_min}, 1], got {rho_max}."
             raise ValueError(errmsg)
 
-        self.copula_id = int(copula_id)
-        self.copula_shape = float(copula_shape)
         self.rho_min = float(rho_min)
         self.rho_max = float(rho_max)
+
+        # Configure marginal and copula
+        self._copula = copulas.factory(copula_name, nstations, copula_shape)
+        self.copula_shape = float(copula_shape)
+
+        if marginal_name not in MARGINALS_ALLOWED:
+            txt = "/".join(MARGINALS_ALLOWED)
+            errmsg = f"Expected marginal in {txt}, got {marginal_name}."
+            raise ValueError(errmsg)
+        self._marginal = marginals.factory(marginal_name)
 
         self.set_data(data, day_of_year, censors)
         self.delta_days_max = delta_days_max
         self.set_initial_parameters()
+
+    @property
+    def copula_id(self):
+        nm = self.copula.name
+        return copulas.COPULA_NAMES.index(nm)
+
+    @property
+    def copula(self):
+        return self._copula
+
+    @property
+    def marginal_id(self):
+        nm = self.marginal.name
+        return MARGINALS_ALLOWED.index(nm)
+
+    @property
+    def marginal(self):
+        return self._marginal
 
     @property
     def stan_sample_args(self):
@@ -94,7 +120,8 @@ class StanSamplingMultivariate():
         self.idx_miss = np.array(np.where(cases == 3)).T + 1
 
     def set_initial_parameters(self):
-        # GEV parameters and priors
+        # marginal parameters and priors
+        marginal = self.marginal
         P = self.data.shape[1]
 
         gparams = np.zeros((P, 3))
@@ -102,8 +129,8 @@ class StanSamplingMultivariate():
             vect = self.data[:, ivar]
             iok = ~np.isnan(vect)
             vect = vect[iok]
-            MARGINAL.fit_lh_moments(vect, eta=2)
-            locn, logscale, shape1 = MARGINAL.params
+            marginal.fit_lh_moments(vect, eta=2)
+            locn, logscale, shape1 = marginal.params
             shape1 = -1e-2  # To avoid boundary problems with GEV
             gparams[ivar] = [locn, logscale, shape1]
 
@@ -128,6 +155,8 @@ class StanSamplingMultivariate():
         }
 
     def to_dict(self):
+        marginal = self.marginal
+
         dd = {
             "N": self.data.shape[0],
             "P": self.data.shape[1],
@@ -138,17 +167,18 @@ class StanSamplingMultivariate():
             "idx_cens": self.idx_cens,
             "Nmiss": len(self.idx_miss),
             "idx_miss": self.idx_miss,
+            "marginal_id": int(self.marginal_id),
             "copula_id": int(self.copula_id),
             "copula_shape": float(self.copula_shape),
-            "ylocn_prior": MARGINAL.locn_prior.to_list(),
-            "ylogscale_prior": MARGINAL.logscale_prior.to_list(),
-            "yshape1_prior": MARGINAL.shape1_prior.to_list(),
-            "locn_lower": float(MARGINAL.locn_prior.lower),
-            "locn_upper": float(MARGINAL.locn_prior.upper),
-            "logscale_lower": float(MARGINAL.logscale_prior.lower),
-            "logscale_upper": float(MARGINAL.logscale_prior.upper),
-            "shape1_lower": float(MARGINAL.shape1_prior.lower),
-            "shape1_upper": float(MARGINAL.shape1_prior.upper),
+            "ylocn_prior": marginal.locn_prior.to_list(),
+            "ylogscale_prior": marginal.logscale_prior.to_list(),
+            "yshape1_prior": marginal.shape1_prior.to_list(),
+            "locn_lower": float(marginal.locn_prior.lower),
+            "locn_upper": float(marginal.locn_prior.upper),
+            "logscale_lower": float(marginal.logscale_prior.lower),
+            "logscale_upper": float(marginal.logscale_prior.upper),
+            "shape1_lower": float(marginal.shape1_prior.lower),
+            "shape1_upper": float(marginal.shape1_prior.upper),
             "censors": self.censors,
             "rho_min": float(self.rho_min),
             "rho_max": float(self.rho_max)

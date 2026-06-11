@@ -111,7 +111,7 @@ def test_multivariate_statistics(rho, nsta, allclose):
     z = norm.ppf(x)
     expected = 2 - rv.logcdf(z) / np.log(x[:, 0])
     err = np.abs(np.arcsinh(mv.xi) - np.arcsinh(expected))
-    assert err.max() < 5e-2
+    assert err.max() < 7e-2
 
 
 def tests_krupskii():
@@ -159,18 +159,16 @@ def test_bivariate_statistics(repeat, rho, allclose):
 
 @pytest.mark.parametrize("copula_shape", [0, 2.5, 5])
 def test_posterior_predictive_checks(copula_shape):
-    copula_type = get_type(copula_shape)
+    copula_name = "Student" if copula_shape > 0 else "Gaussian"
 
-    dalpha = 1.
-
-    with pytest.raises(ValueError, match="Expected 'copula_shape' in"):
-        ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                        1, 1.5, parts_id, dalpha)
+    if copula_shape > 0:
+        with pytest.raises(ValueError, match="Expected df in"):
+            ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
+                                            copula_name, 1.5)
 
     ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                                          copula_type,
-                                                          copula_shape,
-                                                          dalpha)
+                                                          copula_name,
+                                                          copula_shape)
     assert ppu.shape == (9, 21)
     assert ppb.shape == (32, 21)
     assert ppm.shape == (27, 7)

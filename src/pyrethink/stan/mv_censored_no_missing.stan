@@ -26,10 +26,14 @@ data {
   int<lower=0> Ncens;
   array[Ncens, 2] int idx_cens;
 
+  // Choice of marginal (only GEV allowed for now)
+  int<lower=0, upper=0> marginal_id; 
+
   // Copula model
   // 0 : Gaussian, 1: Student
-  int copula_id;
+  int<lower=0, upper=1> copula_id;
   real copula_shape; 
+
 
   // Prior parameters
   vector[2] ylocn_prior;
