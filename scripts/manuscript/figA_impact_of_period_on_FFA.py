@@ -30,7 +30,7 @@ from hydrodiy.plot import putils
 
 from floodstan import freqplots
 from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
-from pyrethink import datahub
+from pyrethink import datahub, processing
 
 
 def get_script_paths(config, source_file):
@@ -383,7 +383,7 @@ def process(config, script_paths, logger, data):
                     delta = 0.06
                     for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
                         q = q100.loc[st]
-                        h = datahub.linear_interpolation(q, rc_q, rc_h)
+                        h = processing.linear_interpolation(q, rc_q, rc_h)
                         stt = "post pred" if st.startswith("POST") else st
 
                         txt = f"{stt:<12s}"
