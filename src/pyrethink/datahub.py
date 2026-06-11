@@ -1,30 +1,13 @@
 from pathlib import Path
 import re
-import json
 import numpy as np
 import pandas as pd
 from hydrodiy.io import csv
 
 FHERE = Path(__file__).resolve().parent
 FROOT = FHERE.parent.parent
-
-ENV = "LOCAL"
-
-with (FHERE / "config.json").open("r") as fo:
-    CONFIG = json.load(fo)[ENV]
-
-
-def replace_root(path):
-    root_label = "package_root_folder"
-    if path.startswith(root_label):
-        return FROOT / re.sub(root_label + "/", "", path)
-    else:
-        return path
-
-
-DATA_FOLDER = replace_root(CONFIG["data_folder"])
-
-DATA_VERSION = CONFIG["data_version"]
+DATA_FOLDER = FROOT / "data"
+DATA_VERSION = "5.0"
 
 
 def get_stations(no_missing=True):
@@ -166,34 +149,3 @@ def get_rating_curves(stationid, only_last=False):
         return rcs[time], metas[time]
     else:
         return rcs, metas
-
-
-def eep2aep(nu, eep):
-    return 1 - np.exp(-nu * eep)
-
-
-def linear_interpolation(xx, x, y):
-    """ Linear interpolation """
-    # Sort values
-    isort = np.argsort(x)
-    x = np.array(x)[isort]
-    if np.any(np.diff(x) <= 0):
-        errmsg = "Cannot process duplicates in x."
-        raise ValueError(errmsg)
-
-    if len(y) != len(x):
-        errmsg = "Expected x and y of same length."
-        raise ValueError(errmsg)
-
-    y = np.array(y)[isort]
-    xx = np.atleast_1d(xx)
-
-    # interpolation coefficients
-    D = np.abs(x[:, None] - x[None, 1:-1])
-    D = np.column_stack([D, np.ones(len(x)), x])
-    coefs = np.linalg.solve(D, y)
-
-    # Run interpolation
-    D = np.abs(xx[:, None] - x[None, 1:-1])
-    D = np.column_stack([D, np.ones(len(xx)), xx])
-    return (D @ coefs).squeeze()
