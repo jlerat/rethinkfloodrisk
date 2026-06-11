@@ -426,8 +426,8 @@ class GaussianOneFactorCopula(GaussianCopula):
         self._csqr = math.sqrt(1 - rho)
 
         nsta = self.nstations
-        cor = (1 - rho) * np.eye(nsta) + rho * np.ones((nsta, nsta))
-        self._rv = mvt(self._mean, cor)
+        corr = (1 - rho) * np.eye(nsta) + rho * np.ones((nsta, nsta))
+        self._rv = mvn(self._mean, corr)
 
     @property
     def sqr(self):
