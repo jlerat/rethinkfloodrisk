@@ -31,7 +31,7 @@ def test_stan_indexing():
     data, _, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
     sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_id=0,
+                                         copula_name="Gaussian",
                                          copula_shape=0.,
                                          censors=censors)
     stan_data = sv.to_dict()
