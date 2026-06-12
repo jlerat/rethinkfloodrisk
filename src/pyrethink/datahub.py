@@ -13,11 +13,20 @@ DATA_VERSION = "5.0"
 def get_stations(richmond_only=True):
     if richmond_only:
         fs = DATA_FOLDER / f"AMS_stations_richmond_v{DATA_VERSION}.csv"
-    else:
-        fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
+        df, _ = csv.read_csv(fs, index_col="STATIONID",
+                             dtype={"STATIONID": str})
+        return df
 
+    fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(fs, index_col="STATIONID",
                          dtype={"STATIONID": str})
+
+    fr = DATA_FOLDER / f"rff_predictors_v{DATA_VERSION}.csv"
+    dfr, _ = csv.read_csv(fr, index_col="STATIONID",
+                          dtype={"STATIONID": str})
+    cc = list(set(dfr.columns) - set(df.columns))
+    df = pd.concat([df, dfr.loc[df.index, cc]], axis=1)
+
     return df
 
 
