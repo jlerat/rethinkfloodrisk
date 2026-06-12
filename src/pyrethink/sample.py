@@ -14,7 +14,7 @@ MARGINALS_ALLOWED = ["GEV"]
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data, day_of_year,
+    def __init__(self, data,
                  copula_name,
                  copula_shape,
                  censors=None,
@@ -47,7 +47,7 @@ class StanSamplingMultivariate():
             raise ValueError(errmsg)
         self._marginal = marginals.factory(marginal_name)
 
-        self.set_data(data, day_of_year, censors)
+        self.set_data(data, censors)
         self.delta_days_max = delta_days_max
         self.set_initial_parameters()
 
@@ -73,24 +73,16 @@ class StanSamplingMultivariate():
     def stan_sample_args(self):
         return {}
 
-    def set_data(self, data, day_of_year, censors):
+    def set_data(self, data, censors):
         data = np.atleast_2d(data)
-        day_of_year = np.atleast_2d(day_of_year)
 
         if data.shape[0] == 1:
             data = data.T
-            day_of_year = day_of_year.T
-
-        if data.shape != day_of_year.shape:
-            errmsg = "'data' and 'day_of_year' do not have the same shape."
-            raise ValueError(errmsg)
 
         # Eliminates cases where all data are missing
         hasdata = np.any(~np.isnan(data), axis=1)
         data = data[hasdata]
-
         self.data = data
-        self.day_of_year = day_of_year[hasdata]
 
         # Check censors
         nvars = data.shape[1]

@@ -79,7 +79,7 @@ def get_ams(stationid=None):
         fa1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.csv"
         fz1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.zip"
         if not fz1.exists():
-            errmsg = f"Cannot find ams data."
+            errmsg = "Cannot find ams data."
             raise ValueError(errmsg)
 
         ams, _ = csv.read_csv(fa1)
