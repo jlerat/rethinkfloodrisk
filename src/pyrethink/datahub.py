@@ -179,7 +179,7 @@ def get_rating_curves(stationid, only_last=False):
 
 
 def get_params_lh_moments():
-    fs = DATA_FOLDER / "priors" / f"params_lh_moments.csv"
+    fs = DATA_FOLDER / "priors" / "params_lh_moments.csv"
     df, _ = csv.read_csv(fs, dtype={"stationid": str})
     df = df.rename(columns={"stationid": "STATIONID"})
     return df

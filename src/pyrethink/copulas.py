@@ -425,11 +425,11 @@ class GaussianOneFactorCopula(GaussianCopula):
             rhos = rhos * np.ones(nsta)
 
         if len(rhos) != nsta:
-            errmsg = f"Expected rhos  of length {nstations}."
+            errmsg = f"Expected rhos of length {nsta}."
             raise ValueError(errmsg)
 
         if np.any((rhos <= -1) | (rhos >= 1)):
-            raise ValueError(f"Expected rhos in ]-1, 1[")
+            raise ValueError("Expected rhos in ]-1, 1[")
 
         self._params = rhos
         self._sqr = np.sqrt(1 - rhos**2)
