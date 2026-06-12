@@ -75,3 +75,10 @@ def test_censors(pcensor):
 
     censors = datahub.get_censors(pcensor)
 
+
+def test_params_lh_moments():
+    params = datahub.get_params_lh_moments()
+    assert "STATIONID" in  params.columns
+
+
+

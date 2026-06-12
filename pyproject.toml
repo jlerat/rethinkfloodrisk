@@ -57,7 +57,7 @@ testpaths = ["tests"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"*" = ["*.pyx", "*.pxd", "*.c", "*.h", "*.stan", "*.stanfunctions"]
+"*" = ["*.pyx", "*.pxd", "*.c", "*.h", "*.stan", "*.stanfunctions", "*.zip", "*.csv"]
 
 [tool.uv]
 no-build-isolation-package = ["pyrethink"]

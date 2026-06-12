@@ -85,14 +85,14 @@ def get_ams(stationid=None):
         ams, _ = csv.read_csv(fa1)
         sids = ams.stationid.astype(str)
 
-        if (sids == stationid).sum() == 0:
-            errmsg = f"Cannot find ams data for station {stationid}."
-            raise ValueError(errmsg)
-
         ams = ams.iloc[:, 1:].T
         ams.columns = sids
 
         if stationid is not None:
+            if (sids == stationid).sum() == 0:
+                errmsg = f"Cannot find ams data for station {stationid}."
+                raise ValueError(errmsg)
+
             ams = ams.loc[:, [stationid]]
             ams.columns = [f"{stationid}_PEAK"]
 
@@ -176,3 +176,11 @@ def get_rating_curves(stationid, only_last=False):
         return rcs[time], metas[time]
     else:
         return rcs, metas
+
+
+def get_params_lh_moments():
+    fs = DATA_FOLDER / "priors" / f"params_lh_moments.csv"
+    df, _ = csv.read_csv(fs, dtype={"stationid": str})
+    df = df.rename(columns={"stationid": "STATIONID"})
+    return df
+
