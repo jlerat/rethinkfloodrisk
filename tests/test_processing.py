@@ -75,7 +75,7 @@ def test_linear_interpolation_plot(allclose):
 def test_eep2aep(allclose):
     nu = 2
     x = np.logspace(-4, -1, 200)
-    y = datahub.eep2aep(nu, x)
+    y = processing.eep2aep(nu, x)
     fig, ax = plt.subplots()
     ax.plot(x, y, "-")
     x0, x1 = x[0], x[-1]

@@ -32,7 +32,7 @@ def test_copulas(name, nstations, allclose):
         cop.params = (1 - rho) * np.eye(nstations) \
                      + rho * np.ones((nstations, nstations))
     else:
-        cop.params = rho
+        cop.params = np.linspace(-0.5, 0.5, nstations)
 
     smp = cop.sample(100)
     assert len(smp) == 100
@@ -62,6 +62,11 @@ def test_copulas(name, nstations, allclose):
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
             assert pv > 1e-2
+
+    if name == "GaussianOneFactor":
+        z = cop.sample_z(1000000)
+        C = np.cov(z.T)
+        assert allclose(C, cop.corr, atol=3e-3)
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])

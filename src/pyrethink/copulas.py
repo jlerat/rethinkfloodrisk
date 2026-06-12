@@ -402,7 +402,7 @@ class GaussianOneFactorCopula(GaussianCopula):
         super(GaussianOneFactorCopula, self).__init__(nstations)
         self.name = "GaussianOneFactor"
         self._sqr = None
-        self._csqr = None
+        self._corr = None
         self.set_approx()
 
     def set_approx(self, napprox=500):
@@ -418,24 +418,34 @@ class GaussianOneFactorCopula(GaussianCopula):
         return self._params
 
     @params.setter
-    def params(self, rho):
-        if rho < 0 or rho >= 1:
-            raise ValueError(f"Expected rho in [0, 1[, got {rho}")
-        self._params = rho
-        self._sqr = math.sqrt(rho)
-        self._csqr = math.sqrt(1 - rho)
-
+    def params(self, rhos):
         nsta = self.nstations
-        corr = (1 - rho) * np.eye(nsta) + rho * np.ones((nsta, nsta))
+        if isinstance(rhos, float):
+            # Allows for single rho
+            rhos = rhos * np.ones(nsta)
+
+        if len(rhos) != nsta:
+            errmsg = f"Expected rhos  of length {nstations}."
+            raise ValueError(errmsg)
+
+        if np.any((rhos <= -1) | (rhos >= 1)):
+            raise ValueError(f"Expected rhos in ]-1, 1[")
+
+        self._params = rhos
+        self._sqr = np.sqrt(1 - rhos**2)
+
+        corr = rhos[:, None] @ rhos[None, :]
+        corr = np.eye(nsta) + corr - np.diag(np.diag(corr))
+        self._corr = corr
         self._rv = mvn(self._mean, corr)
+
+    @property
+    def corr(self):
+        return self._corr
 
     @property
     def sqr(self):
         return self._sqr
-
-    @property
-    def csqr(self):
-        return self._csqr
 
     def cdf(self, u):
         """ Fast computation of CDF useful for high dimensions.
@@ -447,21 +457,24 @@ class GaussianOneFactorCopula(GaussianCopula):
 
         # CDF for a factor copula is
         # p(X1<x1, ..., Xn<xn) =
-        #      int(prod(Phi(xi - sqrt(rho) v) / sqrt(1 - rho)) dv,
+        #      int(prod(Phi(xi - rho_i v) / sqrt(1 - rho_i^2)) dv,
         #          v=-infty,
         #          v=+infty)
         x = self.marginal_ppf(u)
         np.add(x[:, :, None],
-               -self.sqr * self.v[None, None, :],
+               -self.params[None, :, None] * self.v[None, None, :],
                out=self.buf)
-        np.multiply(self.buf, 1./self.csqr, out=self.buf)
+        np.multiply(self.buf, 1./self.sqr[None, :, None], out=self.buf)
         return norm.cdf(self.buf).prod(axis=1).sum(axis=-1) * self.du
 
-    def sample(self, nsamples):
+    def sample_z(self, nsamples):
         v = np.random.normal(size=nsamples)
         eps = np.random.normal(size=(nsamples, self.nstations))
-        fun = self.marginal_cdf
-        return fun(self.sqr * v[:, None] + self.csqr * eps)
+        return v[:, None] * self.params[None, :] + eps * self.sqr[None, :]
+
+    def sample(self, nsamples):
+        z = self.sample_z(nsamples)
+        return self.marginal_cdf(z)
 
 
 class StudentCopula(Copula):
