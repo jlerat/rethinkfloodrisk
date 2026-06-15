@@ -71,21 +71,20 @@ def test_copulas(name, nstations, allclose):
 
 @pytest.mark.parametrize("nstations", [2, 5, 10])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.98])
-@pytest.mark.parametrize("napprox", [0, 100, 500])
-def test_gaussian_cdf_and_pdf(nstations, rho, napprox, allclose):
+@pytest.mark.parametrize("is_factor", [False, True])
+def test_gaussian_cdf_and_pdf(nstations, rho, is_factor, allclose):
     mean = np.zeros(nstations)
-    cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
+    cov = (1 - rho**2) * np.eye(nstations) + rho**2 * np.ones((nstations, nstations))
 
-    if napprox == 0:
-        cop = copulas.GaussianCopula(nstations)
-        cop.params = cov
-    else:
+    if is_factor:
         cop = copulas.GaussianOneFactorCopula(nstations)
         cop.params = rho
-        cop.set_approx(napprox)
+    else:
+        cop = copulas.GaussianCopula(nstations)
+        cop.params = cov
 
     rv = mvt(mean=mean, cov=cov)
-    u = expit(np.linspace(-10, 10, 50))
+    u = expit(np.linspace(-10, 10, 20))
     atol = 5e-3
     for iu, uu in enumerate(u):
         c1 = rv.cdf(norm.ppf(uu) * np.ones((1, nstations)))

@@ -28,9 +28,9 @@ FTESTS = Path(__file__).resolve().parent
 SEED = 5446
 
 def test_stan_indexing():
-    data, _, dows, _ = datahub.get_ams_concat()
+    data, _, _, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor=0.2)
-    sv = sample.StanSamplingMultivariate(data, dows,
+    sv = sample.StanSamplingMultivariate(data,
                                          copula_name="Gaussian",
                                          copula_shape=0.,
                                          censors=censors)

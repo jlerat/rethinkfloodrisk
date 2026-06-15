@@ -1,5 +1,7 @@
 import math
 
+import warnings
+
 import numpy as np
 import pandas as pd
 
@@ -405,14 +407,6 @@ class GaussianOneFactorCopula(GaussianCopula):
         self._corr = None
         self.set_approx()
 
-    def set_approx(self, napprox=500):
-        self.napprox = napprox
-        eps = 5e-1 / napprox
-        u = np.linspace(eps, 1 - eps, napprox)
-        self.v = norm.ppf(u)
-        self.du = u[1] - u[0]
-        self.buf = np.zeros((1, self.nstations, napprox))
-
     @property
     def params(self):
         return self._params
@@ -447,24 +441,33 @@ class GaussianOneFactorCopula(GaussianCopula):
     def sqr(self):
         return self._sqr
 
+    def set_approx(self, napprox=500):
+            self.napprox = napprox
+            eps = 5e-1 / napprox
+            u = np.linspace(eps, 1 - eps, napprox)
+            self.v = norm.ppf(u)
+            self.du = u[1] - u[0]
+            self.buf = np.empty((1, self.nstations, napprox))
+
     def cdf(self, u):
         """ Fast computation of CDF useful for high dimensions.
         Note that pdf is not approximated.
         """
         u = to2d(u, self.nstations)
         if self.buf.shape[0] != len(u):
-            self.buf = np.zeros((len(u), self.nstations, self.napprox))
+            self.buf = np.empty((len(u), self.nstations, self.napprox))
 
         # CDF for a factor copula is
         # p(X1<x1, ..., Xn<xn) =
         #      int(prod(Phi(xi - rho_i v) / sqrt(1 - rho_i^2)) dv,
         #          v=-infty,
         #          v=+infty)
+
         x = self.marginal_ppf(u)
         np.add(x[:, :, None],
                -self.params[None, :, None] * self.v[None, None, :],
                out=self.buf)
-        np.multiply(self.buf, 1./self.sqr[None, :, None], out=self.buf)
+        np.multiply(self.buf, 1. / self.sqr[None, :, None], out=self.buf)
         return norm.cdf(self.buf).prod(axis=1).sum(axis=-1) * self.du
 
     def sample_z(self, nsamples):

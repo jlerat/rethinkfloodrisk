@@ -136,6 +136,9 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
 
+    if not is_missing:
+        data = data.loc[data.notnull().all(axis=1)]
+
     if is_censored:
         pcensor = 0.3
         censors = datahub.get_censors(pcensor)
