@@ -10,8 +10,6 @@ from scipy.stats import t as student_t
 from scipy.stats import multivariate_normal as mvn
 from scipy.stats import multivariate_t as mvt
 
-from scipy.special import gammainc, gammaincinv
-
 from scipy.optimize import minimize_scalar
 
 from hydrodiy.stat import sutils
@@ -162,7 +160,7 @@ class Copula():
 
     def compute_kendall_function_data(self, nkendall=None):
         nsta = self.nstations
-        nkendall = get_nsamples(nsta) if nkendall is None else nkendal
+        nkendall = get_nsamples(nsta) if nkendall is None else nkendall
 
         kdd = self._kendall_function_data
         compute = kdd is None
