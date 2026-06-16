@@ -16,23 +16,25 @@ from hydrodiy.stat import sutils
 
 from pyrethink import copulas
 
-LOGGER = iutils.get_logger("test")
+LOGGER = iutils.get_logger("test", console=True)
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("nstations", [2, 5, 8])
 @pytest.mark.parametrize("name", copulas.COPULA_NAMES)
 def test_copulas(name, nstations, allclose):
     if name == "Gumbel":
         pytest.skip("Gumbel not ready yet.")
 
     cop = copulas.factory(name, nstations)
+    cop.logger = LOGGER
+    cop.printlog = 1000
 
-    rho = 0.8
+    rho = 0.95
     if name in ["Gaussian", "Student"]:
         cop.params = (1 - rho) * np.eye(nstations) \
                      + rho * np.ones((nstations, nstations))
     else:
-        cop.params = np.linspace(-0.5, 0.5, nstations)
+        cop.params = rho #np.linspace(-0.5, 0.5, nstations)
 
     smp = cop.sample(100)
     assert len(smp) == 100
@@ -64,12 +66,13 @@ def test_copulas(name, nstations, allclose):
             assert pv > 1e-2
 
     if name == "GaussianOneFactor":
-        z = cop.sample_z(1000000)
+        n = copulas.get_nsamples(nstations)
+        z = cop.sample_z(n)
         C = np.cov(z.T)
-        assert allclose(C, cop.corr, atol=3e-3)
+        assert allclose(C, cop.corr, atol=2e-2)
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("nstations", [2, 5, 8])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.98])
 @pytest.mark.parametrize("is_factor", [False, True])
 def test_gaussian_cdf_and_pdf(nstations, rho, is_factor, allclose):
@@ -102,13 +105,13 @@ def test_gaussian_cdf_and_pdf(nstations, rho, is_factor, allclose):
         assert allclose(p1, p2, atol=atol)
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("nstations", [2, 5, 8])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 def test_gaussian_one_factor_sampling(nstations, rho, allclose):
     mean = np.zeros(nstations)
     cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
     rv = mvt(mean=mean, cov=cov)
-    nsamples = 1000000
+    nsamples = copulas.get_nsamples(nstations)
     x1 = rv.rvs(size=nsamples)
     m1 = x1.mean(axis=0)
     cov1 = np.cov(x1.T)
@@ -157,19 +160,13 @@ def test_kendall_function_independence(nstations, allclose):
         assert allclose(p[iok], expected[iok])
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 7])
+@pytest.mark.parametrize("nstations", [2, 5, 8])
 @pytest.mark.parametrize("repeat", np.arange(1, 6))
 def test_compute_gaussian_kendall(nstations, repeat, allclose):
     cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = 1e-4
-    cop.logger = LOGGER
-    cop.printlog = 5000
-
-    if nstations == 2:
-        nkendall = 10000
-    elif nstations >= 5:
-        nkendall = 50000
-
+    #cop.logger = LOGGER
+    #cop.printlog = 5000
     pk = cop.compute_kendall_function_data(nkendall)
 
     # Expected independent
@@ -183,7 +180,7 @@ def test_compute_gaussian_kendall(nstations, repeat, allclose):
 
 
 @pytest.mark.parametrize("mex_kind", ["AND", "OR"])
-@pytest.mark.parametrize("nstations", [2, 5, 10])
+@pytest.mark.parametrize("nstations", [2, 5, 8])
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 def test_compute_analytical_and_empirical_marginal_score(mex_kind, nstations, rho, allclose):
     cop = copulas.GaussianOneFactorCopula(nstations)

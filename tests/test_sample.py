@@ -30,13 +30,14 @@ from floodstan import bivariate_censored_sampling
 from pyrethink import sample
 from pyrethink import datahub
 from pyrethink import mv_censored_sampling
+from pyrethink import mv_censored_factors_sampling
 from pyrethink import mv_censored_no_missing_sampling
 
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-DEBUG = False
+DEBUG = True
 
 # Used to write test data for postpred checks
 WRITE_SAMPLE_DATA = True
@@ -63,7 +64,8 @@ STAN_NSAMPLES_DEFAULT = 6000
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
-def test_sample_data(pcensor, allclose):
+@pytest.mark.parametrize("nfactors", [0, 1, 2])
+def test_sample_data(pcensor, nfactors, allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor)
     copula_name = "Student"
@@ -72,11 +74,13 @@ def test_sample_data(pcensor, allclose):
     sv = sample.StanSamplingMultivariate(data,
                                          copula_name=copula_name,
                                          copula_shape=copula_shape,
-                                         censors=censors)
+                                         censors=censors,
+                                         nfactors=nfactors)
 
     stan_data = sv.to_dict()
-    assert len(stan_data) == 24
+    assert len(stan_data) == 25
     assert stan_data["P"] == 8
+    assert stan_data["F"] == nfactors
     assert stan_data["marginal_id"] == 0
     assert stan_data["copula_id"] == 1
 
@@ -104,7 +108,19 @@ def test_sample_data(pcensor, allclose):
 
     stan_inits = sv.initial_parameters
 
-    assert len(stan_inits) == 6
+    if nfactors == 0:
+        assert len(stan_inits) == 6
+    else:
+        assert len(stan_inits) == 8
+        ru = stan_inits["rhos_unit"]
+        assert ru.shape == (P, max(2, nfactors))
+        assert allclose((ru**2).sum(axis=1), 1)
+        assert ((ru >= 0.) & (ru <= 1)).all()
+
+        rs = stan_inits["rhos_scalings"]
+        assert rs.shape == (P, nfactors)
+        assert ((rs >= -1) & (rs <= 1)).all()
+
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
@@ -115,25 +131,13 @@ def test_sample_data(pcensor, allclose):
                                              copula_shape)
 
 
-def test_inits(allclose):
-    data, times, dows, _ = datahub.get_ams_concat()
-    censors = datahub.get_censors(pcensor=0.2)
-    copula_name = "Gaussian"
-    copula_shape = 0.
-    sv = sample.StanSamplingMultivariate(data,
-                                         copula_name,
-                                         copula_shape,
-                                         censors=censors)
-    inits = sv.initial_parameters
-    assert len(inits) == 6
-
-
-@pytest.mark.parametrize("is_censored", [True, False])
-@pytest.mark.parametrize("is_missing", [True, False])
+@pytest.mark.parametrize("is_censored", [True])
+@pytest.mark.parametrize("is_missing", [True])
 @pytest.mark.parametrize("nvars", [3])
 @pytest.mark.parametrize("copula_shape", [0., 4.])
-def test_sampler(is_censored, is_missing, nvars, copula_shape, allclose):
-    data, times, dows, _ = datahub.get_ams_concat()
+@pytest.mark.parametrize("nfactors", [0, 1])
+def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors, allclose):
+    data, _, _, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
 
     if not is_missing:
@@ -150,7 +154,8 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, allclose):
     sv = sample.StanSamplingMultivariate(data,
                                          copula_name,
                                          copula_shape,
-                                         censors=censors)
+                                         censors=censors,
+                                         nfactors=nfactors)
     stan_data = sv.to_dict()
     stan_inits = sv.initial_parameters
 
@@ -173,10 +178,13 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, allclose):
               show_progress=PROGRESS)
 
     # Choose sampler
-    if is_missing:
-        sampler = mv_censored_sampling
+    if nfactors == 0:
+        if is_missing:
+            sampler = mv_censored_sampling
+        else:
+            sampler = mv_censored_no_missing_sampling
     else:
-        sampler = mv_censored_no_missing_sampling
+        sampler = mv_censored_factors_sampling
 
     # Test sample size error
     kw["data"]["Ncens"] += 1

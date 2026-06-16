@@ -24,6 +24,7 @@ MODELS = [
     "test_cor",
     "test_copula",
     "mv_censored",
+    "mv_censored_factors",
     "mv_censored_no_missing"
     ]
 

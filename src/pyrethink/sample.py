@@ -21,7 +21,8 @@ class StanSamplingMultivariate():
                  marginal_name="GEV",
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
-                 delta_days_max=DELTA_DAYS_MAX_DEFAULT):
+                 delta_days_max=DELTA_DAYS_MAX_DEFAULT,
+                 nfactors=0):
 
         # Check data
         nstations = data.shape[1]
@@ -49,6 +50,7 @@ class StanSamplingMultivariate():
 
         self.set_data(data, censors)
         self.delta_days_max = delta_days_max
+        self.nfactors = int(nfactors)
         self.set_initial_parameters()
 
     @property
@@ -114,7 +116,7 @@ class StanSamplingMultivariate():
     def set_initial_parameters(self):
         # marginal parameters and priors
         marginal = self.marginal
-        P = self.data.shape[1]
+        N, P = self.data.shape
 
         gparams = np.zeros((P, 3))
         for ivar in range(P):
@@ -130,6 +132,13 @@ class StanSamplingMultivariate():
         # of rho_min and rho_max
         L_IW = np.eye(P)
 
+        # Initialse rhos for factor copulas
+        rhos_unit = np.random.uniform(0, 1, size=(P, max(2, self.nfactors)))
+        sc = np.sqrt((rhos_unit**2).sum(axis=1))
+        rhos_unit /= sc[:, None]
+
+        rhos_scalings = 0.01 + np.zeros((P, self.nfactors))
+
         # latent variables
         nmiss = len(self.idx_miss)
         wlat_miss = np.random.uniform(0, 1, size=nmiss)
@@ -141,10 +150,18 @@ class StanSamplingMultivariate():
             "ylocn": gparams[:, 0],
             "ylogscale": gparams[:, 1],
             "yshape1": gparams[:, 2],
-            "L_IW": L_IW,
             "wlat_cens": wlat_cens,
-            "wlat_miss": wlat_miss
+            "wlat_miss": wlat_miss,
         }
+
+        if self.nfactors > 0:
+            self.initial_parameters["rhos_unit"] = rhos_unit
+            self.initial_parameters["rhos_scalings"] = rhos_scalings
+
+            zlat_fact = np.random.standard_normal((N, self.nfactors))
+            self.initial_parameters["zlat_factors"] = zlat_fact
+        else:
+            self.initial_parameters["L_IW"] = L_IW
 
     def to_dict(self):
         marginal = self.marginal
@@ -152,6 +169,7 @@ class StanSamplingMultivariate():
         dd = {
             "N": self.data.shape[0],
             "P": self.data.shape[1],
+            "F": self.nfactors,
             "y": self.data,
             "Nobs": len(self.idx_obs),
             "idx_obs": self.idx_obs,
@@ -175,4 +193,5 @@ class StanSamplingMultivariate():
             "rho_min": float(self.rho_min),
             "rho_max": float(self.rho_max)
         }
+
         return dd

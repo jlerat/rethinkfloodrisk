@@ -10,6 +10,8 @@ from scipy.stats import t as student_t
 from scipy.stats import multivariate_normal as mvn
 from scipy.stats import multivariate_t as mvt
 
+from scipy.special import gammainc, gammaincinv
+
 from scipy.optimize import minimize_scalar
 
 from hydrodiy.stat import sutils
@@ -24,8 +26,6 @@ SYMETRICAL_COPULAS = ["Independence", "Comonotone",
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR",
                                    "KENDALL"]
-
-NKENDALL_DEFAULT = 20000
 
 STUDENT_DF_MIN = 2.01
 STUDENT_DF_MAX = 100.
@@ -116,6 +116,8 @@ def to2d(x, nstations):
 
     return x
 
+def get_nsamples(nstations):
+    return int(500**(nstations**0.3))
 
 def factory(name, nstations, copula_shape=4.):
     # Copula id supplied
@@ -148,9 +150,7 @@ class Copula():
 
         # underlying random variable
         self._mean = np.zeros(nstations)
-
         self._rv = None
-
         self._nkendall = None
         self._random_samples = None
         self._kendall_function_data = None
@@ -160,8 +160,10 @@ class Copula():
         txt = f"{self.name} copula {self.nstations} dimensions."
         return txt
 
-    def compute_kendall_function_data(self,
-                                      nkendall=NKENDALL_DEFAULT):
+    def compute_kendall_function_data(self, nkendall=None):
+        nsta = self.nstations
+        nkendall = get_nsamples(nsta) if nkendall is None else nkendal
+
         kdd = self._kendall_function_data
         compute = kdd is None
         if kdd is not None:
@@ -189,7 +191,10 @@ class Copula():
 
             printlog = logger is not None
             p = np.arange(1, nkendall + 1) / nkendall
-            kdd = pd.DataFrame({"value": np.sort(cdfs), "p": p})
+            kdd = pd.DataFrame({
+                "copula_cdf": np.sort(cdfs),
+                "kendall_cdf": p
+                })
             self._kendall_function_data = kdd
 
         return kdd
@@ -254,15 +259,13 @@ class Copula():
     def sample(self, nsamples):
         raise NotImplementedError
 
-    def kendall_function(self, cdf,
-                         nkendall=NKENDALL_DEFAULT):
+    def kendall_function(self, cdf, nkendall=None):
         kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(cdf, kdd.value, kdd.p)
+        return np.interp(cdf, kdd.copula_cdf, kdd.kendall_cdf)
 
-    def inverse_kendall_function(self, p,
-                                 nkendall=NKENDALL_DEFAULT):
+    def inverse_kendall_function(self, p, nkendall=None):
         kdd = self.compute_kendall_function_data(nkendall)
-        return np.interp(p, kdd.p, kdd.value)
+        return np.interp(p, kdd.kendall_cdf, kdd.copula_cdf)
 
 
 class ComonotoneCopula(Copula):
@@ -466,7 +469,8 @@ class GaussianOneFactorCopula(GaussianCopula):
                -self.params[None, :, None] * self.v[None, None, :],
                out=self.buf)
         np.multiply(self.buf, 1. / self.sqr[None, :, None], out=self.buf)
-        return norm.cdf(self.buf).prod(axis=1).sum(axis=-1) * self.du
+        out = norm.cdf(self.buf).prod(axis=1).sum(axis=-1) * self.du
+        return out
 
     def sample_z(self, nsamples):
         v = np.random.normal(size=nsamples)
@@ -476,6 +480,15 @@ class GaussianOneFactorCopula(GaussianCopula):
     def sample(self, nsamples):
         z = self.sample_z(nsamples)
         return self.marginal_cdf(z)
+
+    def kendall_function(self, cdf, nkendall=None):
+        kdd = self.compute_kendall_function_data(nkendall)
+        return np.interp(cdf, kdd.copula_cdf, kdd.kendall_cdf)
+
+    def inverse_kendall_function(self, p, nkendall=None):
+        kdd = self.compute_kendall_function_data(nkendall)
+        return np.interp(p, kdd.kendall_cdf, kdd.copula_cdf)
+
 
 
 class StudentCopula(Copula):
