@@ -42,16 +42,6 @@ def test_get_ams_concat():
     assert ams.shape == dows.shape
     assert all([dt == np.int64 for dt in dows.dtypes])
 
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    eig = np.linalg.eig(ams.cov())[0]
-    p = ax.bar(np.arange(1, 9), eig, width=0.6)
-    ax.bar_label(p, label_type="center")
-    plt.show()
-    import pdb; pdb.set_trace()
-
-
-
 @pytest.mark.parametrize("stationid",
                          datahub.get_stations().index.tolist())
 def test_rating_curves(stationid):
