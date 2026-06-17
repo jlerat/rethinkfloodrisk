@@ -23,6 +23,7 @@ MODELS = [
     "test_indexing",
     "test_cor",
     "test_copula",
+    "test_factors",
     "mv_censored",
     "mv_censored_factors",
     "mv_censored_no_missing"
