@@ -88,9 +88,8 @@ parameters {
   vector<lower=0, upper=1>[Ncens] wlat_cens;
 
   // Factor parameters
-  array[P] unit_vector[max(2, F)] rhos_unit;
-  array[P] vector<lower=-1, upper=1>[F] rhos_scalings; 
-  matrix[N, F] zlat_factors;
+  matrix<lower=-1, upper=1>[P, F] rhos_unit;
+  vector<lower=0, upper=1>[P] rhos_scalings; 
 }  
 
 transformed parameters {
@@ -114,13 +113,14 @@ transformed parameters {
   }
 
   // Rhos 
-  array[P] vector[F] rhos;
+  matrix[P, F] rhos;
   for(i in 1:P) {
-    if(F > 1)
-        rhos[i] = rhos_unit[i] .* rhos_scalings[i];
-    else    
-        rhos[i] = rhos_scalings[i];
+    real sc = dot_self(rhos_unit[i]);
+    rhos[i] = (rhos_scalings[i] / sc) * rhos_unit[i];
   }  
+
+  // Could we get the cholesky factor instead of corr?
+  matrix[P, P] corr = add_diag(rhos' * rhos, 1. - rows_dot_self(rhos));
 }
 
 model {
@@ -132,13 +132,6 @@ model {
   // Prior for latent factors 
 
   // rhos do not get priors -> uniform on the unit circle x uniform scaling
-
-  real sig_adj = get_student_std_adjust(copula_shape);
-  for(i in 1:F)
-    if(copula_id == 0) 
-        zlat_factors[i] ~ std_normal();
-    else
-        zlat_factors[i] ~ student_t(copula_shape, 0., sig_adj);
 
   // -- Latent variable matrix ---
   // (careful indexes switched compared to other stan code)
@@ -194,14 +187,11 @@ model {
   }
 
   // --- Likelihood ---
-  for(i in 1:P) {
-    vector[N] mu = zlat_factors * rhos[i]; 
-    real rs = sum(square(rhos[i]));
-    real sig = 1. - sqrt(rs);
-    if(copula_id == 0) 
-        z[i] ~ normal(mu, sig);
-    else
-        z[i] ~ student_t(mu, 0., sig_adj);
-  }   
 
+  if(copula_id == 0) 
+      z ~ multi_normal(zero_mean, corr);
+  else {
+      real sig_adj = get_student_std_adjust(copula_shape);
+      z ~ multi_student_t(copula_shape, zero_mean, corr * sig_adj);
+  }    
 }

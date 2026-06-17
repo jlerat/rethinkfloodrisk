@@ -115,7 +115,7 @@ def to2d(x, nstations):
     return x
 
 def get_nsamples(nstations):
-    return int(500**(nstations**0.3))
+    return 10000 + 5000 * nstations
 
 def factory(name, nstations, copula_shape=4.):
     # Copula id supplied

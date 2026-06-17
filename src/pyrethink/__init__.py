@@ -20,6 +20,9 @@ stan_test_cor = load_stan_model("stan_test_cor",
 stan_test_copula = load_stan_model("stan_test_copula",
                                    sf_folder=STAN_FILES_FOLDER)
 
+stan_test_factors = load_stan_model("stan_test_factors",
+                                   sf_folder=STAN_FILES_FOLDER)
+
 # Stan sampler
 FO = STAN_FILES_FOLDER
 name = "mv_censored_no_missing_sampling"

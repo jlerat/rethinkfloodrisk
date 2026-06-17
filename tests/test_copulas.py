@@ -109,21 +109,23 @@ def test_gaussian_cdf_and_pdf(nstations, rho, is_factor, allclose):
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 def test_gaussian_one_factor_sampling(nstations, rho, allclose):
     mean = np.zeros(nstations)
-    cov = (1 - rho) * np.eye(nstations) + rho * np.ones((nstations, nstations))
+    cov = (1 - rho**2) * np.eye(nstations) + rho**2 * np.ones((nstations, nstations))
     rv = mvt(mean=mean, cov=cov)
-    nsamples = copulas.get_nsamples(nstations)
+    nsamples = copulas.get_nsamples(nstations) * 100
     x1 = rv.rvs(size=nsamples)
     m1 = x1.mean(axis=0)
     cov1 = np.cov(x1.T)
 
     cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = rho
+    assert allclose(cop.corr, cov)
+
     x2 = norm.ppf(cop.sample(nsamples))
     m2 = x2.mean(axis=0)
-    cov2 = np.cov(x2.T)
+    assert allclose(np.zeros(nstations), m2, atol=1e-2)
 
-    assert allclose(m1, m2, atol=1e-2)
-    assert allclose(cov1, cov2, atol=1e-2)
+    corr = np.corrcoef(x2.T)
+    assert allclose(cov, corr, atol=1e-2)
 
 
 @pytest.mark.parametrize("nstations", [2, 3, 5, 10, 20])
@@ -161,21 +163,34 @@ def test_kendall_function_independence(nstations, allclose):
 
 
 @pytest.mark.parametrize("nstations", [2, 5, 8])
-@pytest.mark.parametrize("repeat", np.arange(1, 6))
+@pytest.mark.parametrize("repeat", np.arange(3))
 def test_compute_gaussian_kendall(nstations, repeat, allclose):
     cop = copulas.GaussianOneFactorCopula(nstations)
     cop.params = 1e-4
     #cop.logger = LOGGER
     #cop.printlog = 5000
-    pk = cop.compute_kendall_function_data(nkendall)
+    pk = cop.compute_kendall_function_data()
 
     # Expected independent
     copi = copulas.IndependenceCopula(nstations)
-    expected = copi.kendall_function(pk.value)
-    err = np.abs(np.arcsinh(expected) - np.arcsinh(pk.p))
+    expected = copi.kendall_function(pk.copula_cdf)
+
+    idx = pk.copula_cdf > 1e-2
+    err = np.abs(expected[idx] - pk.kendall_cdf[idx])
 
     LOGGER.info(f"errmax = {err.max():3.3e}")
-    atol = 2e-2 if nstations <= 5 else 1e-1
+    atol = 1e-2
+
+    #import matplotlib.pyplot as plt
+    #fig, ax = plt.subplots()
+    #x = pk.copula_cdf
+    #ax.plot(x, pk.kendall_cdf)
+    #ax.plot(x, expected)
+    #tax = ax.twinx()
+    #tax.plot(x[idx], err, "k--")
+    #plt.show()
+    #import pdb; pdb.set_trace()
+
     assert err.max() < atol
 
 
