@@ -1,8 +1,6 @@
 import math
 import numpy as np
 
-from scipy.stats import uniform_direction
-
 from floodstan.data_processing import univariate2cases
 from floodstan import marginals
 
@@ -137,8 +135,9 @@ class StanSamplingMultivariate():
 
         # Initialse rhos for factor copulas
         # assumes a high level of correlation between variables
-        rho = 1. / math.sqrt(self.nfactors + 1)
-        rhos = rho * np.ones((P, self.nfactors + 1))
+        rhos = np.zeros((P, self.nfactors + 1))
+        rhos[:, 0] = math.sqrt(0.8)
+        rhos[:, -1] = math.sqrt(0.2)
 
         # latent variables
         nmiss = len(self.idx_miss)
