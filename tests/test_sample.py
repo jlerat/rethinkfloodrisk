@@ -39,12 +39,9 @@ FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-DEBUG = False
-
 # Used to write test data for postpred checks
 WRITE_SAMPLE_DATA = True
 
-PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
 
 # Clean files
@@ -57,7 +54,8 @@ if FLOG.exists():
 for f in FTESTS.glob("test_mv_censored_no_missing_vs_floodstan*.png"):
     f.unlink()
 
-LOGGER = fsample.get_logger(use_stan_logger=PROGRESS, flog=FLOG)
+def get_logger(debug_mode):
+    return fsample.get_logger(use_stan_logger=debug_mode, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 3
 STAN_NWARM_DEFAULT = 5000
@@ -126,7 +124,8 @@ def test_sample_data(pcensor, nfactors, allclose):
 @pytest.mark.parametrize("nvars", [3])
 @pytest.mark.parametrize("copula_shape", [0., 4.])
 @pytest.mark.parametrize("nfactors", [0, 1])
-def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors, allclose):
+def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
+                 allclose, debug_mode):
     data, _, _, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
 
@@ -165,7 +164,7 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors, allclos
               chains=STAN_NCHAINS_DEFAULT,
               parallel_chains=STAN_NCHAINS_DEFAULT,
               iter_warmup=STAN_NWARM_DEFAULT,
-              show_progress=PROGRESS)
+              show_progress=debug_mode)
 
     # Choose sampler
     if nfactors == 0:
@@ -214,7 +213,8 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors, allclos
 
 @pytest.mark.parametrize("pcensor", [0., 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
-def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
+def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, debug_mode,
+                                             allclose):
     # Two variables only
     data, _, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
@@ -253,7 +253,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
               chains=STAN_NCHAINS_DEFAULT,
               parallel_chains=STAN_NCHAINS_DEFAULT,
               iter_warmup=nwarm,
-              show_progress=PROGRESS)
+              show_progress=debug_mode)
 
     smp1 = bivariate_censored_sampling(**kw)
     df1 = smp1.draws_pd()
@@ -286,15 +286,16 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
     pnames.append("corr_IW[2,1]")
 
-    LOGGER.info("")
-    LOGGER.info("-----------------")
+    logger = get_logger(debug_mode)
+    logger.info("")
+    logger.info("-----------------")
     sids = "/".join(data.columns.tolist())
-    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f}")
-    LOGGER.info(f"nwarm = {nwarm}")
-    LOGGER.info(f"nsamples = {nsamples}")
-    LOGGER.info(f"rho_min = {rho_min}")
-    LOGGER.info(f"rho_max = {rho_max}")
-    LOGGER.info("")
+    logger.info(f"stations={sids} pcensor={pcensor:0.2f}")
+    logger.info(f"nwarm = {nwarm}")
+    logger.info(f"nsamples = {nsamples}")
+    logger.info(f"rho_min = {rho_min}")
+    logger.info(f"rho_max = {rho_max}")
+    logger.info("")
 
     plt.close("all")
     n = len(pnames)
@@ -335,13 +336,13 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         msg = f"[{pname2:15s}] x1:m={x1.mean():6.2f} s={x1.std():6.2f}"\
               + f" // x2:m={x2.mean():6.2f} s={x2.std():6.2f}"\
               + f" // test: ks-logpv={kspv:4.1f} t-logpv={tpv:4.1f}"
-        LOGGER.info(msg)
+        logger.info(msg)
 
         # Test on matching the two dist
         # 10^-8 is very low for a p-value! Still looking ok visually though
         # Also skip correlation as it can be slightly different
         pv_thresh = -8
-        if not DEBUG and pname1 != "rho":
+        if not debug_mode and pname1 != "rho":
             assert kspv > pv_thresh
             assert tpv > pv_thresh
 
@@ -379,7 +380,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
 
 @pytest.mark.parametrize("nvars", [6, 8, 10])
 @pytest.mark.parametrize("nfactors", [1, 2, 3])
-def test_factors_correlation(nvars, nfactors, allclose):
+def test_factors_correlation(nvars, nfactors, allclose, debug_mode):
 
     kw = {"data": dict(P=nvars, F=nfactors)}
     fout = FTESTS / "sampling" / "factors_correlation"
@@ -400,7 +401,7 @@ def test_factors_correlation(nvars, nfactors, allclose):
               chains=1,
               parallel_chains=1,
               iter_warmup=nwarm,
-              show_progress=PROGRESS)
+              show_progress=debug_mode)
 
     smp = factors_correlation_sampling(**kw)
     df = smp.draws_pd()
