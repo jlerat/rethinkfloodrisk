@@ -5,26 +5,21 @@ from floodstan import load_stan_model
 STAN_FILES_FOLDER = Path(__file__).parent / "stan"
 
 # Tests
-stan_test_mv = load_stan_model("stan_test_mv",
-                               sf_folder=STAN_FILES_FOLDER)
+FO = STAN_FILES_FOLDER
+stan_test_mv = load_stan_model("stan_test_mv", sf_folder=FO)
 
 stan_test_functions = load_stan_model("stan_test_functions",
-                                      sf_folder=STAN_FILES_FOLDER)
+                                      sf_folder=FO)
 
 stan_test_indexing = load_stan_model("stan_test_indexing",
-                                     sf_folder=STAN_FILES_FOLDER)
+                                     sf_folder=FO)
 
-stan_test_cor = load_stan_model("stan_test_cor",
-                                sf_folder=STAN_FILES_FOLDER)
+stan_test_cor = load_stan_model("stan_test_cor", sf_folder=FO)
 
-stan_test_copula = load_stan_model("stan_test_copula",
-                                   sf_folder=STAN_FILES_FOLDER)
+stan_test_copula = load_stan_model("stan_test_copula", sf_folder=FO)
 
-stan_test_factors = load_stan_model("stan_test_factors",
-                                   sf_folder=STAN_FILES_FOLDER)
 
 # Stan sampler
-FO = STAN_FILES_FOLDER
 name = "mv_censored_no_missing_sampling"
 mv_censored_no_missing_sampling = load_stan_model(name, sf_folder=FO)
 
@@ -34,3 +29,5 @@ mv_censored_sampling = load_stan_model(name, sf_folder=FO)
 name = "mv_censored_factors_sampling"
 mv_censored_factors_sampling = load_stan_model(name, sf_folder=FO)
 
+factors_correlation_sampling = load_stan_model("factors_correlation",
+                                               sf_folder=FO)

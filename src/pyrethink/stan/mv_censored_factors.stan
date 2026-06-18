@@ -87,9 +87,10 @@ parameters {
   // Latent variables for censored data
   vector<lower=0, upper=1>[Ncens] wlat_cens;
 
-  // Factor parameters
-  matrix<lower=-1, upper=1>[P, F] rhos_unit;
-  vector<lower=0, upper=1>[P] rhos_scalings; 
+  // Factor parameters -> sample one more factor to obtain 
+  // a uniform in the hypersphere of dim F
+  // See https://en.wikipedia.org/wiki/N-sphere#Uniformly_at_random_within_the_n-ball
+  array[P] unit_vector[F + 1] rhos;
 }  
 
 transformed parameters {
@@ -112,15 +113,18 @@ transformed parameters {
     ulat_cens[i] = wlat_cens[i] * ucensors[ivar];
   }
 
-  // Rhos 
-  matrix[P, F] rhos;
-  for(i in 1:P) {
-    real sc = dot_self(rhos_unit[i]);
-    rhos[i] = (rhos_scalings[i] / sc) * rhos_unit[i];
+  // Lengthy code to circumvent stan's datatypes
+  // We only store corr here thanks to curly braces
+  matrix[P, P] corr;
+  {
+    matrix[P, F] rhos_matrix;
+    for(i in 1:P) 
+      rhos_matrix[i] = to_row_vector(rhos[i][1:F]);
+    
+    // Could we get the precision instead of corr?
+    corr = rhos_matrix * rhos_matrix';
+    corr = diag_matrix(1. - diagonal(corr)) + corr;
   }  
-
-  // Could we get the cholesky factor instead of corr?
-  matrix[P, P] corr = add_diag(rhos' * rhos, 1. - rows_dot_self(rhos));
 }
 
 model {
@@ -135,7 +139,7 @@ model {
 
   // -- Latent variable matrix ---
   // (careful indexes switched compared to other stan code)
-  array[P] vector[N] z;
+  array[N] vector[P] z;
 
   // Transform data to uniform marginals
   for(i in 1:Nobs) {
@@ -149,7 +153,7 @@ model {
     real obs = y[ival][ivar];
     real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), 
                                          copula_id, copula_shape);
-    z[ivar][ival] = zval;
+    z[ival][ivar] = zval;
 
     // log-Jacobian of z = inv_Phi(gev_cdf(obs))
     // dz/dobs = gev_pdf(obs) / phi(z)
@@ -165,12 +169,11 @@ model {
     real zmiss = copula_marginal_quantile(ulat_miss[i], 
                                           copula_id,
                                           copula_shape);
-    z[ivar][ival] = zmiss;
+    z[ival][ivar] = zmiss;
     
     // log-Jacobian of missing latent variable transform
     target += copula_marginal_quantile_log_jac(zmiss, copula_id, copula_shape);
   }
-
 
   // Set censored latent variables
   for(i in 1:Ncens) {
@@ -179,7 +182,7 @@ model {
     real zcens = copula_marginal_quantile(ulat_cens[i], 
                                           copula_id,
                                           copula_shape);
-    z[ivar][ival] = zcens;
+    z[ival][ivar] = zcens;
     
     // log-Jacobian of censored latent variable transform
     target += log(ucensors[ivar]) 
@@ -187,11 +190,13 @@ model {
   }
 
   // --- Likelihood ---
+  for(i in 1:N) {
+    if(copula_id == 0) 
+        z[i] ~ multi_normal(zero_mean, corr);
+    else {
+        real sig_adj = get_student_std_adjust(copula_shape);
+        z[i] ~ multi_student_t(copula_shape, zero_mean, corr * sig_adj);
+    }    
+  }
 
-  if(copula_id == 0) 
-      z ~ multi_normal(zero_mean, corr);
-  else {
-      real sig_adj = get_student_std_adjust(copula_shape);
-      z ~ multi_student_t(copula_shape, zero_mean, corr * sig_adj);
-  }    
 }

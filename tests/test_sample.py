@@ -13,6 +13,7 @@ from scipy.linalg import toeplitz
 
 from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvn
+from scipy.stats import uniform_direction
 
 from scipy.stats import t as student_t
 from scipy.stats import multivariate_t as mvt
@@ -32,12 +33,13 @@ from pyrethink import datahub
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 from pyrethink import mv_censored_no_missing_sampling
+from pyrethink import factors_correlation_sampling
 
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-DEBUG = True
+DEBUG = False
 
 # Used to write test data for postpred checks
 WRITE_SAMPLE_DATA = True
@@ -108,19 +110,7 @@ def test_sample_data(pcensor, nfactors, allclose):
 
     stan_inits = sv.initial_parameters
 
-    if nfactors == 0:
-        assert len(stan_inits) == 6
-    else:
-        assert len(stan_inits) == 8
-        ru = stan_inits["rhos_unit"]
-        assert ru.shape == (P, max(2, nfactors))
-        assert allclose((ru**2).sum(axis=1), 1)
-        assert ((ru >= 0.) & (ru <= 1)).all()
-
-        rs = stan_inits["rhos_scalings"]
-        assert rs.shape == (P, nfactors)
-        assert ((rs >= -1) & (rs <= 1)).all()
-
+    assert len(stan_inits) == 6
     assert len(stan_inits["wlat_miss"]) == nmiss
     assert len(stan_inits["wlat_cens"]) == ncens
 
@@ -385,4 +375,46 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     fp = fimg / fp
 
     fig.savefig(fp)
+
+
+@pytest.mark.parametrize("nvars", [6, 8, 10])
+@pytest.mark.parametrize("nfactors", [1, 2, 3])
+def test_factors_correlation(nvars, nfactors, allclose):
+
+    kw = {"data": dict(P=nvars, F=nfactors)}
+    fout = FTESTS / "sampling" / "factors_correlation"
+    fout.mkdir(parents=True, exist_ok=True)
+    for f in fout.glob("*.*"):
+        f.unlink()
+
+    stan_data = dict(P=nvars, F=nfactors)
+    stan_inits = dict(rhos=uniform_direction(nfactors + 1).rvs(size=nvars))
+
+    nwarm = 5
+    nsamples = 1000
+    kw = dict(data=stan_data,
+              seed=SEED,
+              iter_sampling=nsamples + nwarm,
+              output_dir=fout,
+              inits=stan_inits,
+              chains=1,
+              parallel_chains=1,
+              iter_warmup=nwarm,
+              show_progress=PROGRESS)
+
+    smp = factors_correlation_sampling(**kw)
+    df = smp.draws_pd()
+
+    # Ensure we only store rhos and corr
+    assert df.shape[1] == 10 + (nfactors + 1 + nvars) * nvars
+
+    cc = [f"corr[{i + 1},{j + 1}]"
+          for i, j in combinations(range(nvars), 2)]
+    corr = df.loc[:, cc]
+
+    # test if correlation terms are widespread
+    (_, qt1), (_, qt2) = corr.quantile([0.01, 0.99]).iterrows()
+    assert all(qt1 < -0.7)
+    assert all(qt2 > 0.7)
+
 
