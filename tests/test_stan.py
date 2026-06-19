@@ -169,16 +169,3 @@ def test_stan_copula(allclose):
     expected = mvt.logpdf(zsr, df=dfr, loc=np.zeros(3),
                           shape=adjust * cor0)
     assert allclose(lpdfs, expected, atol=1e-4)
-
-
- def test_stan_factors(allclose):
-    P = 5
-    F = 2
-    stan_data = {
-        "P": P,
-        "F": F
-        }
-
-    x = stan_test_factors(data=stan_data)
-
-

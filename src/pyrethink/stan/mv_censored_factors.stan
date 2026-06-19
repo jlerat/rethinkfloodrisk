@@ -90,7 +90,8 @@ parameters {
   // Factor parameters -> sample one more factor to obtain 
   // a uniform in the hypersphere of dim F
   // See https://en.wikipedia.org/wiki/N-sphere#Uniformly_at_random_within_the_n-ball
-  array[P] unit_vector[F + 1] rhos;
+  // Note that we sample only positive values to stick to positive correlations
+  array[P] vector<lower=0.>[F + 1] zrhos;
 }  
 
 transformed parameters {
@@ -119,7 +120,7 @@ transformed parameters {
   {
     matrix[P, F] rhos_matrix;
     for(i in 1:P) 
-      rhos_matrix[i] = to_row_vector(rhos[i][1:F]);
+      rhos_matrix[i] = to_row_vector(zrhos[i][1:F] / sqrt(dot_self(zrhos[i])));
     
     // Could we get the precision instead of corr?
     corr = rhos_matrix * rhos_matrix';
@@ -134,8 +135,8 @@ model {
   yshape1 ~ normal(yshape1_prior[1], yshape1_prior[2]) T[shape1_lower, shape1_upper];
 
   // Prior for latent factors 
-
-  // rhos do not get priors -> uniform on the unit circle x uniform scaling
+  for(i in 1:P)
+    zrhos[i] ~ std_normal();
 
   // -- Latent variable matrix ---
   // (careful indexes switched compared to other stan code)
