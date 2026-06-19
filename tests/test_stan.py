@@ -22,7 +22,6 @@ from pyrethink import stan_test_indexing
 from pyrethink import stan_test_functions
 from pyrethink import stan_test_cor
 from pyrethink import stan_test_copula
-from pyrethink import stan_test_factors
 
 FTESTS = Path(__file__).resolve().parent
 
