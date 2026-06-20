@@ -182,5 +182,9 @@ def get_params_lh_moments():
     fs = DATA_FOLDER / "priors" / "params_lh_moments.csv"
     df, _ = csv.read_csv(fs, dtype={"stationid": str})
     df = df.rename(columns={"stationid": "STATIONID"})
-    return df
+
+    fp = DATA_FOLDER / f"rff_predictors_v{DATA_VERSION}.csv"
+    dfp, _ = csv.read_csv(fp, dtype={"STATIONID": str})
+
+    return pd.merge(df, dfp, on="STATIONID")
 
