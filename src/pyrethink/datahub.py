@@ -179,12 +179,16 @@ def get_rating_curves(stationid, only_last=False):
 
 
 def get_params_lh_moments():
+    # Parameter data
     fs = DATA_FOLDER / "priors" / "params_lh_moments.csv"
     df, _ = csv.read_csv(fs, dtype={"stationid": str})
     df = df.rename(columns={"stationid": "STATIONID"})
 
+    # Predictor data
     fp = DATA_FOLDER / f"rff_predictors_v{DATA_VERSION}.csv"
     dfp, _ = csv.read_csv(fp, dtype={"STATIONID": str})
-
+    dfp = dfp.drop("CENTER_OZ_METRIC[-]", axis=1)
+    dfp.columns = [cn if re.search("CENTROID|STATIONID", cn) else f"PREDICTOR_{cn}"
+                   for cn in dfp.columns]
     return pd.merge(df, dfp, on="STATIONID")
 
