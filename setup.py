@@ -25,8 +25,7 @@ MODELS = [
     "test_copula",
     "factors_correlation",
     "mv_censored",
-    "mv_censored_factors",
-    "mv_censored_no_missing"
+    "mv_censored_factors"
     ]
 
 CMDSTAN_VERSION = "2.36.0"

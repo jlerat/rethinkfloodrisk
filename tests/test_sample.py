@@ -32,7 +32,6 @@ from pyrethink import sample
 from pyrethink import datahub
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
-from pyrethink import mv_censored_no_missing_sampling
 from pyrethink import factors_correlation_sampling
 
 FTESTS = Path(__file__).resolve().parent
@@ -51,7 +50,7 @@ if FLOG.exists():
     except:
         pass
 
-for f in FTESTS.glob("test_mv_censored_no_missing_vs_floodstan*.png"):
+for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
     f.unlink()
 
 def get_logger(debug_mode):
@@ -168,10 +167,7 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
 
     # Choose sampler
     if nfactors == 0:
-        if is_missing:
-            sampler = mv_censored_sampling
-        else:
-            sampler = mv_censored_no_missing_sampling
+        sampler = mv_censored_sampling
     else:
         sampler = mv_censored_factors_sampling
 
@@ -213,7 +209,7 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
 
 @pytest.mark.parametrize("pcensor", [0., 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
-def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, debug_mode,
+def test_mv_censored_vs_floodstan(stationpair, pcensor, debug_mode,
                                              allclose):
     # Two variables only
     data, _, dows, _ = datahub.get_ams_concat()
@@ -276,7 +272,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, debug_mode,
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 
-    smp2 = mv_censored_no_missing_sampling(**kw)
+    smp2 = mv_censored_sampling(**kw)
     df2 = smp2.draws_pd()
     diag2 = report.process_stan_diagnostic(smp2.diagnose())
 
@@ -358,7 +354,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, debug_mode,
         xb = max(x1.max(), x2.max())
         bins = np.linspace(xa, xb, 30)
         ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
-        ax.hist(x2, bins=bins, label="mv_censored_no_missing", edgecolor="0.5", alpha=0.6)
+        ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
 
         title = f"{pname2} - ks-logpv={kspv:0.1f}"
         ax.set_title(title, fontweight="bold")
@@ -371,7 +367,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, debug_mode,
     sids = "-".join(data.columns.tolist())
     fimg = FTESTS / "images"
     fimg.mkdir(exist_ok=True)
-    fp = f"test_mv_censored_no_missing_vs_floodstan_stations{sids}"\
+    fp = f"test_mv_censored_vs_floodstan_stations{sids}"\
         + f"_pcens{pcensor*100:0.02f}.png"
     fp = fimg / fp
 

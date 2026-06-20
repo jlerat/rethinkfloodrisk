@@ -20,9 +20,6 @@ stan_test_copula = load_stan_model("stan_test_copula", sf_folder=FO)
 
 
 # Stan sampler
-name = "mv_censored_no_missing_sampling"
-mv_censored_no_missing_sampling = load_stan_model(name, sf_folder=FO)
-
 name = "mv_censored_sampling"
 mv_censored_sampling = load_stan_model(name, sf_folder=FO)
 
