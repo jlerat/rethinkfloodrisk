@@ -52,18 +52,18 @@ jobs:
           set -e
           uv run --locked pytest -cov=pyrethink --cov-report xml:coverage.xml --cov-report html -cov-report=term-missing tests
  
-      - name: Parse coverage report and create badge
-        run: |
-          uv run python -c "import xml.etree.ElementTree as ET; from anybadge import Badge; cov = float(ET.parse('coverage.xml').getroot().get('line-rate')) * 100; covbadge = Badge('Coverage', value=f'{cov:0.0f}%', thresholds={60:'red', 70:'orange', 80:'lightgreen', 90:'green'}); covbadge.write_badge('coverage_badge.svg', True)"
+      #- name: Parse coverage report and create badge
+      #  run: |
+      #    uv run python -c "import xml.etree.ElementTree as ET; from anybadge import Badge; cov = float(ET.parse('coverage.xml').getroot().get('line-rate')) * 100; covbadge = Badge('Coverage', value=f'{cov:0.0f}%', thresholds={60:'red', 70:'orange', 80:'lightgreen', 90:'green'}); covbadge.write_badge('coverage_badge.svg', True)"
 
-      - name: Update gist badge
-        run: |
-          set -e
-          sed 's/\"/\\\"/g' coverage_badge.svg > coverage_badge.txt
-          echo "{\"files\": {\"coverage_badge.svg\": {\"content\": \"$(cat coverage_badge.txt)\"}}}" > coverage_badge.json
-          curl -X PATCH -H "Authorization: token ${{ secrets.COVERAGE_GIST_TOKEN }}" \
-                -d @coverage_badge.json \
-                "https://api.github.com/gists/${{ secrets.COVERAGE_GIST_ID }}"
+      #- name: Update gist badge
+      #  run: |
+      #    set -e
+      #    sed 's/\"/\\\"/g' coverage_badge.svg > coverage_badge.txt
+      #    echo "{\"files\": {\"coverage_badge.svg\": {\"content\": \"$(cat coverage_badge.txt)\"}}}" > coverage_badge.json
+      #    curl -X PATCH -H "Authorization: token ${{ secrets.COVERAGE_GIST_TOKEN }}" \
+      #          -d @coverage_badge.json \
+      #          "https://api.github.com/gists/${{ secrets.COVERAGE_GIST_ID }}"
 
       - name: Upload pytest test log files
         uses: actions/upload-artifact@v7
