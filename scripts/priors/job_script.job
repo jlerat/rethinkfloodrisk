@@ -13,6 +13,8 @@ set -a
 
 module load uv
 
+export CMDSTAN=$RFWORK/cmdstan/cmdstan-2.39.0
+
 FROOT=$NFRSK
 
 jobname=$SLURM_JOB_NAME

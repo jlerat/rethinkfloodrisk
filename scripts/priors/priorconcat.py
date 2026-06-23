@@ -63,19 +63,24 @@ def get_logger(config, script_paths):
     return logger
 
 
-def process(config, script_paths, logger, data):
+def process(config, script_paths, logger):
     # Concatenate
-    lf = script_paths.fout.parent.glob("*.csv")
+    lf = list(script_paths.fout.glob("*.csv"))
+
+    logger.info(f"Found {len(lf)} files")
     res = []
     for f in lf:
+        if f.stem == "priors":
+            logger.info("Skipping priors.csv")
+            continue
         df, _ = csv.read_csv(f)
         res.append(df)
 
     res = pd.concat(res)
 
     # To disk
-    fp = script_paths.fout.parent / f"priors.csv"
-    csv.write_csv(priors, fp, "Concatenated prior data",
+    fp = script_paths.fout / f"priors.csv"
+    csv.write_csv(res, fp, "Concatenated prior data",
                   script_paths.source_file,
                   compress=False, lineterminator="\n")
 
