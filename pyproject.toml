@@ -35,6 +35,7 @@ dependencies = [
     "pandas >= 2.0.0",
     "hydrodiy",
     "floodstan",
+    "ipython>=9.14.1",
 ]
 
 [dependency-groups]

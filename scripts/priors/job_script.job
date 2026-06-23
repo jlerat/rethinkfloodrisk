@@ -11,7 +11,7 @@
 
 set -a
 
-# module load uv ???
+module load uv
 
 FROOT=$NFRSK
 
@@ -31,6 +31,7 @@ fi
 
 echo -------------------
 echo Running script $BASE 
+echo Script file : $PYSCRIPT
 echo 
 echo --- System info ---
 echo whoami  : `whoami`
@@ -39,7 +40,7 @@ echo hostname: `hostname -f`
 echo uname   : `uname -a`
 #echo issue   : `cat /etc/issue`
 echo release : `lsb_release -a` 
-echo python  : `which python`
+echo python  : `uv run which python`
 
 ## WARNING !
 ## Don't forget to export ALL as well otherwise the script won't load the

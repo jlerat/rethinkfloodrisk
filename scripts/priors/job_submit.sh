@@ -24,7 +24,7 @@ NTASKS=12
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
 
 # Job config
-JOBSCRIPT=$FROOT/scripts/fit/job_script.job
+JOBSCRIPT=$FROOT/scripts/priors/job_script.job
 
 if [ ! -f "$JOBSCRIPT" ]; then
     echo "ERROR - script $JOBSCRIPT does not exists"
@@ -43,7 +43,7 @@ JOBCONFIGS["0,4"]="X"          # job dependency
 JOBCONFIGS["0,5"]="X"          # job id
 
 # postprocessing concat job (depends on MVN postprocessing)
-JOBCONFIGS["1,0"]="mvnconcat"    # Job name
+JOBCONFIGS["1,0"]="priorconcat"    # Job name
 JOBCONFIGS["1,1"]="1"            # number of cpus
 JOBCONFIGS["1,2"]="0"            # arrays
 JOBCONFIGS["1,3"]="0"            # use user supplied array if any

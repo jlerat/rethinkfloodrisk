@@ -86,6 +86,7 @@ def get_data(config, script_paths, logger):
         theta, fstat, fpvalue, _ = sutils.lstsq(xfull, y)
         preds = theta.tpvalue.sort_values().index.tolist()[:npred]
     else:
+        theta = None
         preds = ["INTERCEPT"]
 
     x = xfull.loc[:, preds]
@@ -186,17 +187,19 @@ def process(config, script_paths, logger, data):
     priors = []
     pname = parname.lower()
     pname = f"log{pname}" if parname == "LOCN" else pname
+    opts = task.to_dict()["options"]
     for i, isite in enumerate(data.stationids_idx):
         dd = {
             "STATIONID": data.stationids[i],
+            "TASKID": config.taskid,
+            "MARGINAL": marginal,
+            "NPREDICTORS": npred,
             "PARAMETER": pname,
             "PRIOR_MEAN": float(ypred[:, isite].mean().round(3)),
             "PRIOR_STD": float(ypred[:, isite].std(ddof=1).round(3)),
-            "Y": data.predictand.iloc[isite],
-            "MARGINAL": marginal,
+            "PREDICTAND": data.predictand.iloc[isite],
             "PREDICTORS": "/".join(data.predictors)
         }
-
         for m in config.stan_diag_metrics:
             dd[f"STAN_DIAG_{m}"] = diag[m]
 
