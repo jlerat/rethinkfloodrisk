@@ -11,9 +11,11 @@
 
 set -a
 
-FROOT=$NFRSK
+module load uv
 
-conda activate env_jl_v2_pet
+export CMDSTAN=$RFWORK/cmdstan/cmdstan-2.39.0
+
+FROOT=$NFRSK
 
 jobname=$SLURM_JOB_NAME
 jobid=$SLURM_ARRAY_JOB_ID
@@ -31,6 +33,7 @@ fi
 
 echo -------------------
 echo Running script $BASE 
+echo Script file : $PYSCRIPT
 echo 
 echo --- System info ---
 echo whoami  : `whoami`
@@ -39,7 +42,7 @@ echo hostname: `hostname -f`
 echo uname   : `uname -a`
 #echo issue   : `cat /etc/issue`
 echo release : `lsb_release -a` 
-echo python  : `which python`
+echo python  : `uv run which python`
 
 ## WARNING !
 ## Don't forget to export ALL as well otherwise the script won't load the
@@ -58,4 +61,4 @@ echo
 
 # .. run with overwrite option
 ferr=$FLOG/${jobname}_TASK${taskid}_JOB${jobid}.err
-srun --ntasks=1 --error=$ferr python $PYSCRIPT -t $taskid -v $VERSION
+srun --ntasks=1 --error=$ferr uv run python $PYSCRIPT -t $taskid -v $VERSION
