@@ -6,7 +6,7 @@ from floodstan import marginals
 
 from pyrethink import copulas
 
-RHO_MIN_DEFAULT = 0.
+RHO_MIN_DEFAULT = -1.
 RHO_MAX_DEFAULT = 1.
 
 DELTA_DAYS_MAX_DEFAULT = 10
@@ -161,10 +161,11 @@ class StanSamplingMultivariate():
 
     def to_dict(self):
         marginal = self.marginal
+        nsta = self.data.shape[1]
 
         dd = {
             "N": self.data.shape[0],
-            "P": self.data.shape[1],
+            "P": nsta,
             "F": self.nfactors,
             "y": self.data,
             "Nobs": len(self.idx_obs),
@@ -176,9 +177,9 @@ class StanSamplingMultivariate():
             "marginal_id": int(self.marginal_id),
             "copula_id": int(self.copula_id),
             "copula_shape": float(self.copula_shape),
-            "ylocn_prior": marginal.locn_prior.to_list(),
-            "ylogscale_prior": marginal.logscale_prior.to_list(),
-            "yshape1_prior": marginal.shape1_prior.to_list(),
+            "ylocn_prior": [marginal.locn_prior.to_list()] * nsta,
+            "ylogscale_prior": [marginal.logscale_prior.to_list()] * nsta,
+            "yshape1_prior": [marginal.shape1_prior.to_list()] * nsta,
             "locn_lower": float(marginal.locn_prior.lower),
             "locn_upper": float(marginal.locn_prior.upper),
             "logscale_lower": float(marginal.logscale_prior.lower),
