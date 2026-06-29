@@ -40,15 +40,15 @@ data {
   real copula_shape; 
 
   // Prior parameters
-  vector[2] ylocn_prior;
+  array[P] vector[2] ylocn_prior;
   real<lower=-1e10> locn_lower;
   real<lower=locn_lower, upper=1e10> locn_upper;
   
-  vector[2] ylogscale_prior;
+  array[P] vector[2] ylogscale_prior;
   real<lower=-20> logscale_lower;
   real<lower=logscale_lower, upper=20> logscale_upper;
   
-  vector[2] yshape1_prior;
+  array[P] vector[2] yshape1_prior;
   real shape1_lower;
   real<lower=shape1_lower> shape1_upper;
 
@@ -67,10 +67,6 @@ transformed data {
   // Check number of data in each category adds up 
   int Ntest = N * P - Nobs - Ncens - Nmiss;
   int<lower=0, upper=0> Ncheck = Ntest; 
-
-  // Check number of factor does not exceed size of correlation matrix
-  // n corr = P (P-1) / 2     n fact = P * F  hence (P-1)/2 >= F
-  int<lower=0> Ncheck_corr = P - 1 - 2 * F;
 
   row_vector[P] zero_mean = zeros_row_vector(P);
 }
@@ -130,9 +126,11 @@ transformed parameters {
 
 model {
   // --- Priors ---
-  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
-  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
-  yshape1 ~ normal(yshape1_prior[1], yshape1_prior[2]) T[shape1_lower, shape1_upper];
+  for(i in 1:P) {
+    ylocn[i] ~ normal(ylocn_prior[i][1], ylocn_prior[i][2]) T[locn_lower, locn_upper];
+    ylogscale[i] ~ normal(ylogscale_prior[i][1], ylogscale_prior[i][2]) T[logscale_lower, logscale_upper];
+    yshape1[i] ~ normal(yshape1_prior[i][1], yshape1_prior[i][2]) T[shape1_lower, shape1_upper];
+  }
 
   // Prior for latent factors 
   for(i in 1:P)

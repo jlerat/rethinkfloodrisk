@@ -216,7 +216,7 @@ def process(config, script_paths, logger, data):
     priors = pd.DataFrame(priors)
 
     # To disk
-    fp = script_paths.fout.parent / f"priors_TASK{taskid}_{parname}_{marginal}_NP{npred}.csv"
+    fp = script_paths.fout / f"priors_TASK{taskid}_{parname}_{marginal}_NP{npred}.csv"
     comment = f"Prior data for variable {parname} and marginal {marginal}."
     csv.write_csv(priors, fp, comment,
                   script_paths.source_file,

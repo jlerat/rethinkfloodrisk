@@ -105,6 +105,10 @@ def test_sample_data(pcensor, nfactors, allclose):
     assert nobs + ncens == nok
     assert nmiss == nval - nok
 
+    assert len(stan_data["ylocn_prior"]) == P
+    assert len(stan_data["ylogscale_prior"]) == P
+    assert len(stan_data["yshape1_prior"]) == P
+
     stan_inits = sv.initial_parameters
 
     assert len(stan_inits) == 6

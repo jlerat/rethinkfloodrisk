@@ -167,6 +167,7 @@ def compute_predictive_checks(metric_obs, metric_sim):
 def posterior_predictive_checks(yobs, params,
                                 copula_name,
                                 copula_shape=4.,
+                                copula_factors=0,
                                 logger=None,
                                 marginal=GEV(),
                                 iterlog=500):
