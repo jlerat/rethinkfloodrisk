@@ -36,6 +36,46 @@ from pyrethink import sample as rsample
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 
+def get_options(version, version_priors=1):
+    models = [
+        "Univariate",
+        "Gaussian",
+        "GaussianFactor1",
+        "GaussianFactor2",
+        "Student3",
+        "Student5"
+        ]
+    pcensors = [0.3]
+    priors = ["uninformative", "informative"]
+    excludes = ["NONE",
+                "2021"]
+    stations = datahub.get_stations()
+    sids = stations.index.to_list()
+    groups = ["203014-203002-203012"] + ["-".join(sids)] + sids
+
+    opm = hyruns.OptionManager(version=version,
+                               version_priors=version_priors)
+    opm.from_cartesian_product(pcensor=pcensors,
+                               exclude=excludes,
+                               model=models,
+                               prior=priors,
+                               group=groups)
+    # .. exclude options with a single stations and
+    # multivariate model
+    keep = []
+    for task in opm.tasks:
+        nsta = len(task["group"].split("-"))
+        if nsta == 1 and task["model"] != "Univariate":
+            continue
+        if nsta > 1 and task["model"] == "Univariate":
+            continue
+        if nsta < 8 and task["model"] == "GaussianFactor2":
+            continue
+        keep.append(task)
+    opm.tasks = keep
+    return opm
+
+
 def get_script_paths(config):
     source_file = Path(__file__).resolve()
     froot = source_file.parent.parent.parent
@@ -109,8 +149,10 @@ def get_data(config, script_paths, logger):
         marginal = marginals.factory("GEV")
         y = df.loc[:, stationids].squeeze()
         censor = np.nanpercentile(y, pcensor * 100)
+        nchains = config.stan_nchains if hasattr(config, "stan_nchains")\
+                else 10
         sv = fsample.StanSamplingVariable(marginal, y, censor,
-                                          ninits=config.stan_nchains)
+                                          ninits=nchains)
     else:
         y = df.loc[:, stationids]
         censors = np.nanpercentile(y, pcensor * 100, axis=0)
@@ -264,8 +306,6 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-o", "--overwrite", help="Overwrite data",
                         action="store_true", default=False)
-    parser.add_argument("-s", "--sitepattern", help="Site selection pattern",
-                        type=str, default=".*")
     args = parser.parse_args()
 
     # Config
@@ -288,45 +328,7 @@ if __name__ == "__main__":
 
 
     # .. options
-    models = [
-        "Univariate",
-        "Gaussian",
-        "GaussianFactor1",
-        "GaussianFactor2",
-        "Student3",
-        "Student5"
-        ]
-    pcensors = [0.3]
-    priors = ["uninformative", "informative"]
-    excludes = ["NONE",
-                "2021"]
-    stations = datahub.get_stations()
-    sids = stations.index.to_list()
-    groups = ["203014-203002-203012"] + ["-".join(sids)] + sids
-
-    opm = hyruns.OptionManager(version=version,
-                               version_priors=version_priors,
-                               stan_nwarm=stan_nwarm,
-                               stan_nchains=stan_nchains,
-                               stan_nsamples=stan_nsamples)
-    opm.from_cartesian_product(pcensor=pcensors,
-                               exclude=excludes,
-                               model=models,
-                               prior=priors,
-                               group=groups)
-    # .. exclude options with a single stations and
-    # multivariate model
-    keep = []
-    for task in opm.tasks:
-        nsta = len(task["group"].split("-"))
-        if nsta == 1 and task["model"] != "Univariate":
-            continue
-        if nsta > 1 and task["model"] == "Univariate":
-            continue
-        if nsta < 8 and task["model"] == "GaussianFactor2":
-            continue
-        keep.append(task)
-    opm.tasks = keep
+    opm = get_options(version, version_priors)
 
     if debug:
         ctype = "mv"
@@ -339,7 +341,7 @@ if __name__ == "__main__":
             taskid = opm.search(model="GaussianFactor2$",
                                 exclude="NONE",
                                 prior="^informative",
-                                group=groups[1])[0]
+                                group=opm.options["group"][1])[0]
 
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
