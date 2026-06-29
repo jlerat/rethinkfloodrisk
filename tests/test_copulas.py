@@ -48,7 +48,7 @@ def test_copulas(name, nfactors, nstations, allclose):
     if name in ["Gaussian", "Student"]:
         cop.params = (1 - rho) * np.eye(nstations) \
                      + rho * np.ones((nstations, nstations))
-    if name == "GaussianFactor":
+    elif name == "GaussianFactor":
         # Check single rho works
         cop.params = cop.random_params(True)
 
