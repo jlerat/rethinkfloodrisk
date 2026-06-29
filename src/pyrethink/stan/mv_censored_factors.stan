@@ -68,10 +68,6 @@ transformed data {
   int Ntest = N * P - Nobs - Ncens - Nmiss;
   int<lower=0, upper=0> Ncheck = Ntest; 
 
-  // Check number of factor does not exceed size of correlation matrix
-  // n corr = P (P-1) / 2     n fact = P * F  hence (P-1)/2 >= F
-  int<lower=0> Ncheck_corr = P - 1 - 2 * F;
-
   row_vector[P] zero_mean = zeros_row_vector(P);
 }
 

@@ -6,6 +6,7 @@ import pandas as pd
 from scipy.stats import norm
 from scipy.stats import gamma
 from scipy.stats import invwishart
+from scipy.stats import uniform_direction
 from scipy.stats import t as student_t
 from scipy.stats import multivariate_normal as mvn
 from scipy.stats import multivariate_t as mvt
@@ -15,11 +16,11 @@ from scipy.optimize import minimize_scalar
 from hydrodiy.stat import sutils
 
 COPULA_NAMES = ["Gaussian", "Student",
-                "GaussianOneFactor", "Independence",
+                "GaussianFactor", "Independence",
                 "Comonotone", "Gumbel"]
 
 SYMETRICAL_COPULAS = ["Independence", "Comonotone",
-                      "Gaussian", "GaussianOneFactor",
+                      "Gaussian", "GaussianFactor",
                       "Student"]
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR",
@@ -114,10 +115,26 @@ def to2d(x, nstations):
 
     return x
 
+
+def normal_cdf_approx(x, out=None):
+    """ Approximation from https://www.jiem.org/index.php/jiem/article/view/60
+    """
+    if out is None:
+        out = np.empty(x.shape)
+
+    np.multiply(x, x, out=out)
+    np.multiply(x, out, out=out)
+    np.exp(-0.07056 * out - 1.5976 * x, out=out)
+    np.add(out, 1., out=out)
+    np.reciprocal(out, out=out)
+    return out
+
+
 def get_nsamples(nstations):
     return 10000 + 5000 * nstations
 
-def factory(name, nstations, copula_shape=4.):
+
+def factory(name, nstations, nfactors=1, copula_shape=4.):
     # Copula id supplied
     if isinstance(name, int):
         name = COPULA_NAMES[name]
@@ -130,8 +147,8 @@ def factory(name, nstations, copula_shape=4.):
         return GaussianCopula(nstations)
     elif name == "Student":
         return StudentCopula(nstations, copula_shape)
-    elif name == "GaussianOneFactor":
-        return GaussianOneFactorCopula(nstations)
+    elif name == "GaussianFactor":
+        return GaussianFactorCopula(nstations, nfactors)
     elif name == "Gumbel":
         return GumbelCopula(nstations)
 
@@ -388,10 +405,10 @@ class GaussianCopula(Copula):
         return mvn.rvs(mean=muc, cov=Sc)
 
 
-class GaussianOneFactorCopula(GaussianCopula):
+class GaussianFactorCopula(GaussianCopula):
     """ Compute the CDF for a Gaussian factor copula such that
         Ui = Phi(Zi)
-        Zi = sqrt(rho) V + sqrt(1 - rho) Ei
+        Zi = sum_k sqrt(rho_k) V_k + sqrt(1 - rho) Ei
         with V ~ N(0,1)  Ei ~ N(0,1)
 
         Hence Z ~ N(0, Sigma)
@@ -399,12 +416,17 @@ class GaussianOneFactorCopula(GaussianCopula):
 
         Computation is done in an arbitrary number of dimensions.
     """
-    def __init__(self, nstations):
-        super(GaussianOneFactorCopula, self).__init__(nstations)
-        self.name = "GaussianOneFactor"
+    def __init__(self, nstations, nfactors=1):
+        super(GaussianFactorCopula, self).__init__(nstations)
+        self.name = "GaussianFactor"
+        self._nfactors = int(nfactors)
         self._sqr = None
         self._corr = None
         self.set_approx()
+
+    @property
+    def nfactors(self):
+        return self._nfactors
 
     @property
     def params(self):
@@ -413,21 +435,28 @@ class GaussianOneFactorCopula(GaussianCopula):
     @params.setter
     def params(self, rhos):
         nsta = self.nstations
+        nfact = self.nfactors
+
         if isinstance(rhos, float):
             # Allows for single rho
-            rhos = rhos * np.ones(nsta)
+            rhos = rhos * np.ones((nsta, nfact))
 
-        if len(rhos) != nsta:
-            errmsg = f"Expected rhos of length {nsta}."
+        rhos = np.array(rhos)
+        if rhos.ndim == 1:
+            rhos = np.repeat(rhos[:, None], nfact, axis=1)
+
+        if rhos.shape != (nsta, nfact):
+            errmsg = f"Expected rhos of shape {nsta}x{nfact}."
             raise ValueError(errmsg)
 
-        if np.any((rhos <= -1) | (rhos >= 1)):
-            raise ValueError("Expected rhos in ]-1, 1[")
+        sr = (rhos**2).sum(axis=1)
+        if np.any(sr >= 1):
+            raise ValueError("Expected rhos**2 sum < 1")
 
         self._params = rhos
-        self._sqr = np.sqrt(1 - rhos**2)
+        self._sqr = np.sqrt(1 - sr)
 
-        corr = rhos[:, None] @ rhos[None, :]
+        corr = rhos @ rhos.T
         corr = np.eye(nsta) + corr - np.diag(np.diag(corr))
         self._corr = corr
         self._rv = mvn(self._mean, corr)
@@ -440,40 +469,73 @@ class GaussianOneFactorCopula(GaussianCopula):
     def sqr(self):
         return self._sqr
 
-    def set_approx(self, napprox=500):
-            self.napprox = napprox
-            eps = 5e-1 / napprox
-            u = np.linspace(eps, 1 - eps, napprox)
-            self.v = norm.ppf(u)
-            self.du = u[1] - u[0]
-            self.buf = np.empty((1, self.nstations, napprox))
+    def random_params(self, single_value=False):
+        nsta = self.nstations
+        nfact = self.nfactors
+        if single_value:
+            sq = math.sqrt(nsta)
+            rho = np.random.uniform(-1. / sq, 1. / sq)
+            return rho * np.ones((nsta, nfact))
+        else:
+            return uniform_direction(nfact + 1).rvs(size=nsta)[:, :-1]
 
-    def cdf(self, u):
+    def set_approx(self, napprox=500):
+        self.napprox = napprox
+        eps = 5e-1 / napprox
+        u = np.linspace(eps, 1 - eps, napprox)
+        v = norm.ppf(u)
+        self.v = [m[None, None, :] for m in np.meshgrid(*[v] * self.nfactors)]
+        self.du = u[1] - u[0]
+
+        dims = [1, self.nstations] + [napprox] * self.nfactors
+        self.buf = np.empty(dims)
+        self.buf_cdf = np.empty(dims)
+
+
+    def cdf(self, u, approx=True):
         """ Fast computation of CDF useful for high dimensions.
         Note that pdf is not approximated.
         """
         u = to2d(u, self.nstations)
         if self.buf.shape[0] != len(u):
-            self.buf = np.empty((len(u), self.nstations, self.napprox))
+            dim = [len(u), self.nstations] + [self.napprox] * self.nfactors
+            self.buf = np.empty(dim)
+            self.buf_cdf = np.empty(dim)
+
+        self.buf.fill(0.)
 
         # CDF for a factor copula is
         # p(X1<x1, ..., Xn<xn) =
-        #      int(prod(Phi(xi - rho_i v) / sqrt(1 - rho_i^2)) dv,
-        #          v=-infty,
-        #          v=+infty)
+        #      int(prod(Phi(xi - rho_i1 v1 - rhoi2 v2 ...) / sqrt(1 - sum rho_ik^2)) dv1 dv2.. dvp,
+        #          vk=-infty,
+        #          vk=+infty)
 
-        x = self.marginal_ppf(u)
-        np.add(x[:, :, None],
-               -self.params[None, :, None] * self.v[None, None, :],
-               out=self.buf)
-        np.multiply(self.buf, 1. / self.sqr[None, :, None], out=self.buf)
-        out = norm.cdf(self.buf).prod(axis=1).sum(axis=-1) * self.du
-        return out
+        nfact = self.nfactors
+        dims = np.arange(2, 2 + nfact).tolist()
+        # divide by nfact because we add this nfact times in the loop below
+        dx = np.expand_dims(self.marginal_ppf(u) / nfact, dims)
+        rhos = self.params
+        for i in range(nfact):
+            r = np.expand_dims(rhos[:, i][None, :], dims)
+            np.add(self.buf, dx - r * self.v[i], out=self.buf)
+
+        sqr = np.expand_dims(self.sqr[None, :], dims)
+        np.multiply(self.buf, 1. / sqr, out=self.buf)
+
+        dims = np.arange(1, 1 + nfact).tolist()
+        if approx:
+            normal_cdf_approx(self.buf, out=self.buf_cdf)
+        else:
+            self.buf_cdf[:] = norm.cdf(self.buf)
+
+        out = np.apply_over_axes(np.sum, self.buf_cdf.prod(axis=1), dims) * self.du**nfact
+        return out.squeeze()
 
     def sample_z(self, nsamples):
-        v = np.random.normal(size=nsamples)
+        nfact = self.nfactors
+        v = np.random.normal(size=(nsamples, nfact))
         eps = np.random.normal(size=(nsamples, self.nstations))
-        return v[:, None] * self.params[None, :] + eps * self.sqr[None, :]
+        return v @ self.params.T + eps * self.sqr[None, :]
 
     def sample(self, nsamples):
         z = self.sample_z(nsamples)
