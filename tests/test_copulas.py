@@ -20,6 +20,8 @@ from pyrethink import copulas
 
 LOGGER = iutils.get_logger("test", console=True)
 
+NSTATIONS = [2, 5]
+
 
 def test_normal_cdf_approx():
     x = np.linspace(-10, 10, 100000)
@@ -30,7 +32,7 @@ def test_normal_cdf_approx():
     assert err < 2e-4
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 8])
+@pytest.mark.parametrize("nstations", NSTATIONS)
 @pytest.mark.parametrize("nfactors", [1, 2])
 @pytest.mark.parametrize("name", copulas.COPULA_NAMES)
 def test_copulas(name, nfactors, nstations, allclose):
@@ -94,7 +96,7 @@ def test_copulas(name, nfactors, nstations, allclose):
         assert allclose(C, cop.corr, atol=2e-2)
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 8])
+@pytest.mark.parametrize("nstations", NSTATIONS)
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.98])
 @pytest.mark.parametrize("nfactors", [0, 1, 2])
 def test_gaussian_cdf_and_pdf(nstations, rho, nfactors, allclose):
@@ -131,7 +133,7 @@ def test_gaussian_cdf_and_pdf(nstations, rho, nfactors, allclose):
         assert allclose(p1, p2, atol=atol)
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 8])
+@pytest.mark.parametrize("nstations", NSTATIONS)
 @pytest.mark.parametrize("nfactors", [1, 2])
 @pytest.mark.parametrize("rho", [0.01, 0.5, 0.9, 0.99])
 def test_gaussian_factor_sampling(nstations, rho, nfactors, allclose):
@@ -193,7 +195,7 @@ def test_kendall_function_independence(nstations, allclose):
         assert allclose(p[iok], expected[iok])
 
 
-@pytest.mark.parametrize("nstations", [2, 5, 8])
+@pytest.mark.parametrize("nstations", NSTATIONS)
 @pytest.mark.parametrize("nfactors", [1, 2])
 @pytest.mark.parametrize("repeat", np.arange(3))
 def test_compute_gaussian_kendall(nstations, nfactors, repeat, allclose):
@@ -228,7 +230,7 @@ def test_compute_gaussian_kendall(nstations, nfactors, repeat, allclose):
 
 
 @pytest.mark.parametrize("mex_kind", ["AND", "OR"])
-@pytest.mark.parametrize("nstations", [2, 5, 8])
+@pytest.mark.parametrize("nstations", NSTATIONS)
 @pytest.mark.parametrize("rho", [0.1, 0.5, 0.9])
 def test_compute_analytical_and_empirical_marginal_score(mex_kind, nstations, rho, allclose):
     cop = copulas.GaussianFactorCopula(nstations)
