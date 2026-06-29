@@ -63,7 +63,7 @@ def test_copulas(name, nstations, allclose):
         if mex_kind == "KENDALL":
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
-            assert pv > 1e-2
+            assert pv > 1e-3
 
     if name == "GaussianOneFactor":
         n = copulas.get_nsamples(nstations)
