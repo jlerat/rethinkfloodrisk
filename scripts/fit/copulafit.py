@@ -37,13 +37,13 @@ from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 
 def get_options(version, version_priors=1):
-    models = [
+    copula_specs = [
         "Univariate",
         "Gaussian",
-        "GaussianFactor1",
-        "GaussianFactor2",
-        "Student3",
-        "Student5"
+        "GaussianFactor_0_1",
+        "GaussianFactor_0_2",
+        "Student_3",
+        "Student_5"
         ]
     pcensors = [0.3]
     priors = ["uninformative", "informative"]
@@ -57,19 +57,19 @@ def get_options(version, version_priors=1):
                                version_priors=version_priors)
     opm.from_cartesian_product(pcensor=pcensors,
                                exclude=excludes,
-                               model=models,
+                               copula_spec=copula_specs,
                                prior=priors,
                                group=groups)
     # .. exclude options with a single stations and
-    # multivariate model
+    # multivariate copula_spec
     keep = []
     for task in opm.tasks:
         nsta = len(task["group"].split("-"))
-        if nsta == 1 and task["model"] != "Univariate":
+        if nsta == 1 and task["copula_spec"] != "Univariate":
             continue
-        if nsta > 1 and task["model"] == "Univariate":
+        if nsta > 1 and task["copula_spec"] == "Univariate":
             continue
-        if nsta < 8 and task["model"] == "GaussianFactor2":
+        if nsta < 8 and task["copula_spec"] == "GaussianFactor2":
             continue
         keep.append(task)
     opm.tasks = keep
@@ -122,30 +122,15 @@ def get_stationids(config):
     return config.task["group"].split("-")
 
 
-def get_copula_spec(config):
-    copn = config.task.model
-    if copn == "Gaussian":
-        cops = 0.
-        copf = 0
-    elif re.search("GaussianFactor", copn):
-        copf = int(copn[-1])
-        copn = "Gaussian"
-        cops = 0.
-    else:
-        cops = float(copn[-1])
-        copn = copn[:-1]
-        copf = 0
-
-    return copn, cops, copf
-
-
 def get_data(config, script_paths, logger):
     df, _, _, _ = datahub.get_ams_concat()
     ams_times = df.index
     stationids = get_stationids(config)
     pcensor = config.task["pcensor"]
 
-    if config.task.model == "Univariate":
+    copula_spec = config.task.copula_spec
+
+    if copula_spec == "Univariate":
         marginal = marginals.factory("GEV")
         y = df.loc[:, stationids].squeeze()
         censor = np.nanpercentile(y, pcensor * 100)
@@ -156,12 +141,10 @@ def get_data(config, script_paths, logger):
     else:
         y = df.loc[:, stationids]
         censors = np.nanpercentile(y, pcensor * 100, axis=0)
-        copn, cops, copf = get_copula_spec(config)
         sv = rsample.StanSamplingMultivariate(y,
-                                              copula_name=copn,
-                                              copula_shape=cops,
-                                              censors=censors,
-                                              nfactors=copf)
+                                              copula_spec,
+                                              censors=censors)
+
     stan_data = sv.to_dict()
 
     # set priors
@@ -197,7 +180,7 @@ def get_data(config, script_paths, logger):
                     pm, pv = float(mu), float(sig)
                     pn2 = f"y{pn}_prior"
 
-                if config.task.model == "Univariate":
+                if config.task.copula_spec == "Univariate":
                     stan_data[pn2] = [pm, pv]
                 else:
                     stan_data[pn2][isite] = [pm, pv]
@@ -223,9 +206,9 @@ def process(config, script_paths, logger, data):
               iter_warmup=config.stan_nwarm,
               show_progress=config.debug)
 
-    if config.task.model == "Univariate":
+    if config.task.copula_spec == "Univariate":
         sampler = univariate_censored_sampling
-    elif re.search("GaussianFactor", config.task.model):
+    elif re.search("GaussianFactor", config.task.copula_spec):
         sampler = mv_censored_factors_sampling
     else:
         sampler = mv_censored_sampling
@@ -263,7 +246,7 @@ def process(config, script_paths, logger, data):
 
     # Store data with additional info
     stan_data = data.stan_data
-    stan_data["pcensors"] = pcensors
+    stan_data["pcensor"] = config.task.pcensor
     stan_data["ams_time"] = data.ams_times.tolist()
     stan_data["stationids"] = data.stationids
     stan_data.update(task_opt)
@@ -333,12 +316,12 @@ if __name__ == "__main__":
     if debug:
         ctype = "mv"
         if ctype == "univ":
-            taskid = opm.search(model="Univariate",
+            taskid = opm.search(copula_spec="Univariate",
                                 exclude="NONE",
                                 prior="^informative",
                                 group="203014")[0]
         else:
-            taskid = opm.search(model="GaussianFactor2$",
+            taskid = opm.search(copula_spec="GaussianFactor_0_2$",
                                 exclude="NONE",
                                 prior="^informative",
                                 group=opm.options["group"][1])[0]

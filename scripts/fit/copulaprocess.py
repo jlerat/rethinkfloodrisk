@@ -28,7 +28,7 @@ from hydrodiy.io import csv, iutils, hyruns
 
 from pyrethink import report
 
-from copulafit import get_options, get_stationids, get_copula_spec, get_data
+from copulafit import get_options, get_stationids, get_data
 
 def get_script_paths(config):
     source_file = Path(__file__).resolve()
@@ -72,6 +72,8 @@ def get_logger(config, script_paths):
 def process(config, script_paths, logger, data):
     logger.info(f"Start processing", nret=1)
     taskid = config.taskid
+    copula_spec = config.task.copula_spec
+
     fp = script_paths.fdata / f"copulafit_samples_TASK{taskid}.csv"
     fz = fp.parent / f"{fp.stem}.zip"
     samples = pd.read_csv(fz, skiprows=15)
@@ -80,7 +82,7 @@ def process(config, script_paths, logger, data):
         samples = samples.iloc[:200]
 
     # Observed FFA (assumes GEV marginal)
-    if config.task.model == "Univariate":
+    if config.task.copula_spec == "Univariate":
         # Rename columns to match ffa_report conventions
         samples.columns = [f"{cn}[1]" if re.search("^y", cn) else cn
               for cn in samples.columns]
@@ -91,11 +93,8 @@ def process(config, script_paths, logger, data):
 
     # Post pred checks
     ppu, ppb, ppm, data = ppc.posterior_predictive_checks(yobs, samples,
-                                                          copula_type,
-                                                          copula_shape,
-                                                          partitions_id,
-                                                          dirichlet_alpha,
-                                                          logger=LOGGER)
+                                                          copula_spec,
+                                                          logger=logger)
 
 
 if __name__ == "__main__":
@@ -127,14 +126,14 @@ if __name__ == "__main__":
     # .. options
     opm = get_options(version, version_priors)
     if debug:
-        ctype = "univ"
+        ctype = "cop"
         if ctype == "univ":
-            taskid = opm.search(model="Univariate",
+            taskid = opm.search(copula_spec="Univariate",
                                 exclude="NONE",
                                 prior="^informative",
                                 group="203014")[0]
         else:
-            taskid = opm.search(model="GaussianFactor2$",
+            taskid = opm.search(copula_spec="GaussianFactor2$",
                                 exclude="NONE",
                                 prior="^informative",
                                 group=opm.options["group"][1])[0]
