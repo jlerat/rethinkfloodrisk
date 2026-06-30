@@ -50,7 +50,7 @@ jobs:
       - name: Run tests
         run: |
           set -e
-          uv run --locked pytest -cov=pyrethink --cov-report xml:coverage.xml --cov-report html -cov-report=term-missing tests
+          uv run --locked pytest -sv -cov=pyrethink --cov-report xml:coverage.xml --cov-report html -cov-report=term-missing tests
  
       #- name: Parse coverage report and create badge
       #  run: |
