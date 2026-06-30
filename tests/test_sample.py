@@ -34,12 +34,11 @@ from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 from pyrethink import factors_correlation_sampling
 
+from test_copulas import COPULA_SPECS
+
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
-
-# Used to write test data for postpred checks
-WRITE_SAMPLE_DATA = True
 
 FLOG = FTESTS / "test_sample.log"
 
@@ -63,25 +62,20 @@ STAN_NSAMPLES_DEFAULT = 6000
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
-@pytest.mark.parametrize("nfactors", [0, 1, 2])
-def test_sample_data(pcensor, nfactors, allclose):
+@pytest.mark.parametrize("copula_spec", COPULA_SPECS)
+def test_sample_data(pcensor, copula_spec, allclose):
     data, times, dows, _ = datahub.get_ams_concat()
     censors = datahub.get_censors(pcensor)
-    copula_name = "Student"
-    copula_shape = 2.5
 
     sv = sample.StanSamplingMultivariate(data,
-                                         copula_name=copula_name,
-                                         copula_shape=copula_shape,
-                                         censors=censors,
-                                         nfactors=nfactors)
-
+                                         copula_spec=copula_spec,
+                                         censors=censors)
     stan_data = sv.to_dict()
     assert len(stan_data) == 25
     assert stan_data["P"] == 8
-    assert stan_data["F"] == nfactors
+    assert stan_data["F"] == sv.copula.copula_nfactors
     assert stan_data["marginal_id"] == 0
-    assert stan_data["copula_id"] == 1
+    assert stan_data["copula_id"] == sv.copula_id
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -117,17 +111,19 @@ def test_sample_data(pcensor, nfactors, allclose):
 
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
-        sv = sample.StanSamplingMultivariate(data,
-                                             copula_name,
-                                             copula_shape)
+        sv = sample.StanSamplingMultivariate(data, copula_spec)
 
 
 @pytest.mark.parametrize("is_censored", [True])
 @pytest.mark.parametrize("is_missing", [True])
 @pytest.mark.parametrize("nvars", [3])
-@pytest.mark.parametrize("copula_shape", [0., 4.])
-@pytest.mark.parametrize("nfactors", [0, 1])
-def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
+@pytest.mark.parametrize("copula_spec", [
+    "Gaussian",
+    "Student_4",
+    "GaussianFactor_0_1",
+    "GaussianFactor_0_2"
+    ])
+def test_sampler(is_censored, is_missing, nvars, copula_spec,
                  allclose, debug_mode):
     data, _, _, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
@@ -142,16 +138,13 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
     else:
         censors = np.zeros(data.shape[1])
 
-    copula_name = "Student" if copula_shape > 0 else "Gaussian"
     sv = sample.StanSamplingMultivariate(data,
-                                         copula_name,
-                                         copula_shape,
-                                         censors=censors,
-                                         nfactors=nfactors)
+                                         copula_spec,
+                                         censors=censors)
     stan_data = sv.to_dict()
     stan_inits = sv.initial_parameters
 
-    fout = f"sampling_{is_censored}_N{nvars}_C{copula_shape:0.0f}"
+    fout = f"sampling_{is_censored}_N{nvars}_C{copula_spec}"
     fout = FTESTS / "sampling" / fout
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
@@ -170,7 +163,7 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
               show_progress=debug_mode)
 
     # Choose sampler
-    if nfactors == 0:
+    if sv.copula_nfactors == 0:
         sampler = mv_censored_sampling
     else:
         sampler = mv_censored_factors_sampling
@@ -183,12 +176,12 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
     kw["data"]["Ncens"] -= 1
 
     # Test copula shape error
-    if copula_name == "Student":
+    if sv.copula_name == "Student":
         kw["data"]["copula_shape"] = 1.9
         with pytest.raises(RuntimeError):
             sampler(**kw)
 
-    kw["data"]["copula_shape"] = copula_shape
+    kw["data"]["copula_shape"] = sv.copula_shape
 
     # Run sampler
     smp = sampler(**kw)
@@ -202,12 +195,14 @@ def test_sampler(is_censored, is_missing, nvars, copula_shape, nfactors,
     for met in STAN_DIAG_METRICS:
         assert diag[met] == "satisfactory"
 
-    if is_censored and not is_missing and WRITE_SAMPLE_DATA:
-        fd = fout / "data.zip"
+    if is_censored and is_missing and debug_mode:
+        fd = fout / "censored_missing_data.zip"
         comp = dict(method="zip", compresslevel=9)
         data.to_csv(fd, compression=comp)
 
-        fs = fout / "samples.zip"
+        fs = fout / "censored_missing_samples.zip"
+        if sv.copula_nfactors > 0:
+            fs = fout / "censored_missing_factors_samples.zip"
         df.to_csv(fs, compression=comp)
 
 
@@ -268,8 +263,7 @@ def test_mv_censored_vs_floodstan(stationpair, pcensor, debug_mode,
     rho_min = np.floor(df1.rho.min() * 1e2) * 1e-2
     rho_max = 1.
     sv = sample.StanSamplingMultivariate(data,
-                                         copula_name="Gaussian",
-                                         copula_shape=0,
+                                         copula_spec="Gaussian",
                                          censors=censors,
                                          rho_min=rho_min,
                                          rho_max=rho_max)

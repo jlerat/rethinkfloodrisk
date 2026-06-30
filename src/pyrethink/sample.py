@@ -15,15 +15,12 @@ MARGINALS_ALLOWED = ["GEV"]
 
 
 class StanSamplingMultivariate():
-    def __init__(self, data,
-                 copula_name,
-                 copula_shape,
+    def __init__(self, data, copula_spec,
                  censors=None,
                  marginal_name="GEV",
                  rho_min=RHO_MIN_DEFAULT,
                  rho_max=RHO_MAX_DEFAULT,
-                 delta_days_max=DELTA_DAYS_MAX_DEFAULT,
-                 nfactors=0):
+                 delta_days_max=DELTA_DAYS_MAX_DEFAULT):
 
         # Check data
         nstations = data.shape[1]
@@ -40,8 +37,7 @@ class StanSamplingMultivariate():
         self.rho_max = float(rho_max)
 
         # Configure marginal and copula
-        self._copula = copulas.factory(copula_name, nstations, copula_shape)
-        self.copula_shape = float(copula_shape)
+        self._copula = copulas.factory(copula_spec, nstations)
 
         if marginal_name not in MARGINALS_ALLOWED:
             txt = "/".join(MARGINALS_ALLOWED)
@@ -51,17 +47,28 @@ class StanSamplingMultivariate():
 
         self.set_data(data, censors)
         self.delta_days_max = delta_days_max
-        self.nfactors = int(nfactors)
         self.set_initial_parameters()
 
-    @property
-    def copula_id(self):
-        nm = self.copula.name
-        return copulas.COPULA_NAMES.index(nm)
 
     @property
     def copula(self):
         return self._copula
+
+    @property
+    def copula_id(self):
+        return self.copula.copula_id
+
+    @property
+    def copula_name(self):
+        return self.copula.name
+
+    @property
+    def copula_nfactors(self):
+        return self.copula.copula_nfactors
+
+    @property
+    def copula_shape(self):
+        return self.copula.copula_shape
 
     @property
     def marginal_id(self):
@@ -135,7 +142,7 @@ class StanSamplingMultivariate():
 
         # Initialse rhos for factor copulas
         # assumes a high level of correlation between variables
-        rhos = np.zeros((P, self.nfactors + 1))
+        rhos = np.zeros((P, self.copula_nfactors + 1))
         rhos[:, 0] = math.sqrt(0.8)
         rhos[:, -1] = math.sqrt(0.2)
 
@@ -154,7 +161,7 @@ class StanSamplingMultivariate():
             "wlat_miss": wlat_miss,
         }
 
-        if self.nfactors > 0:
+        if self.copula_nfactors > 0:
             self.initial_parameters["rhos"] = rhos
         else:
             self.initial_parameters["L_IW"] = L_IW
@@ -166,7 +173,7 @@ class StanSamplingMultivariate():
         dd = {
             "N": self.data.shape[0],
             "P": nsta,
-            "F": self.nfactors,
+            "F": self.copula_nfactors,
             "y": self.data,
             "Nobs": len(self.idx_obs),
             "idx_obs": self.idx_obs,

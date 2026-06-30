@@ -14,6 +14,8 @@ from pyrethink import postpredchecks as ppc
 
 from floodstan.marginals import GEV
 
+from test_copulas import COPULA_SPECS
+
 FTESTS = Path(__file__).resolve().parent
 
 _, _, _, sta = datahub.get_ams_concat()
@@ -21,11 +23,9 @@ NSTATIONS = len(sta)
 
 DATA = pd.read_csv(FTESTS / "censored_missing_data.zip",
                    index_col=0, parse_dates=True)
-DATA = DATA[pd.notnull(DATA).any(axis=1)]
 
 SAMPLES = pd.read_csv(FTESTS / "censored_missing_samples.zip")
-# .. fix all sample format
-SAMPLES.columns = [re.sub("^cor", "corr", cn) for cn in SAMPLES.columns]
+SAMPLES_FACTORS = pd.read_csv(FTESTS / "censored_missing_factors_samples.zip")
 
 MARGINAL = GEV()
 
@@ -136,6 +136,7 @@ def test_bivariate_statistics_obs(pair, allclose):
     assert np.all(dep.xibar >= -1)
     assert np.all(dep.xibar <= 1)
 
+
 @pytest.mark.parametrize("repeat", range(10))
 @pytest.mark.parametrize("rho", [0.5, 0.9, 0.95])
 def test_bivariate_statistics(repeat, rho, allclose):
@@ -157,18 +158,14 @@ def test_bivariate_statistics(repeat, rho, allclose):
     assert allclose(mv.xi, expected, atol=1e-1, rtol=2e-2)
 
 
-@pytest.mark.parametrize("copula_shape", [0, 2.5, 5])
-def test_posterior_predictive_checks(copula_shape):
-    copula_name = "Student" if copula_shape > 0 else "Gaussian"
-
-    if copula_shape > 0:
-        with pytest.raises(ValueError, match="Expected df in"):
-            ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                            copula_name, 1.5)
-
-    ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                                          copula_name,
-                                                          copula_shape)
+@pytest.mark.parametrize("copula_spec", ["Gaussian", "GaussianFactor_0_1"])
+def test_posterior_predictive_checks(copula_spec):
+    if re.search("Factor", copula_spec):
+        samples = SAMPLES_FACTORS.iloc[:200]
+    else:
+        samples = SAMPLES.iloc[:200]
+    ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, samples,
+                                                          copula_spec)
     assert ppu.shape == (9, 21)
     assert ppb.shape == (32, 21)
     assert ppm.shape == (27, 7)

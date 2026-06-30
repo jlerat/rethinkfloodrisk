@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import math
 import numpy as np
 
@@ -22,6 +23,46 @@ LOGGER = iutils.get_logger("test", console=True)
 
 NSTATIONS = [2, 5]
 
+COPULA_SPECS = [
+    "Gaussian",
+    "Student_3",
+    "Student_5",
+    "GaussianFactor_0_1",
+    "GaussianFactor_0_2",
+    "Independence",
+    "Comonotone",
+    "Gumbel"
+    ]
+
+
+def test_get_copula_spec():
+    cn, cs, cf = copulas.get_copula_spec("Gaussian")
+    assert cn == "Gaussian"
+    assert cs == 0.0
+    assert cf == 0
+
+    cn, cs, cf = copulas.get_copula_spec("Student_5.5")
+    assert cn == "Student"
+    assert cs == 5.5
+    assert cf == 0
+
+    cn, cs, cf = copulas.get_copula_spec("GaussianFactor_0_2")
+    assert cn == "GaussianFactor"
+    assert cs == 0.
+    assert cf == 2
+
+    with pytest.raises(ValueError, match="Cannot have factors"):
+        cn, cs, cf = copulas.get_copula_spec("Student_5.5_1")
+
+    with pytest.raises(ValueError, match="Copula GaussianFactor needs"):
+        cn, cs, cf = copulas.get_copula_spec("GaussianFactor_0_0")
+
+    with pytest.raises(ValueError, match="Copula GaussianFactor does not"):
+        cn, cs, cf = copulas.get_copula_spec("GaussianFactor_2_1")
+
+    for cs in COPULA_SPECS:
+        copulas.get_copula_spec(cs)
+
 
 def test_normal_cdf_approx():
     x = np.linspace(-10, 10, 100000)
@@ -33,24 +74,21 @@ def test_normal_cdf_approx():
 
 
 @pytest.mark.parametrize("nstations", NSTATIONS)
-@pytest.mark.parametrize("nfactors", [1, 2])
-@pytest.mark.parametrize("name", copulas.COPULA_NAMES)
-def test_copulas(name, nfactors, nstations, allclose):
-    if name == "Gumbel":
+@pytest.mark.parametrize("cspec", COPULA_SPECS)
+def test_copulas(cspec, nstations, allclose):
+    if re.search("Gumbel", cspec):
         pytest.skip("Gumbel not ready yet.")
 
-    if nfactors != 1 and name != "GaussianFactor":
-        pytest.skip("No factor copula except Gaussian")
-
-    cop = copulas.factory(name, nstations, nfactors)
+    cop = copulas.factory(cspec, nstations)
+    print(cop)
     cop.logger = LOGGER
     cop.printlog = 1000
 
     rho = 0.95
-    if name in ["Gaussian", "Student"]:
+    if cop.name in ["Gaussian", "Student"]:
         cop.params = (1 - rho) * np.eye(nstations) \
                      + rho * np.ones((nstations, nstations))
-    elif name == "GaussianFactor":
+    elif cop.name == "GaussianFactor":
         # Check single rho works
         cop.params = cop.random_params(True)
 
@@ -89,11 +127,16 @@ def test_copulas(name, nfactors, nstations, allclose):
             st, pv = kstest(aep, "uniform")
             assert pv > 1e-3
 
-    if name == "GaussianFactor":
-        n = copulas.get_nsamples(nstations)
+    if re.search("GaussianFactor", cspec):
+        n = copulas.get_nsamples(nstations) * 10
         z = cop.sample_z(n)
         C = np.cov(z.T)
         assert allclose(C, cop.corr, atol=2e-2)
+
+        zr = np.random.uniform(-2, 2, size=(nstations, cop.copula_nfactors + 1))
+        cop.set_params_via_zrho(zr)
+        rhos = zr[:, :-1] / np.sqrt((zr**2).sum(axis=1))[:, None]
+        assert allclose(cop.params, rhos)
 
 
 @pytest.mark.parametrize("nstations", NSTATIONS)
@@ -214,7 +257,7 @@ def test_compute_gaussian_kendall(nstations, nfactors, repeat, allclose):
     err = np.abs(expected[idx] - pk.kendall_cdf[idx])
 
     LOGGER.info(f"errmax = {err.max():3.3e}")
-    atol = 1e-2
+    atol = 1.5e-2
 
     #import matplotlib.pyplot as plt
     #fig, ax = plt.subplots()

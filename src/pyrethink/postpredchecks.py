@@ -1,3 +1,4 @@
+import re
 from itertools import combinations as combs
 import numpy as np
 import pandas as pd
@@ -9,7 +10,6 @@ from floodstan.marginals import lh_moments
 from floodstan.marginals import GEV
 
 from pyrethink.copulas import factory as copula_factory
-
 
 PERC_TAILS_DEFAULT = np.arange(50, 95, 5)
 
@@ -165,9 +165,7 @@ def compute_predictive_checks(metric_obs, metric_sim):
 
 
 def posterior_predictive_checks(yobs, params,
-                                copula_name,
-                                copula_shape=4.,
-                                copula_factors=0,
+                                copula_spec,
                                 logger=None,
                                 marginal=GEV(),
                                 iterlog=500):
@@ -178,7 +176,7 @@ def posterior_predictive_checks(yobs, params,
     nsamples = len(params)
 
     # copula sampling tools
-    cop = copula_factory(copula_name, nsta, copula_shape=copula_shape)
+    cop = copula_factory(copula_spec, nsta)
 
     # Compute obs
     univ_obs = pd.DataFrame([univariate_statistics(v)
@@ -211,8 +209,15 @@ def posterior_predictive_checks(yobs, params,
             logger.info(msg)
 
         # Sample data with same size as obs
-        corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))
-        cop.params = corr
+        if re.search("Factor", cop.name):
+            nfact = cop.copula_nfactors
+            zrhos = param.filter(regex="zrhos").values.reshape((nsta, nfact + 1))
+            cop.set_params_via_zrho(zrhos)
+        else:
+            # Regular correlation matrix
+            corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))
+            cop.params = corr
+
         usim = cop.sample(nval)
 
         ysim = np.empty((nval, nsta))

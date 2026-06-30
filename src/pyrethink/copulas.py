@@ -1,3 +1,4 @@
+import re
 import math
 
 import numpy as np
@@ -134,7 +135,41 @@ def get_nsamples(nstations):
     return 10000 + 5000 * nstations
 
 
-def factory(name, nstations, nfactors=1, copula_shape=4.):
+def get_copula_spec(name, default_shape=0., default_nfactor=0):
+    elems = name.split("_")
+    if len(elems) == 1:
+        elems = elems + [default_shape, default_nfactor]
+    elif len(elems) == 2:
+        elems = elems + [default_nfactor]
+
+    if elems[0] not in COPULA_NAMES:
+        txt = "/".join(COPULA_NAMES)
+        errmsg = f"First part of spec should be in {txt}, got {elems[0]}."
+        raise ValueError(errmsg)
+
+    elems[1] = float(elems[1])
+    elems[2] = int(elems[2])
+
+    # Constraints
+    if not re.search("Factor", elems[0]) and elems[2] > 0:
+        errmsg = f"Cannot have factors with copula {elems[0]}."
+        raise ValueError(errmsg)
+
+    if re.search("Factor", elems[0]) and elems[2] == 0:
+        errmsg = f"Copula {elems[0]} needs at least one factor."
+        raise ValueError(errmsg)
+
+    if elems[0] != "Student" and elems[1] != default_shape:
+        errmsg = f"Copula {elems[0]} does not accept"\
+                 + f" shape parameter != {default_shape}."
+        raise ValueError(errmsg)
+
+    return elems
+
+
+def factory(copula_spec, nstations):
+    name, cshape, nfactors = get_copula_spec(copula_spec)
+
     # Copula id supplied
     if isinstance(name, int):
         name = COPULA_NAMES[name]
@@ -146,7 +181,7 @@ def factory(name, nstations, nfactors=1, copula_shape=4.):
     elif name == "Gaussian":
         return GaussianCopula(nstations)
     elif name == "Student":
-        return StudentCopula(nstations, copula_shape)
+        return StudentCopula(nstations, cshape)
     elif name == "GaussianFactor":
         return GaussianFactorCopula(nstations, nfactors)
     elif name == "Gumbel":
@@ -163,6 +198,10 @@ class Copula():
         self.logger = None
         self.printlog = 0
 
+        # Spec
+        self._copula_shape = 0.
+        self._copula_nfactors = 0
+
         # underlying random variable
         self._mean = np.zeros(nstations)
         self._rv = None
@@ -172,8 +211,21 @@ class Copula():
         self._u_data = None
 
     def __str__(self):
-        txt = f"{self.name} copula {self.nstations} dimensions."
+        txt = f"{self.name} copula in {self.nstations} dimensions"
+        nfact = self.copula_nfactors
+        if nfact == 1:
+            txt += f" using 1 factor"
+        elif nfact > 1:
+            txt += f" using {nfact} factor(s)"
         return txt
+
+    @property
+    def copula_shape(self):
+        return self._copula_shape
+
+    @property
+    def copula_nfactors(self):
+        return self._copula_nfactors
 
     def compute_kendall_function_data(self, nkendall=None):
         nsta = self.nstations
@@ -416,17 +468,16 @@ class GaussianFactorCopula(GaussianCopula):
 
         Computation is done in an arbitrary number of dimensions.
     """
-    def __init__(self, nstations, nfactors=1):
+    def __init__(self, nstations, copula_nfactors=1):
         super(GaussianFactorCopula, self).__init__(nstations)
         self.name = "GaussianFactor"
-        self._nfactors = int(nfactors)
+        self._copula_nfactors = int(copula_nfactors)
+        if self.copula_nfactors < 1:
+            errmsg = "Cannot have a factor copula with less than 1 factor."
+            raise ValueError(errmsg)
         self._sqr = None
         self._corr = None
         self.set_approx()
-
-    @property
-    def nfactors(self):
-        return self._nfactors
 
     @property
     def params(self):
@@ -435,7 +486,7 @@ class GaussianFactorCopula(GaussianCopula):
     @params.setter
     def params(self, rhos):
         nsta = self.nstations
-        nfact = self.nfactors
+        nfact = self.copula_nfactors
 
         if isinstance(rhos, float):
             # Allows for single rho
@@ -469,9 +520,18 @@ class GaussianFactorCopula(GaussianCopula):
     def sqr(self):
         return self._sqr
 
+    def set_params_via_zrho(self, zrhos):
+        nsta = self.nstations
+        nfact = self.copula_nfactors
+        if zrhos.shape != (nsta, nfact + 1):
+            errmsg = f"Expected shape of zrhos to be ({nsta},{nfact+1}),"\
+                     + f" got {zrhos.shape}."
+
+        self.params = zrhos[:, :nfact] / np.sqrt(np.sum(zrhos**2, axis=1))[:, None]
+
     def random_params(self, single_value=False):
         nsta = self.nstations
-        nfact = self.nfactors
+        nfact = self.copula_nfactors
         if single_value:
             sq = math.sqrt(nsta)
             rho = np.random.uniform(-1. / sq, 1. / sq)
@@ -479,15 +539,15 @@ class GaussianFactorCopula(GaussianCopula):
         else:
             return uniform_direction(nfact + 1).rvs(size=nsta)[:, :-1]
 
-    def set_approx(self, napprox=500):
+    def set_approx(self, napprox=100):
         self.napprox = napprox
         eps = 5e-1 / napprox
         u = np.linspace(eps, 1 - eps, napprox)
         v = norm.ppf(u)
-        self.v = [m[None, None, :] for m in np.meshgrid(*[v] * self.nfactors)]
+        self.v = [m[None, None, :] for m in np.meshgrid(*[v] * self.copula_nfactors)]
         self.du = u[1] - u[0]
 
-        dims = [1, self.nstations] + [napprox] * self.nfactors
+        dims = [1, self.nstations] + [napprox] * self.copula_nfactors
         self.buf = np.empty(dims)
         self.buf_cdf = np.empty(dims)
 
@@ -498,7 +558,7 @@ class GaussianFactorCopula(GaussianCopula):
         """
         u = to2d(u, self.nstations)
         if self.buf.shape[0] != len(u):
-            dim = [len(u), self.nstations] + [self.napprox] * self.nfactors
+            dim = [len(u), self.nstations] + [self.napprox] * self.copula_nfactors
             self.buf = np.empty(dim)
             self.buf_cdf = np.empty(dim)
 
@@ -510,7 +570,7 @@ class GaussianFactorCopula(GaussianCopula):
         #          vk=-infty,
         #          vk=+infty)
 
-        nfact = self.nfactors
+        nfact = self.copula_nfactors
         dims = np.arange(2, 2 + nfact).tolist()
         # divide by nfact because we add this nfact times in the loop below
         dx = np.expand_dims(self.marginal_ppf(u) / nfact, dims)
@@ -532,7 +592,7 @@ class GaussianFactorCopula(GaussianCopula):
         return out.squeeze()
 
     def sample_z(self, nsamples):
-        nfact = self.nfactors
+        nfact = self.copula_nfactors
         v = np.random.normal(size=(nsamples, nfact))
         eps = np.random.normal(size=(nsamples, self.nstations))
         return v @ self.params.T + eps * self.sqr[None, :]
@@ -560,16 +620,12 @@ class StudentCopula(Copula):
         if df < smi or df > sma:
             errmsg = f"Expected df in [{smi}, {sma}], got {df}."
             raise ValueError(errmsg)
-        self._df = df
-
-    @property
-    def df(self):
-        return self._df
+        self._copula_shape = df
 
     @property
     def scale(self):
-        df = self.df
-        return math.sqrt((df - 2) / self.df)
+        df = self.copula_shape
+        return math.sqrt((df - 2) / df)
 
     @property
     def params(self):
@@ -583,7 +639,7 @@ class StudentCopula(Copula):
     def params(self, corr):
         check_semidefpos(corr)
         self._params = corr
-        df = self.df
+        df = self.copula_shape
         scorr = self.corr_scaled
         self._rv = mvt(loc=self._mean, shape=scorr, df=df)
 
@@ -606,10 +662,12 @@ class StudentCopula(Copula):
         return self.rv.cdf(x)
 
     def marginal_ppf(self, u):
-        return student_t.ppf(u, scale=self.scale, df=self.df)
+        return student_t.ppf(u, scale=self.scale,
+                             df=self.copula_shape)
 
     def marginal_cdf(self, x):
-        return student_t.cdf(x, scale=self.scale, df=self.df)
+        return student_t.cdf(x, scale=self.scale,
+                             df=self.copula_shape)
 
     def sample(self, nsamples):
         return self.marginal_cdf(self.sample_z(nsamples))
@@ -633,7 +691,7 @@ class StudentCopula(Copula):
         muc = S21 @ S11i @ zcond
         Sc = S22 - S21 @ S11i @ S21.T
 
-        df0 = self.df
+        df0 = self.copula_shape
         p1 = 1  # Because we only allow zcond of length = 1
         d1 = zcond.T @ S11i @ zcond
 
