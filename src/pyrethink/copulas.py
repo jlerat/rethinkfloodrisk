@@ -214,7 +214,7 @@ class Copula():
         txt = f"{self.name} copula in {self.nstations} dimensions"
         nfact = self.copula_nfactors
         if nfact == 1:
-            txt += f" using 1 factor"
+            txt += " using 1 factor"
         elif nfact > 1:
             txt += f" using {nfact} factor(s)"
         return txt
@@ -526,6 +526,7 @@ class GaussianFactorCopula(GaussianCopula):
         if zrhos.shape != (nsta, nfact + 1):
             errmsg = f"Expected shape of zrhos to be ({nsta},{nfact+1}),"\
                      + f" got {zrhos.shape}."
+            raise ValueError(errmsg)
 
         self.params = zrhos[:, :nfact] / np.sqrt(np.sum(zrhos**2, axis=1))[:, None]
 
