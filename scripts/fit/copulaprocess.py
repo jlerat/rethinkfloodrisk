@@ -27,6 +27,7 @@ import pandas as pd
 from hydrodiy.io import csv, iutils, hyruns
 
 from pyrethink import report
+from pyrethink import postpredchecks as ppc
 
 from copulafit import get_options, get_stationids, get_data
 
@@ -90,11 +91,34 @@ def process(config, script_paths, logger, data):
     stat, df = report.ffa_report(samples,
                                  design_eris=config.design_eris,
                                  logger=logger)
+    fout = script_paths.fout
+    source_file = script_paths.source_file
+    fs = fout / f"copulaprocess_ffa_TASK{taskid}.csv"
+    csv.write_csv(stat, fs, "FFA for task {taskid}",
+                  source_file, write_index=True)
 
-    # Post pred checks
-    ppu, ppb, ppm, data = ppc.posterior_predictive_checks(yobs, samples,
+    # Post pred checks for copula models
+    if config.task.copula_spec == "Univariate":
+        return
+
+    fdd = script_paths.fdata / f"copulafit_data_TASK{taskid}.json"
+    with fdd.open() as fd:
+        cdata = json.load(fd)
+    yobs = np.array(cdata["y"])
+    ppu, ppb, ppm, pdata = ppc.posterior_predictive_checks(yobs, samples,
                                                           copula_spec,
                                                           logger=logger)
+    fp = fout / f"copulaprocess_postpredcheck_univ_TASK{taskid}.csv"
+    csv.write_csv(ppu, fp, "Checks for task {taskid}",
+                  source_file, write_index=True)
+
+    fp = fout / f"copulaprocess_postpredcheck_biv_TASK{taskid}.csv"
+    csv.write_csv(ppb, fp, "Checks for task {taskid}",
+                  source_file, write_index=True)
+
+    fp = fout / f"copulaprocess_postpredcheck_multivar_TASK{taskid}.csv"
+    csv.write_csv(ppm, fp, "Checks for task {taskid}",
+                  source_file, write_index=True)
 
 
 if __name__ == "__main__":
@@ -131,12 +155,14 @@ if __name__ == "__main__":
             taskid = opm.search(copula_spec="Univariate",
                                 exclude="NONE",
                                 prior="^informative",
-                                group="203014")[0]
+                                group="203014")
         else:
-            taskid = opm.search(copula_spec="GaussianFactor2$",
+            taskid = opm.search(copula_spec="GaussianFactor_0_2$",
                                 exclude="NONE",
                                 prior="^informative",
-                                group=opm.options["group"][1])[0]
+                                group=opm.options["group"][1])
+
+        taskid = taskid[0]
 
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
