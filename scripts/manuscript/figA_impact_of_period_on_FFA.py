@@ -154,6 +154,9 @@ def process(config, script_paths, logger, data):
                 idx = ffa.STATIONID == stationid
                 idx &= ffa.TASKID == taskid
                 idx &= ffa.VARIABLE.str.contains("DESIGN")
+                if idx.sum() == 0:
+                    continue
+
                 df = ffa.loc[idx].copy()
                 ERI = df.VARIABLE.replace(".*ERI|\.$", "", regex=True)
                 df.loc[:, "ERI"] = ERI.astype(float)
