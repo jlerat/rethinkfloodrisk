@@ -86,8 +86,7 @@ parameters {
   // Factor parameters -> sample one more factor to obtain 
   // a uniform in the hypersphere of dim F
   // See https://en.wikipedia.org/wiki/N-sphere#Uniformly_at_random_within_the_n-ball
-  // Note that we sample only positive values to stick to positive correlations
-  array[P] vector<lower=0.>[F + 1] zrhos;
+  array[P] vector[F + 1] zrhos;
 }  
 
 transformed parameters {
