@@ -60,13 +60,13 @@ JOBCONFIGS["1,5"]="X"            # job id
 #JOBCONFIGS["2,4"]="0"            # parent job number
 #JOBCONFIGS["2,5"]="X"            # job id
 #
-## MVN postprocessing concat job (depends on MVN postprocessing)
-#JOBCONFIGS["3,0"]="mvnconcat"    # Job name
-#JOBCONFIGS["3,1"]="1"            # number of cpus
-#JOBCONFIGS["3,2"]="0"            # arrays
-#JOBCONFIGS["3,3"]="0"            # use user supplied array if any
-#JOBCONFIGS["3,4"]="2"            # parent job number
-#JOBCONFIGS["3,5"]="X"            # job id
+# MVN postprocessing concat job (depends on MVN postprocessing)
+JOBCONFIGS["2,0"]="copulaconcat"    # Job name
+JOBCONFIGS["2,1"]="1"            # number of cpus
+JOBCONFIGS["2,2"]="0"            # arrays
+JOBCONFIGS["2,3"]="0"            # use user supplied array if any
+JOBCONFIGS["2,4"]="1"            # parent job number
+JOBCONFIGS["2,5"]="X"            # job id
 
 
 LENGTH=${#JOBCONFIGS[@]}
