@@ -17,6 +17,7 @@ import math
 import argparse
 from pathlib import Path
 from collections import namedtuple
+from shutil import make_archive
 
 #import warnings
 #warnings.filterwarnings("ignore")
@@ -69,11 +70,12 @@ def process(config, script_paths, logger):
         "postpredcheck_biv",
         "postpredcheck_multivar"
         ]
-
     for ftype in ftypes:
         logger.info(f"Concatenating {ftype} files")
         df = []
-        for f in script_paths.fout.glob(f"*/*{ftype}*.zip"):
+        lf = list(script_paths.fout.glob(f"*/*{ftype}*.zip"))
+        logger.info(f"{ftype} files ({len(lf)} found)", ntab=1)
+        for f in lf:
             # Get data
             taskid = re.sub(".*_TASK", "", f.stem)
             fd = script_paths.fdata / f"TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
@@ -89,10 +91,10 @@ def process(config, script_paths, logger):
             ddf.loc[:, "TASKID"] = taskid
 
             # Set station ID
-            ddf.loc[:, "STATIONNB"] = ddf.VARIABLE.str[-2]
+            ddf.loc[:, "STATIONNB"] = pd.to_numeric(ddf.VARIABLE.str[-2], errors="coerce")
             ddf.loc[:, "STATIONID"] = "NA"
             for istation, stationid in enumerate(stationids):
-                idx = ddf.VARIABLE.str.contains(f"\[{istation + 1}\]$", regex=True)
+                idx = ddf.VARIABLE.str.contains(f"\\[{istation + 1}\\]$", regex=True)
                 ddf.loc[idx, "STATIONID"] = stationid
 
             ddf.loc[:, "VARIABLE"] = ddf.VARIABLE.str.replace("\[.*", "",
@@ -104,6 +106,16 @@ def process(config, script_paths, logger):
         fr = script_paths.fout / f"copulaconcat_{ftype}.csv"
         csv.write_csv(df, fr, f"Concatenation of {ftype} results",
                       script_paths.source_file)
+
+    # Zip everything
+    logger.info("Creating zip files...")
+    for outname in ["fit", "process"]:
+        logger.info(f"copula{outname} file", ntab=1)
+        fz = script_paths.fout.parent / f"copula{outname}_v{config.version}.zip"
+        make_archive(
+            fz.parent / (fz.stem + "_archive"),
+            "zip",
+            fz.parent / fz.stem)
 
 
 if __name__ == "__main__":
