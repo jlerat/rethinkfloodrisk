@@ -32,26 +32,29 @@ from floodstan import freqplots
 from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 from pyrethink import datahub, processing
 
+import importlib.util
+
+ffit = Path(__file__).resolve().parent.parent / "fit" / "copulafit.py"
+spec = importlib.util.spec_from_file_location("copulafit", ffit)
+copulafit = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(copulafit)
+
 
 def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
     fdata = froot / "data"
-    fout = froot / "outputs" / f"copulafit_v{config.version}"
+    fproc = froot / "outputs" / f"copulaprocess_v{config.version}"
 
     basename = source_file.stem
     fimg = froot / "images" / "manuscript" / basename
 
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
-                     "froot", "fdata", "fout", "fimg"])
-    script_paths = SP(source_file, basename, froot, fdata, fout, fimg)
+                     "froot", "fdata", "fproc", "fimg"])
+    script_paths = SP(source_file, basename, froot, fdata,
+                      fproc, fimg)
 
-    for pa in script_paths:
-        if isinstance(pa, str):
-            continue
-        if pa.is_file():
-            continue
-        pa.mkdir(exist_ok=True)
+    fimg.mkdir(exist_ok=True)
 
     for f in fimg.glob("*"):
         for ff in f.glob("*.*"):
@@ -70,232 +73,38 @@ def get_logger(config, script_paths):
     return logger
 
 
-def diag2run_config(diag):
-    RN = namedtuple("Run",
-                    ["exclude", "pcensor", "rho_min",
-                     "copula_shape",
-                     "has_cluster", "text"])
-    ex = diag["task_exclude"]
-    pc = diag["task_pcensor"]
-    rm = diag["task_rho_min"]
-    cop = diag["task_copula_shape"]
-    hc = diag["task_has_clusters"]
-    txt = f"PC{pc}_RM{rm}_C{cop}_HC{hc}_EX{ex}"
-    return RN(ex, pc, rm, cop, hc, txt)
-
-
-def display_stan_diagnostics(diag, logger):
-    for vn in SDV:
-        logger.info(f"{vn}: {diag[vn][:50]}", ntab=1)
-
-
-def get_taskids(config, script_paths):
-    fopm = script_paths.fout / "copulafit_options.json"
-    opm = hyruns.OptionManager.from_file(fopm)
-
-    kw = {}
-
-    if hasattr(config, "pcensor"):
-        kw["pcensor"] = config.pcensor
-
-    if hasattr(config, "excludes"):
-        kw["exclude"] = "|".join(config.excludes)
-
-    if hasattr(config, "rho_mins"):
-        kw["rho_min"] = "|".join(config.rho_mins)
-
-    if hasattr(config, "copula_shapes"):
-        kw["copula_shape"] = "|".join([str(s) for s in config.copula_shapes])
-
-    return opm.find(**kw)
-
-
 def get_data(config, script_paths, logger):
-    _, _, _, stations = datahub.get_ams_concat()
-    taskids = get_taskids(config, script_paths)
+    opm = copulafit.get_options(config.version)
 
-    ffa = {}
-    obs_data = {}
-    mvnproc = {}
-    expected_params = {}
-    postpred_checks = {}
+    obs_data, _, _, stations = datahub.get_ams_concat()
 
-    options = {
-        "pcensors": set(),
-        "rho_mins": set(),
-        "has_clusters": set(),
-        "copula_shapes": set()
-    }
+    fr = script_paths.fproc / "copulaconcat_ffa.csv"
+    ffa, _ = csv.read_csv(fr, dtype={"STATIONID": str})
 
-    run_configs = []
-    for itask, taskid in enumerate(taskids):
-        ftask = script_paths.fout / f"copulafit_TASK{taskid}"
-        fd = ftask / f"copulafit_diagnostic_TASK{taskid}.json"
-        with fd.open("r") as fo:
-            diag = json.load(fo)
-
-        rn = diag2run_config(diag)
-        options["pcensors"].add(rn.pcensor)
-        options["rho_mins"].add(rn.rho_min)
-        options["has_clusters"].add(rn.has_cluster)
-        options["copula_shapes"].add(rn.copula_shape)
-        run_configs.append(rn)
-
-        mess = f"Load data from TASK {taskid} {rn.text}"
-        logger.info(mess, nret=1)
-        if rn.pcensor != config.pcensor:
-            errmsg = "Pb with run config"
-            raise ValueError(errmsg)
-
-        if config.diag:
-            display_stan_diagnostics(diag, logger)
-
-        if config.load_ffa:
-            fr = ftask / f"postprocess_report_TASK{taskid}.csv"
-            df, _ = csv.read_csv(fr, index_col=0)
-            ffa[rn] = df
-
-        if config.load_mvnproc:
-            fs = ftask / f"copulafit_mvnprocess_TASK{taskid}.zip"
-            mvnproc[rn], _ = csv.read_csv(fs)
-
-        if config.load_postpred_checks:
-            pp = {}
-            for ppt in ["univ", "biv", "multi"]:
-                fp = f"postprocess_postpredchecks_{ppt}_TASK{taskid}.csv"
-                fp = ftask / fp
-                if not fp.exists():
-                    continue
-                df = pd.read_csv(fp, skiprows=15)
-                df.columns = ["VARIABLE"] + df.columns[1:].tolist()
-                pp[ppt] = df
-
-            postpred_checks[rn] = pp
-
-        if config.load_expected_params:
-            fe = ftask / f"expected_parameters_TASK{taskid}.json"
-            if not fe.exists():
-                fs = ftask / f"copulafit_samples_TASK{taskid}.zip"
-                samples = pd.read_csv(fs, skiprows=15)
-                ylocs = samples.filter(regex="ylocn", axis=1).mean()
-                ylogscales = samples.filter(regex="ylogsca", axis=1).mean()
-                yshape1 = samples.filter(regex="yshape1", axis=1).mean()
-                cor = samples.filter(regex="corr_IW", axis=1).mean()
-                expected = {
-                    "ylocs": ylocs.to_dict(),
-                    "ylogscales": ylogscales.to_dict(),
-                    "yshape1": yshape1.to_dict(),
-                    "corr_IW": cor.to_dict()
-                    }
-                with fe.open("w") as fo:
-                    json.dump(expected, fo, indent=4)
-
-            else:
-                with fe.open("r") as fo:
-                    expected = json.load(fo)
-
-            expected_params[rn] = expected
-
-        if config.load_obs_data:
-            fd = ftask / f"copulafit_data_TASK{taskid}.json"
-            with fd.open("r") as fo:
-                d = json.load(fo)
-                y = pd.DataFrame(d["y"], columns=d["stationids"])
-                cn = "WATER_YEAR"
-                y.loc[:, cn] = d["ams_time"]
-                y.loc[:, cn] += 1 # adds 1 because starts in Oct
-                obs_data[rn] = y
-
-        if config.debug and itask > 1:
-            break
-
-    DT = namedtuple("Data", ["stations", "run_configs", "ffa", "obs_data",
-                             "mvnproc", "expected_params", "postpred_checks",
+    DT = namedtuple("Data", ["stations", "ffa", "obs_data",
                              "options"])
-    return DT(stations, run_configs, ffa, obs_data, mvnproc,
-              expected_params, postpred_checks, options)
-
-def get_iter_options(data):
-    pcensors = data.options["pcensors"]
-    rho_mins = data.options["rho_mins"]
-    has_clusters = data.options["has_clusters"]
-    copula_shapes = data.options["copula_shapes"]
-    return prod(pcensors, rho_mins, has_clusters, copula_shapes)
-
-
-def select_data(data, **kwargs):
-    selected = []
-    ffa = {}
-    obs_data = {}
-    mvnproc = {}
-    expected_params = {}
-    postpred_checks = {}
-    for rn in data.run_configs:
-        isin = True
-        if "pcensor" in kwargs:
-            isin &= rn.pcensor == kwargs["pcensor"]
-
-        if "rho_min" in kwargs:
-            isin &= rn.rho_min == kwargs["rho_min"]
-
-        if "has_cluster" in kwargs:
-            isin &= rn.has_cluster == kwargs["has_cluster"]
-
-        if "copula_shape" in kwargs:
-            isin &= rn.copula_shape == kwargs["copula_shape"]
-
-        if isin:
-            selected.append(rn)
-            if rn in data.ffa:
-                ffa[rn] = data.ffa[rn]
-
-            if rn in data.obs_data:
-                obs_data[rn] = data.obs_data[rn]
-
-            if rn in data.mvnproc:
-                mvnproc[rn] = data.mvnproc[rn]
-
-            if rn in data.expected_params:
-                expected_params[rn] = data.expected_params[rn]
-
-            if rn in data.postpred_checks:
-                postpred_checks[rn] = data.postpred_checks[rn]
-
-    return ffa, obs_data, mvnproc, expected_params, postpred_checks
+    return DT(stations, ffa, obs_data, opm)
 
 
 def process(config, script_paths, logger, data):
+    stations = data.stations
+    if config.debug:
+        stations = stations.iloc[:2]
 
-    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
-        ffa, obs_data, mvnproc, _, _ = select_data(data,
-                                                   pcensor=pcensor,
-                                                   rho_min=rho_min,
-                                                   has_cluster=has_cluster,
-                                                   copula_shape=copula_shape)
-        if len(ffa) == 0:
-            continue
+    options = data.options
+    obs_data = data.obs_data
+    ffa = data.ffa
 
-        assert len(ffa) == 2
-        assert len(mvnproc) == 2
+    copula_specs = options.options["copula_spec"][1:]
+    if config.debug:
+        copula_specs = [copula_specs[0]]
 
-        rn_isin = next(rn for rn in ffa if rn.exclude == "NONE")
-        rn_isout = next(rn for rn in ffa if rn.exclude != "NONE")
+    excludes = config.excludes + ["NONE"]
+    fptype = config.freq_plot_type
 
-        rtxt = re.sub("_EX.*", "", rn_isin.text)
-        logger.info(f"-- Plotting {rtxt} --", nret=1)
-
-        for stationid, sinfo in data.stations.iterrows():
-            logger.info(f"Plotting {stationid}", ntab=1)
-
-            plt.close("all")
-            mosaic = [["ffa-isin", "ffa-isout"]]
-
-            nrows = len(mosaic)
-            ncols = len(mosaic[0])
-            figsize = (ncols * config.awidth, nrows * config.aheight)
-            fig = plt.figure(figsize=figsize,
-                             layout="constrained")
-            axs = fig.subplot_mosaic(mosaic, sharey=True)
+    for copula_spec in copula_specs:
+        for stationid in stations.index:
+            sinfo = stations.loc[stationid]
 
             # Rating curve analysis
             rc, _ = datahub.get_rating_curves(stationid, True)
@@ -305,160 +114,166 @@ def process(config, script_paths, logger, data):
             rc_h = rc_h.loc[ipos]
             rc_q = rc_q.loc[ipos]
 
-            # Plot ffa
-            fptype = config.freq_plot_type
+            # Plot
+            plt.close("all")
+            mosaic = [[f"{ex}_univ-noninf",
+                       f"{ex}_univ-inf",
+                       f"{ex}_mv-inf"] for ex in excludes]
+            nrows = len(mosaic)
+            ncols = len(mosaic[0])
+            figsize = (ncols * config.awidth, nrows * config.aheight)
+            fig = plt.figure(figsize=figsize,
+                             layout="constrained")
+            axs = fig.subplot_mosaic(mosaic, sharey=True)
 
             for iax, (aname, ax) in enumerate(axs.items()):
-                ptype, dsrc = aname.split("-")
-                rn = rn_isin if dsrc == "isin" else rn_isout
+                exclude, axcfg = aname.split("_")
 
-                if ptype == "ffa":
-                    # Plot data
-                    peaks = obs_data[rn].loc[:, str(stationid)]
-
-                    x, y = freqplots.plot_data(ax, peaks, fptype, zorder=10)
-                    same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
-                    _, same = np.where(same)
-                    time = obs_data[rn].WATER_YEAR.iloc[same]
-
-                    ythresh = y[-3]
-                    arrowprops = {
-                        "edgecolor": "0.4",
-                        "arrowstyle": "-"
-                        }
-                    for wy, xx, yy in zip(time, x, y):
-                        if yy < ythresh:
-                            continue
-                        txt = str(wy)
-                        ax.annotate(txt, xy=(xx, yy),
-                                    xycoords="data",
-                                    xytext=(-40, 40),
-                                    va="bottom", ha="right",
-                                    textcoords="offset points",
-                                    arrowprops=arrowprops,
-                                    zorder=5)
-
-                    # Plot FFA
-                    df = ffa[rn]
-                    istation = obs_data[rn].columns.tolist().index(str(stationid))
-                    quantiles = df.filter(regex=f"DESIGN.*\\[{istation + 1}\\]", axis=0)
-                    aris = quantiles.index.to_series().str\
-                            .replace(".*ERI|\\[.*", "", regex=True).astype(float).values
-
-                    iok = aris <= ari_max
-                    aris = aris[iok]
-                    quantiles = quantiles.loc[iok]
-
-                    inocens = 1 - 1./aris >= pcensor
-                    quantiles = quantiles.loc[inocens]
-                    aris = aris[inocens]
-                    freqplots.plot_marginal_quantiles(ax, aris, quantiles, fptype,
-                                                      center_column="POSTERIOR_PREDICTIVE",
-                                                      q0_column="5%",
-                                                      q1_column="95%",
-                                                      alpha=0.3,
-                                                      facecolor="tab:blue",
-                                                      edgecolor="k")
-
-                    retp = [10, 100, 500]
-                    aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
-
-                    if dsrc == "isin":
-                        exctxt = "All data"
-                    else:
-                        ev = int(re.sub("-.*", "", rn.exclude)) + 1
-                        exctxt = f"Without {ev} flood"
-
-                    title = f"({letters[iax]}) Flood Frequency Curve - {exctxt}"
-                    xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
-                    ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
-                    ax.set(title=title, ylabel=ylab, xlabel=xlab)
-
-                    q100 = quantiles.filter(regex="DESIGN_ERI100\\[", axis=0).squeeze()
-
-                    txt = "Uncertainty in the 1:100 event\n\n"
-                    kw = dict(va="top", ha="left", transform=ax.transAxes)
-                    ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
-
-                    delta = 0.06
-                    for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
-                        q = q100.loc[st]
-                        h = processing.linear_interpolation(q, rc_q, rc_h)
-                        stt = "post pred" if st.startswith("POST") else st
-
-                        txt = f"{stt:<12s}"
-                        ytxt = 0.97 - delta * (ist + 1)
-                        ax.text(0.03, ytxt, txt, **kw)
-
-                        txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
-                        ax.text(0.18, ytxt, txt, **kw)
-
+                # Find tasks
+                if re.search("univ", axcfg):
+                    cs = "Univariate"
                 else:
-                    pass
+                    cs = copula_spec
+
+                prior = "uninformative" if re.search("noninf", axcfg) \
+                    else "informative"
+
+                grp = next(g for g in options.options["group"]
+                           if len(g.split("-")) == 8)
+                group = stationid if cs == "Univariate" else grp
+
+                taskid = options.find(prior=prior, copula_spec=cs,
+                                      exclude=exclude,
+                                      group= f"^{group}$")
+                taskid = next(t for t in taskid)
+
+                task = options.get_task(taskid)
+                pcensor = task.pcensor
+
+                # Get ffa data
+                idx = ffa.STATIONID == stationid
+                idx &= ffa.TASKID == taskid
+                idx &= ffa.VARIABLE.str.contains("DESIGN")
+                df = ffa.loc[idx].copy()
+                ERI = df.VARIABLE.replace(".*ERI|\.$", "", regex=True)
+                df.loc[:, "ERI"] = ERI.astype(float)
+
+                # Plot obs data
+                peaks = obs_data.loc[:, str(stationid)]
+                x, y = freqplots.plot_data(ax, peaks, fptype, zorder=10)
+
+                same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
+                _, same = np.where(same)
+                time = obs_data.index[same]
+
+                ythresh = y[-3]
+                arrowprops = {
+                    "edgecolor": "0.4",
+                    "arrowstyle": "-"
+                    }
+                for wy, xx, yy in zip(time, x, y):
+                    if yy < ythresh:
+                        continue
+                    txt = str(wy)
+                    ax.annotate(txt, xy=(xx, yy),
+                                xycoords="data",
+                                xytext=(-40, 40),
+                                va="bottom", ha="right",
+                                textcoords="offset points",
+                                arrowprops=arrowprops,
+                                zorder=5)
+
+                # Plot FFA
+                aris = df.ERI
+                quantiles = df
+
+                iok = aris <= ari_max
+                aris = aris[iok]
+                quantiles = quantiles.loc[iok]
+
+                inocens = 1 - 1./aris >= pcensor
+                quantiles = quantiles.loc[inocens]
+                aris = aris[inocens]
+                freqplots.plot_marginal_quantiles(ax, aris, quantiles, fptype,
+                                                  center_column="POSTERIOR_PREDICTIVE",
+                                                  q0_column="5%",
+                                                  q1_column="95%",
+                                                  alpha=0.3,
+                                                  facecolor="tab:blue",
+                                                  edgecolor="k")
+
+                retp = [10, 100, 500]
+                aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
+
+                if exclude == "NONE":
+                    exctxt = "All data"
+                else:
+                    ev = int(re.sub("-.*", "", exclude)) + 1
+                    exctxt = f"Without {ev} flood"
+
+                title = f"({letters[iax]}) Flood Frequency Curve\n"\
+                        + f"{exctxt} - {prior} prior - {copula_spec} model"
+                xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
+                ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
+                ax.set(title=title, ylabel=ylab, xlabel=xlab)
+
+                i100 = df.ERI == 100
+                q100 = quantiles.loc[i100].squeeze()
+
+                txt = "Uncertainty in the 1:100 event\n\n"
+                kw = dict(va="top", ha="left", transform=ax.transAxes)
+                ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
+
+                delta = 0.06
+                for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
+                    q = q100.loc[st]
+                    h = processing.linear_interpolation(q, rc_q, rc_h)
+                    stt = "post pred" if st.startswith("POST") else st
+
+                    txt = f"{stt:<12s}"
+                    ytxt = 0.97 - delta * (ist + 1)
+                    ax.text(0.03, ytxt, txt, **kw)
+
+                    txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
+                    ax.text(0.18, ytxt, txt, **kw)
 
             ftitle = f"{sinfo.NAME} ({stationid})"
             fig.suptitle(ftitle, fontweight="bold")
 
             basename = script_paths.basename
-            fp = f"{basename}_{stationid}_{rtxt}_v{config.version}.png"
-            fp = script_paths.fimg / rtxt / fp
+            fp = f"{basename}_{stationid}_{copula_spec}_v{config.version}.png"
+            fp = script_paths.fimg / fp
             fp.parent.mkdir(exist_ok=True)
             fig.savefig(fp, dpi=config.fdpi)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="[DESCRIPTION]",
+    parser = argparse.ArgumentParser(description="Univariate FFA plots",
                                      formatter_class=
                                      argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument("-v", "--version", help="version",
                         type=int, required=True)
-    parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                        type=float, default=0.3)
-    parser.add_argument("-di", "--diag", help="Show stan diagnostics",
-                        action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_mins", help="Minimum rho values",
-                        type=str, default="-1|0")
-    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
-                        type=str, default="0")
     args = parser.parse_args()
-    assert not args.debug
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
+    CF = namedtuple("Config", ["version", "debug",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "copula_shapes", "diag", "debug",
-                               "load_obs_data",
-                               "load_ffa",
-                               "load_mvnproc",
-                               "load_expected_params",
-                               "load_postpred_checks",
                                "freq_plot_type"])
     awidth = 6
     aheight = 5
     fdpi = 300
     ptype = "gumbel"
     ari_max = 500
-    excludes = ["NONE", "2021"]
-    load_ffa = True
-    load_obs_data = True
-    load_mvnproc = True
-    load_expected_params = False
-    load_postpred_checks = False
+    excludes = ["2021"]
     freq_plot_type = "gumbel"
 
-    config = CF(args.version, args.pcensor,
-                args.rho_mins.split("|"),
+    config = CF(args.version,  args.debug,
                 awidth, aheight, fdpi, ptype, ari_max,
                 excludes,
-                args.copula_shapes.split("|"),
-                args.diag, args.debug,
-                load_obs_data, load_ffa,
-                load_mvnproc, load_expected_params,
-                load_postpred_checks,
                 freq_plot_type)
 
     # Baseline

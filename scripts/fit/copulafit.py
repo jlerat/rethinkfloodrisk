@@ -48,6 +48,7 @@ def get_options(version, version_priors=1):
     pcensors = [0.3]
     priors = ["uninformative", "informative"]
     excludes = ["NONE",
+                "2016",
                 "2021"]
     stations = datahub.get_stations()
     sids = stations.index.to_list()
@@ -124,6 +125,11 @@ def get_stationids(config):
 
 def get_data(config, script_paths, logger):
     df, _, _, _ = datahub.get_ams_concat()
+
+    excl = config.task.exclude
+    if excl != "NONE":
+        df = df.loc[df.index != int(excl)]
+
     ams_times = df.index
     stationids = get_stationids(config)
     pcensor = config.task["pcensor"]
@@ -317,12 +323,12 @@ if __name__ == "__main__":
         ctype = "mv"
         if ctype == "univ":
             taskid = opm.search(copula_spec="Univariate",
-                                exclude="NONE",
+                                exclude="2021",
                                 prior="^informative",
                                 group="203014")[0]
         else:
             taskid = opm.search(copula_spec="GaussianFactor_0_2$",
-                                exclude="NONE",
+                                exclude="2021",
                                 prior="^informative",
                                 group=opm.options["group"][1])[0]
 
