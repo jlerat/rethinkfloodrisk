@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.stats import invwishart
+from scipy.stats import multivariate_normal as mvn
 from scipy.linalg import toeplitz
 import matplotlib.pyplot as plt
 
@@ -64,38 +65,53 @@ def getL(rho, nv):
 L0 = getL(rho, nv)
 assert np.allclose(C0, L0@L0.T)
 
-rv = invwishart(scale=np.eye(nv), df=int(1.1 * nv))
+#rv = invwishart(scale=np.eye(nv), df=int(1.1 * nv))
+#def corrnorm(M):
+#    si = 1./ np.sqrt(np.diag(M))[:, None]
+#    return si * M * si.T
 
-def corrnorm(M):
-    si = 1./ np.sqrt(np.diag(M))[:, None]
-    return si * M * si.T
+#rho_min = 0.2
+#rho_max = 1.0
+#w1 = (rho_max - rho_min) / 2
+#w0 = (rho_max + rho_min) / 2
+#
+#for i in range(nsmp):
+#    C = rv.rvs()
+#    c[i, 0] = C
+#    L = np.linalg.cholesky(C)
+#    c[i, 1] = L
+#
+#    c[i, 2] = C * w1 + C0 * w0
 
-# Check corr ok
-C = corrnorm(rv.rvs())
-L = np.linalg.cholesky(C)
+
+nfactors = 1
+nvars = 8
+
+def generate_corr():
+    R = np.random.standard_normal(size=(nvars, nfactors + 2))
+    s = np.sqrt((R**2).sum(axis=1))
+    C = R[:, :nv] / s[:, None]
+    C = C @ C.T
+    k = np.arange(nvars)
+    C[k, k] = 1.
+    return C
 
 nsmp = 10000
-M = np.zeros((nsmp, 4, nv, nv))
-
-rho_min = 0.2
-rho_max = 1.0
-w1 = (rho_max - rho_min) / 2
-w0 = (rho_max + rho_min) / 2
-
+C = np.zeros((nsmp, nvars * (nvars - 1) // 2))
 for i in range(nsmp):
-    C = rv.rvs()
-    c[i, 0] = C
-    L = np.linalg.cholesky(C)
-    c[i, 1] = L
+    c = generate_corr()
+    C[i, :] = c[np.triu_indices(nvars, 1)]
 
-    c[i, 2] = C * w1 + C0 * w0
 
-bins = np.linspace(-1, 1, 50)
 plt.close("all")
-i1 = 0
-i2 = nv - 1
-plt.hist(c[:, i1, i2], bins=bins, fc="0.8", ec="0.2", alpha=0.2)
-plt.hist(c2[:, i1, i2], bins=bins, fc="0.8", ec="0.2", alpha=0.9)
+fig, axs = plt.subplots(ncols=5, nrows=2,
+                        figsize=(15, 8),
+                        layout="constrained")
+
+bins = np.linspace(-1, 1, 20)
+for iax, ax in enumerate(axs.flat):
+    ax.hist(C[:, iax], bins=bins, fc="0.8", ec="0.2", alpha=0.2)
+
 plt.show()
 
 LOGGER.completed()
