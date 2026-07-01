@@ -501,8 +501,8 @@ class GaussianFactorCopula(GaussianCopula):
             raise ValueError(errmsg)
 
         sr = (rhos**2).sum(axis=1)
-        if np.any(sr >= 1):
-            raise ValueError("Expected rhos**2 sum < 1")
+        if np.any(sr > 1):
+            raise ValueError("Expected rhos**2 sum <= 1")
 
         self._params = rhos
         self._sqr = np.sqrt(1 - sr)
@@ -528,7 +528,11 @@ class GaussianFactorCopula(GaussianCopula):
                      + f" got {zrhos.shape}."
             raise ValueError(errmsg)
 
-        self.params = zrhos[:, :nfact] / np.sqrt(np.sum(zrhos**2, axis=1))[:, None]
+        # Add a small offset to avoid one the last component being exactly 0
+        z2 = zrhos**2
+        z2[:, -1] = np.maximum(z2[:, -1], 1e-10)
+        sr = np.sqrt(np.sum(z2, axis=1))
+        self.params = zrhos[:, :nfact] / sr[:, None]
 
     def random_params(self, single_value=False):
         nsta = self.nstations
