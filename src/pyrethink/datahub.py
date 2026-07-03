@@ -30,6 +30,13 @@ def get_stations(richmond_only=True):
     return df
 
 
+def get_awra_cookies():
+    fs = DATA_FOLDER / f"awra_v7_cookies_daily_cookies_list.csv"
+    df, _ = csv.read_csv(fs, index_col=0)
+    df.index.name = "STATIONID"
+    return df
+
+
 def get_potpeaks():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(ft, index_col="DAY", parse_dates=True)
@@ -97,6 +104,18 @@ def get_ams(stationid=None):
             ams.columns = [f"{stationid}_PEAK"]
 
         return ams
+
+
+def get_ams_awra(stationid, variable="QTOT"):
+    fa = DATA_FOLDER / "ams_awra" / f"awra_v7_cookies_daily_cookies_ams_{stationid}.csv"
+    ams, _ = csv.read_csv(fa)
+    ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4]
+    ams = ams.set_index("YEAR")
+    ams = ams.filter(regex=variable, axis=1)
+    ams.columns = [re.sub(f"{variable}_", "", cn) for cn in ams.columns]
+
+    return ams
+
 
 
 def get_ams_concat():

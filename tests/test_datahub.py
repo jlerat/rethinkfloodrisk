@@ -22,6 +22,10 @@ def test_get_stations():
     df2 = datahub.get_stations(False)
     assert df2.shape[0] == 900
 
+def test_get_awra_cookies():
+    cookies = datahub.get_awra_cookies()
+    assert cookies.shape == (12, 11)
+
 def test_potpeaks():
     df, wy, nu = datahub.get_potpeaks()
 
@@ -41,6 +45,13 @@ def test_get_ams_concat():
     assert ams.shape == times.shape
     assert ams.shape == dows.shape
     assert all([dt == np.int64 for dt in dows.dtypes])
+
+@pytest.mark.parametrize("stationid",
+                         datahub.get_awra_cookies().index.tolist())
+def test_get_ams_awra(stationid):
+    df = datahub.get_ams_awra(stationid)
+    assert df.shape == (111, 4)
+
 
 @pytest.mark.parametrize("stationid",
                          datahub.get_stations().index.tolist())

@@ -1,0 +1,28 @@
+# --------------------------------------------------,,,,,
+# nrow : 12,,,,,
+# ncol : 11,,,,,
+# comment : AWRA cookies info,,,,,
+# time_generated : 2026-07-03 09:41:51,,,,,
+# author : ler015,,,,,
+# source_file : /datasets/work/lw-resilient-nr/work/0_Common_Data/8_DataProcessingScripts/nrivdatascripts/scripts/awra/AWR040_export_cookies.py,,,,,
+# work_dir : /datasets/work/lw-resilient-nr/work/0_Common_Data/8_DataProcessingScripts/nrivdatascripts,,,,,
+# python_environment posix,,,,,
+# python_version : 3.12.9 | packaged by Anaconda, Inc. | (main, Feb  6 2025, 18:56:27) [GCC 11.2.0],,
+# pandas_version : 3.0.3,,,,,
+# numpy_version : 2.5.0,,,,,
+# python_inc : /home/ler015/miniconda3/include/python3.12,,,,,
+# python_lib : /datasets/work/lw-resilient-nr/work/0_Common_Data/8_DataProcessingScripts/nrivdatascripts/.venv/lib/python3.12/site-packages,,,,,
+# --------------------------------------------------,,,,,
+,LONGITUDE[deg],LATITUDE[deg],CATCHMENTAREA_SRTM[km2],NCELLS_NORTHERNRIVERS_MASK_CLIPPED[undef],NAME
+RICHMOND,153.5847292,-28.87385526,7015.32666,308,Richmond
+RichmondWilsonsJcn,153.2880881,-28.98443255,329.18344,28,RichmondWilsonsJcn
+WILSONS_RIVER,153.2913173,"-28.983654728668522, ",1592.50122,82,Wilsons River
+203002,153.41258,-28.641293,63.15826,8,Coopers Creek at Repentance
+203004,153.05542,-28.86403,1864.67896,95,Richmond River at Casino
+203005,152.96709,-28.505512,701.96545,41,Richmond River at Wiangaree
+203010,153.16324,-28.736397,176.94298,16,Leycester River at Rock Valley
+203012,153.4979,-28.706612,37.2952,6,Byron Creek at Binna Burra
+203014,153.39482,-28.755573,221.13843,22,Wilsons River at Eltham
+203024,153.36227,-28.721535,175.22177,17,Coopers Creek at Ewing Bridge
+203900,152.99484,-28.621042,889.78943,50,Richmond River at Kyogle
+H058176,153.2733,-28.81,1385.76672,72,Lismore
