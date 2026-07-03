@@ -40,17 +40,33 @@ from pyrethink import postpredchecks as ppc
 
 from floodstan import marginals
 
-import figA_impact_of_period_on_FFA
-import importlib
-importlib.reload(figA_impact_of_period_on_FFA)
+from figA_impact_of_period_on_FFA import get_script_paths, get_logger, copulafit
 
-from figA_impact_of_period_on_FFA import get_script_paths
-from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
-from figA_impact_of_period_on_FFA import get_iter_options, select_data
+def get_data(config, script_paths, logger):
+    opm = copulafit.get_options(config.version)
+    stations = datahub.get_stations()
 
-importlib.reload(ppc)
+    fu = script_paths.fproc / "copulaconcat_postpredcheck_univ.zip"
+    pp_univ = pd.read_csv(fu, skiprows=15)
+
+    fb = script_paths.fproc / "copulaconcat_postpredcheck_biv.zip"
+    pp_biv = pd.read_csv(fb, skiprows=15)
+
+    fm = script_paths.fproc / "copulaconcat_postpredcheck_multivar.zip"
+    pp_mv = pd.read_csv(fb, skiprows=15)
+
+    DT = namedtuple("Data", ["stations", "options", "pp_univ",
+                             "pp_biv", "pp_mv"])
+    return DT(stations, opm, pp_univ, pp_biv, pp_mv)
+
 
 def process(config, script_paths, logger, data):
+
+    univ = data.pp_univ
+    biv = data.pp_biv
+    import pdb; pdb.set_trace()
+
+
     for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
         _, obs_data, _, _, postpred = select_data(data,
                                                   pcensor=pcensor,
@@ -252,43 +268,23 @@ if __name__ == "__main__":
 
     parser.add_argument("-v", "--version", help="version",
                         type=int, required=True)
-    parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                        type=float, default=0.3)
-    parser.add_argument("-di", "--diag", help="Show stan diagnostics",
-                        action="store_true", default=False)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
-                        type=str, default="-1|0")
-    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
-                        type=str, default="0|3")
     parser.add_argument("-x", "--xi_plots", help="Draw xi plots",
                         action="store_true", default=False)
     args = parser.parse_args()
 
+    exclude = "NONE"
+    copula_spec = "GaussianFactor_0_1"
+
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
+    CF = namedtuple("Config", ["version", "debug", "xi_plots",
                                "awidth", "aheight", "fdpi", "ncols",
-                               "excludes", "copula_shapes",
-                               "diag", "debug",
-                               "load_obs_data",
-                               "load_ffa",
-                               "load_mvnproc",
-                               "load_expected_params",
-                               "load_postpred_checks",
-                               "variables", "exclude",
-                               "xi_plots"])
+                               "exclude", "copula_spec", "variables"])
     awidth = 6
     aheight = 5
     ncols = 3
     fdpi = 300
-    excludes = ["NONE"]
-    load_ffa = False
-    load_obs_data = True
-    load_mvnproc = False
-    load_expected_params = False
-    load_postpred_checks = True
-    exclude = "NONE"
 
     # Post pred checks to plot
     variables = {
@@ -297,16 +293,9 @@ if __name__ == "__main__":
         "multi": ["xi", "xibar", "."]
     }
 
-    config = CF(args.version, args.pcensor,
-                args.rho_mins.split("|"),
+    config = CF(args.version, args.debug, args.xi_plots,
                 awidth, aheight, fdpi, ncols,
-                excludes,
-                args.copula_shapes.split("|"),
-                args.diag, args.debug,
-                load_obs_data, load_ffa,
-                load_mvnproc, load_expected_params,
-                load_postpred_checks, variables,
-                exclude, args.xi_plots)
+                exclude, copula_spec, variables)
 
     # Baseline
     source_file = Path(__file__).resolve()

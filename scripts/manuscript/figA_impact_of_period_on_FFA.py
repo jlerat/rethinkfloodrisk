@@ -97,16 +97,22 @@ def process(config, script_paths, logger, data):
 
     copula_specs = options.options["copula_spec"][1:]
     if config.debug:
-        copula_specs = [copula_specs[0]]
+        #copula_specs = [copula_specs[0]]
+        copula_specs = ["Gaussian", "GaussianFactor_0_1"]
 
     excludes = config.excludes + ["NONE"]
     fptype = config.freq_plot_type
 
     for copula_spec in copula_specs:
         for stationid in stations.index:
+            logger.info(f"FFA plots - {copula_spec} - {stationid}")
+
             sinfo = stations.loc[stationid]
 
-            # Rating curve analysis
+            # Get data
+            peaks = obs_data.loc[:, str(stationid)]
+
+            # .. Rating curve analysis
             rc, _ = datahub.get_rating_curves(stationid, True)
             rc_h = rc.loc[:, "WATERLEVEL[m]"]
             rc_q = rc.loc[:, "STREAMFLOW[m3_s-1]"]
@@ -118,7 +124,7 @@ def process(config, script_paths, logger, data):
             plt.close("all")
             mosaic = [[f"{ex}_univ-noninf",
                        f"{ex}_univ-inf",
-                       f"{ex}_mv-inf"] for ex in excludes]
+                       f"{ex}_mv-noninf"] for ex in excludes]
             nrows = len(mosaic)
             ncols = len(mosaic[0])
             figsize = (ncols * config.awidth, nrows * config.aheight)
@@ -162,8 +168,11 @@ def process(config, script_paths, logger, data):
                 df.loc[:, "ERI"] = ERI.astype(float)
 
                 # Plot obs data
-                peaks = obs_data.loc[:, str(stationid)]
-                x, y = freqplots.plot_data(ax, peaks, fptype, zorder=10)
+                peaks_excluded = peaks.copy()
+                if exclude != "NONE":
+                    peaks_excluded.loc[int(exclude)] = np.nan
+
+                x, y = freqplots.plot_data(ax, peaks_excluded, fptype, zorder=10)
 
                 same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
                 _, same = np.where(same)
@@ -214,11 +223,12 @@ def process(config, script_paths, logger, data):
                     ev = int(re.sub("-.*", "", exclude)) + 1
                     exctxt = f"Without {ev} flood"
 
-                title = f"({letters[iax]}) Flood Frequency Curve\n"\
-                        + f"{exctxt} - {prior} prior - {copula_spec} model"
-                xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
-                ylab = "Peak flow [m3.s-1]" if iax == 0 else ""
-                ax.set(title=title, ylabel=ylab, xlabel=xlab)
+                title = f"({letters[iax]}) {exctxt} - {cs} - {prior} prior"
+                xlab = "Gumbel reduced variable $-log(-log(P))$ [-]" if iax >=  ncols else ""
+                ylab = "Peak flow [m3.s-1]" if iax % ncols == 0 else ""
+                ylim = (0, peaks.max() * 1.3)
+                ax.set(title=title, ylabel=ylab, xlabel=xlab,
+                       ylim=ylim)
 
                 i100 = df.ERI == 100
                 q100 = quantiles.loc[i100].squeeze()
