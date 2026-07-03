@@ -177,7 +177,7 @@ def get_data(config, script_paths, logger):
             idx0 = priors.STATIONID == stationid
             idx0 &= priors.MARGINAL == "GEV"
 
-            for pn in ["loglocn", "logscale", "shape1"]:
+            for pn in ["locn", "logscale", "shape1"]:
                 idx = idx0 & (priors.PARAMETER == pn)
                 pred = "INTERCEPT" if pn == "shape1"\
                         else "LOG10_CATCHMENTAREA_VALID[km2][-]"
@@ -189,22 +189,14 @@ def get_data(config, script_paths, logger):
                     continue
 
                 pv = priors.loc[idx].squeeze()
-
-                mu = pv.PRIOR_MEAN
-                sig = pv.PRIOR_STD
-                if pn == "loglocn":
-                    # Need to transform back to raw from log
-                    pm = math.exp(mu + sig**2 / 2)
-                    pv = math.sqrt((math.exp(sig**2) - 1) * math.exp(2 * mu + sig**2))
-                    pn2 = "ylocn_prior"
-                else:
-                    pm, pv = float(mu), float(sig)
-                    pn2 = f"y{pn}_prior"
+                pm = float(pv.PRIOR_MEAN)
+                ps = float(pv.PRIOR_STD)
+                pn2 = f"y{pn}_prior"
 
                 if config.task.copula_spec == "Univariate":
-                    stan_data[pn2] = [pm, pv]
+                    stan_data[pn2] = [pm, ps]
                 else:
-                    stan_data[pn2][isite] = [pm, pv]
+                    stan_data[pn2][isite] = [pm, ps]
 
     stan_inits = sv.initial_parameters
     Data = namedtuple("Data", ["stan_data", "stan_inits",
@@ -320,7 +312,7 @@ if __name__ == "__main__":
     seed = 5446
     awraid = "WILSONSRIVER"
 
-    version_priors = 1
+    version_priors = 2
 
     if debug:
         stan_nwarm = 200

@@ -141,7 +141,7 @@ if __name__ == "__main__":
     taskid = args.taskid
     overwrite = args.overwrite
     debug = args.debug
-    version_priors = 1
+    version_priors = 2
     awraid = "WILSONSRIVER"
 
     design_eris = [1.1, 1.2, 1.4, 1.6, 1.8,

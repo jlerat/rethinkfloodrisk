@@ -152,7 +152,7 @@ def process(config, script_paths, logger, data):
     parname = task.parname
     npred = task.npred
     marginal = task.marginal
-    logger.info(f"Sampling {parname}-{npred}")
+    logger.info(f"Sampling parameter {parname} with npred={npred}")
 
     fstan = script_paths.fout / f"stan_{parname}_NP{npred}"
     fstan.mkdir(exist_ok=True)
@@ -186,7 +186,6 @@ def process(config, script_paths, logger, data):
     logger.info(f"Storing data for parameter {parname} with npred={npred}")
     priors = []
     pname = parname.lower()
-    pname = f"log{pname}" if parname == "LOCN" else pname
     opts = task.to_dict()["options"]
     for i, isite in enumerate(data.stationids_idx):
         if parname == "LOCN":
