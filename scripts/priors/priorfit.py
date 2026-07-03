@@ -179,25 +179,33 @@ def process(config, script_paths, logger, data):
     shutil.rmtree(fstan)
 
     # Prediction for target sites
-    logger.info(f"Generating {parname}-{npred}")
+    logger.info(f"Generating data for parameter {parname} with npred={npred}")
     ypred = gls.generate(data.stan_data, df, True)
 
     # Storage
-    logger.info(f"Storing {parname}-{npred}")
+    logger.info(f"Storing data for parameter {parname} with npred={npred}")
     priors = []
     pname = parname.lower()
     pname = f"log{pname}" if parname == "LOCN" else pname
     opts = task.to_dict()["options"]
     for i, isite in enumerate(data.stationids_idx):
+        if parname == "LOCN":
+            # Transform locn to original scale
+            values = np.exp(ypred[:, isite])
+            pred = np.exp(data.predictand.iloc[isite])
+        else:
+            values = ypred[:, isite]
+            pred = data.predictand.iloc[isite]
+
         dd = {
             "STATIONID": data.stationids[i],
             "TASKID": config.taskid,
             "MARGINAL": marginal,
             "NPREDICTORS": npred,
             "PARAMETER": pname,
-            "PRIOR_MEAN": float(ypred[:, isite].mean().round(3)),
-            "PRIOR_STD": float(ypred[:, isite].std(ddof=1).round(3)),
-            "PREDICTAND": data.predictand.iloc[isite],
+            "PRIOR_MEAN": float(values.mean().round(3)),
+            "PRIOR_STD": float(values.std(ddof=1).round(3)),
+            "PREDICTAND": pred,
             "PREDICTORS": "/".join(data.predictors)
         }
         for m in config.stan_diag_metrics:
