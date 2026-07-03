@@ -24,7 +24,7 @@ def test_get_stations():
 
 def test_get_awra_cookies():
     cookies = datahub.get_awra_cookies()
-    assert cookies.shape == (12, 11)
+    assert cookies.shape == (12, 5)
 
 def test_potpeaks():
     df, wy, nu = datahub.get_potpeaks()
