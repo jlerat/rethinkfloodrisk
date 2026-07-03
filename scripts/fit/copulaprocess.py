@@ -142,6 +142,7 @@ if __name__ == "__main__":
     overwrite = args.overwrite
     debug = args.debug
     version_priors = 1
+    awraid = "WILSONSRIVER"
 
     design_eris = [1.1, 1.2, 1.4, 1.6, 1.8,
                    2, 5, 10, 20, 50, 70, 100, 150,
@@ -167,10 +168,10 @@ if __name__ == "__main__":
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
                          "debug", "task", "version_priors",
-                         "design_eris"])
+                         "design_eris", "awraid"])
     config = Config(version, taskid, overwrite,
                     debug, opm.get_task(taskid),
-                    version_priors, design_eris)
+                    version_priors, design_eris, awraid)
 
     # Baseline
     script_paths = get_script_paths(config)
