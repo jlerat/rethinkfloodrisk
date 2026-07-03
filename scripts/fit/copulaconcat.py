@@ -82,7 +82,7 @@ def process(config, script_paths, logger):
             with fd.open("r") as fo:
                 data = json.load(fo)
 
-            stationids = data["task_group"].split("-")
+            stationids = data["stationids"]
 
             # Get results
             #ddf, _ = csv.read_csv(f)

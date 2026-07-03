@@ -36,13 +36,12 @@ from pyrethink import sample as rsample
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 
-def get_options(version, version_priors=1):
+def get_options(version, version_priors=1, awraid="WILSONS_RIVER"):
     copula_specs = [
         "Univariate",
         "Gaussian",
         "GaussianFactor_0_1",
         "GaussianFactor_0_2",
-        "Student_3",
         "Student_5"
         ]
     pcensors = [0.3]
@@ -51,16 +50,22 @@ def get_options(version, version_priors=1):
                 "2016",
                 "2021"]
     stations = datahub.get_stations()
+
     sids = stations.index.to_list()
-    groups = ["203014-203002-203012"] + ["-".join(sids)] + sids
+    groups = ["203014-203010-203024"] + ["-".join(sids)] + sids
+
+    awra_covariate = [False, True]
 
     opm = hyruns.OptionManager(version=version,
-                               version_priors=version_priors)
+                               version_priors=version_priors,
+                               awraid=awraid)
     opm.from_cartesian_product(pcensor=pcensors,
                                exclude=excludes,
                                copula_spec=copula_specs,
                                prior=priors,
+                               awra_covariate=awra_covariate,
                                group=groups)
+
     # .. exclude options with a single stations and
     # multivariate copula_spec
     keep = []
@@ -71,6 +76,8 @@ def get_options(version, version_priors=1):
         if nsta > 1 and task["copula_spec"] == "Univariate":
             continue
         if nsta < 8 and task["copula_spec"] == "GaussianFactor2":
+            continue
+        if nsta != 3 and task["awra_covariate"]:
             continue
         keep.append(task)
     opm.tasks = keep
@@ -120,11 +127,19 @@ def get_logger(config, script_paths):
 
 
 def get_stationids(config):
-    return config.task["group"].split("-")
+    stationids = config.task["group"].split("-")
+    if config.task.awra_covariate:
+        stationids += [f"AWRA-{config.awraid}"]
+    return stationids
 
 
 def get_data(config, script_paths, logger):
     df, _, _, _ = datahub.get_ams_concat()
+
+    if config.task.awra_covariate:
+        awra = datahub.get_ams_awra(config.awraid)
+        awra.name = f"AWRA-{config.awraid}"
+        df = pd.concat([df, awra], axis=1).sort_index()
 
     excl = config.task.exclude
     if excl != "NONE":
@@ -303,6 +318,7 @@ if __name__ == "__main__":
     overwrite = args.overwrite
     debug = args.debug
     seed = 5446
+    awraid = "WILSONSRIVER"
 
     version_priors = 1
 
@@ -317,7 +333,7 @@ if __name__ == "__main__":
 
 
     # .. options
-    opm = get_options(version, version_priors)
+    opm = get_options(version, version_priors, awraid)
 
     if debug:
         ctype = "mv"
@@ -330,18 +346,19 @@ if __name__ == "__main__":
             taskid = opm.search(copula_spec="GaussianFactor_0_2$",
                                 exclude="2021",
                                 prior="^informative",
-                                group=opm.options["group"][1])[0]
+                                awra_covariate="True",
+                                group="203014-203010-203024")[0]
 
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
                          "debug", "task", "version_priors",
                          "stan_nwarm", "stan_nchains",
-                         "stan_nsamples", "seed"])
+                         "stan_nsamples", "seed", "awraid"])
     config = Config(version, taskid, overwrite,
                     debug, opm.get_task(taskid),
                     version_priors, stan_nwarm,
                     stan_nchains, stan_nsamples,
-                    seed)
+                    seed, awraid)
 
     # Baseline
     script_paths = get_script_paths(config)
