@@ -28,7 +28,6 @@ def test_get_awra_cookies():
 
 def test_potpeaks():
     df, wy, nu = datahub.get_potpeaks()
-
     assert df.shape == (86, 8)
     assert abs(nu - 1.8297) < 1e-2
     assert (df.min() > 0).all()
@@ -41,7 +40,6 @@ def test_get_ams_concat():
     ams, times, dows, stations = datahub.get_ams_concat()
     assert ams.shape[1] == 8
     assert stations.shape[0] == 8
-
     assert ams.shape == times.shape
     assert ams.shape == dows.shape
     assert all([dt == np.int64 for dt in dows.dtypes])
@@ -49,8 +47,9 @@ def test_get_ams_concat():
 @pytest.mark.parametrize("stationid",
                          datahub.get_awra_cookies().index.tolist())
 def test_get_ams_awra(stationid):
-    df = datahub.get_ams_awra(stationid)
-    assert df.shape == (111, 4)
+    se = datahub.get_ams_awra(stationid)
+    assert len(se) == 111
+    assert np.all(se.index.values == np.arange(1911, 2022))
 
 
 @pytest.mark.parametrize("stationid",

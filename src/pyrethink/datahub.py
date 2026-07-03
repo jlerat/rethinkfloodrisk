@@ -109,12 +109,9 @@ def get_ams(stationid=None):
 def get_ams_awra(stationid, variable="QTOT"):
     fa = DATA_FOLDER / "ams_awra" / f"awra_v7_cookies_daily_cookies_ams_{stationid}.csv"
     ams, _ = csv.read_csv(fa)
-    ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4]
+    ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4].astype(int)
     ams = ams.set_index("YEAR")
-    ams = ams.filter(regex=variable, axis=1)
-    ams.columns = [re.sub(f"{variable}_", "", cn) for cn in ams.columns]
-
-    return ams
+    return ams.loc[:, f"{stationid}_{variable}_PEAK"]
 
 
 
