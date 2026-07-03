@@ -55,14 +55,14 @@ def get_script_paths(config, source_file):
                       fproc, fimg)
 
     fimg.mkdir(exist_ok=True)
-
-    for f in fimg.glob("*"):
-        for ff in f.glob("*.*"):
-            ff.unlink()
-        if f.is_dir():
-            f.rmdir()
-        else:
-            f.unlink()
+    if config.clean:
+        for f in fimg.glob("*"):
+            for ff in f.glob("*.*"):
+                ff.unlink()
+            if f.is_dir():
+                f.rmdir()
+            else:
+                f.unlink()
 
     return script_paths
 
@@ -87,9 +87,9 @@ def get_data(config, script_paths, logger):
 
 
 def process(config, script_paths, logger, data):
-    stations = data.stations
-    if config.debug:
-        stations = stations.iloc[:2]
+    grp3 = next(g for g in data.options.options["group"] if len(g.split("-")) == 3)
+    stationids = grp3.split("-")
+    stations = data.stations.loc[stationids]
 
     options = data.options
     obs_data = data.obs_data
@@ -122,9 +122,10 @@ def process(config, script_paths, logger, data):
 
             # Plot
             plt.close("all")
+            cop_prior = "inf" if config.use_informative else "noninf"
             mosaic = [[f"{ex}_univ-noninf",
                        f"{ex}_univ-inf",
-                       f"{ex}_mv-noninf"] for ex in excludes]
+                       f"{ex}_mv-{cop_prior}"] for ex in excludes]
             nrows = len(mosaic)
             ncols = len(mosaic[0])
             figsize = (ncols * config.awidth, nrows * config.aheight)
@@ -144,12 +145,12 @@ def process(config, script_paths, logger, data):
                 prior = "uninformative" if re.search("noninf", axcfg) \
                     else "informative"
 
-                grp = next(g for g in options.options["group"]
-                           if len(g.split("-")) == 8)
-                group = stationid if cs == "Univariate" else grp
+                group = stationid if cs == "Univariate" else grp3
+                awra_covariate = False if cs == "Univariate" else config.use_awra
 
                 taskid = options.find(prior=prior, copula_spec=cs,
                                       exclude=exclude,
+                                      awra_covariate=awra_covariate,
                                       group= f"^{group}$")
                 taskid = next(t for t in taskid)
 
@@ -189,7 +190,7 @@ def process(config, script_paths, logger, data):
                     txt = str(wy)
                     ax.annotate(txt, xy=(xx, yy),
                                 xycoords="data",
-                                xytext=(-40, 40),
+                                xytext=(40, -40),
                                 va="bottom", ha="right",
                                 textcoords="offset points",
                                 arrowprops=arrowprops,
@@ -254,7 +255,9 @@ def process(config, script_paths, logger, data):
             fig.suptitle(ftitle, fontweight="bold")
 
             basename = script_paths.basename
-            fp = f"{basename}_{stationid}_{copula_spec}_v{config.version}.png"
+            use_a = config.use_awra
+            use_i = config.use_informative
+            fp = f"{basename}_{stationid}_{copula_spec}_A{use_a}_I{use_i}_v{config.version}.png"
             fp = script_paths.fimg / fp
             fp.parent.mkdir(exist_ok=True)
             fig.savefig(fp, dpi=config.fdpi)
@@ -269,13 +272,20 @@ if __name__ == "__main__":
                         type=int, required=True)
     parser.add_argument("-d", "--debug", help="Debug",
                         action="store_true", default=False)
+    parser.add_argument("-c", "--clean", help="Clean image folder",
+                        action="store_true", default=False)
+    parser.add_argument("-a", "--use_awra", help="Use copula including awra covariate",
+                        action="store_true", default=False)
+    parser.add_argument("-i", "--use_informative", help="Use copula including informative prior",
+                        action="store_true", default=False)
     args = parser.parse_args()
 
     # Config
     CF = namedtuple("Config", ["version", "debug",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "freq_plot_type"])
+                               "freq_plot_type", "use_awra",
+                               "use_informative", "clean"])
     awidth = 6
     aheight = 5
     fdpi = 300
@@ -287,7 +297,9 @@ if __name__ == "__main__":
     config = CF(args.version,  args.debug,
                 awidth, aheight, fdpi, ptype, ari_max,
                 excludes,
-                freq_plot_type)
+                freq_plot_type,
+                args.use_awra, args.use_informative,
+                args.clean)
 
     # Baseline
     source_file = Path(__file__).resolve()
