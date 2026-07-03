@@ -31,7 +31,7 @@ def get_stations(richmond_only=True):
 
 
 def get_awra_cookies():
-    fs = DATA_FOLDER / f"awra_v7_cookies_daily_cookies_list.csv"
+    fs = DATA_FOLDER / "awra_v7_cookies_daily_cookies_list.csv"
     df, _ = csv.read_csv(fs, index_col=0)
     df.index.name = "STATIONID"
     return df
