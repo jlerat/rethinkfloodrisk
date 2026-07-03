@@ -1,0 +1,78 @@
+name: Build pyrethink
+
+on: [push]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      max-parallel: 5
+    
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: "Set up Python"
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Cache CmdStan
+        uses: actions/cache@v5
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-2.39.0
+
+      - name: Install CmdStan
+        run: |
+          if [ ! -d ~/.cmdstan/cmdstan-2.39.0 ]; then
+            uvx --from cmdstanpy install_cmdstan --version 2.39.0
+          else
+            echo "CmdStan 2.39.0 already cached, skipping install"
+          fi
+
+      - name : Install pyrethink package 
+        run: |
+          set -e
+          uv lock --refresh
+          uv sync --locked --all-extras --dev
+
+      - name: Lint with ruff
+        run: |
+          uv run ruff check src/pyrethink
+
+      - name: Run tests
+        run: |
+          set -e
+          uv run --locked pytest -sv -cov=pyrethink --cov-report xml:coverage.xml --cov-report html -cov-report=term-missing tests
+ 
+      #- name: Parse coverage report and create badge
+      #  run: |
+      #    uv run python -c "import xml.etree.ElementTree as ET; from anybadge import Badge; cov = float(ET.parse('coverage.xml').getroot().get('line-rate')) * 100; covbadge = Badge('Coverage', value=f'{cov:0.0f}%', thresholds={60:'red', 70:'orange', 80:'lightgreen', 90:'green'}); covbadge.write_badge('coverage_badge.svg', True)"
+
+      #- name: Update gist badge
+      #  run: |
+      #    set -e
+      #    sed 's/\"/\\\"/g' coverage_badge.svg > coverage_badge.txt
+      #    echo "{\"files\": {\"coverage_badge.svg\": {\"content\": \"$(cat coverage_badge.txt)\"}}}" > coverage_badge.json
+      #    curl -X PATCH -H "Authorization: token ${{ secrets.COVERAGE_GIST_TOKEN }}" \
+      #          -d @coverage_badge.json \
+      #          "https://api.github.com/gists/${{ secrets.COVERAGE_GIST_ID }}"
+
+      - name: Upload pytest test log files
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-logs
+          path: tests/*.log
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-coverage
+          path: htmlcov/*.*

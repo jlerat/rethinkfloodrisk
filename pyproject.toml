@@ -1,37 +1,52 @@
 [build-system]
 requires = [
     "wheel",
-    "setuptools >= 64",
-    "cython >= 3.0.10",
-    "numpy >= 1.26.4",
+    "setuptools >= 82",
+    "cython >= 3.2.5",
+    "numpy >= 2.4.6",
     "cmdstanpy >= 1.2.5"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyrethink"
+version = "0.1"
 authors = [{name = "Julien Lerat, CSIRO Environment", email="julien.lerat@csiro.au"}]
-description = "Tool supporting the workflows"
+description = "Code supporting the paper 'rethink flood risk'"
 readme = "README.md"
-license = {file = "LICENSE"}
-keywords = ["data processing", "rainfall", "streamflow", "rainfall-runoff", "hydrology"]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["data processing", "flood", "flood frequency analysis", "hydrology"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python 3",
-    "Programming Language :: C",
+    "Programming Language :: stan",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Hydrology"
 ]    
-requires-python = ">= 3.8"
+
+requires-python = ">= 3.14"
 dependencies = [
-    "cython >= 3.0.10",
-    "numpy >= 1.26.4",
+    "cython >= 3.2.5",
+    "numpy >= 2.4.6",
     "cmdstanpy >= 1.2.5",
     "scipy >= 1.13.0",
-    "pandas >= 2.0.0"
+    "pandas >= 2.0.0",
+    "hydrodiy",
+    "floodstan",
+    "ipython>=9.14.1",
 ]
-dynamic = ["version"]
+
+[dependency-groups]
+dev = [
+    "anybadge>=1.16.0",
+    "ruff>=0.15.12",
+    "pytest>=8.3.5",
+    "pytest-allclose>=1.0.0",
+    "pytest-cov>=5.0.0"
+]
+
 
 #[project.urls]
 #Homepage = "https://github.com/csiro-hydroinformatics/hydrodiy"
@@ -43,5 +58,13 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
-[tool.setuptools.dynamic]
-version = {attr = "pyrethink.__version__"}
+[tool.setuptools.package-data]
+"*" = ["*.pyx", "*.pxd", "*.c", "*.h", "*.stan", "*.stanfunctions", "*.zip", "*.csv"]
+
+[tool.uv]
+no-build-isolation-package = ["pyrethink"]
+default-groups = []
+
+[tool.uv.sources]
+hydrodiy = { git = "https://github.com/csiro-hydroinformatics/hydrodiy" }
+floodstan = { git = "https://github.com/jlerat/floodstan" }

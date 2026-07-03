@@ -13,6 +13,7 @@ from scipy.linalg import toeplitz
 
 from scipy.stats import norm
 from scipy.stats import multivariate_normal as mvn
+from scipy.stats import uniform_direction
 
 from scipy.stats import t as student_t
 from scipy.stats import multivariate_t as mvt
@@ -29,20 +30,16 @@ from floodstan import bivariate_censored_sampling
 
 from pyrethink import sample
 from pyrethink import datahub
-from pyrethink import mv_censored_no_missing_sampling
+from pyrethink import mv_censored_sampling
+from pyrethink import mv_censored_factors_sampling
+from pyrethink import factors_correlation_sampling
 
-from test_copulas import get_type
+from test_copulas import COPULA_SPECS
 
 FTESTS = Path(__file__).resolve().parent
 
 SEED = 5446
 
-DEBUG = False
-
-# Used to write test data for postpred checks
-WRITE_SAMPLE_DATA = True
-
-PROGRESS = DEBUG
 FLOG = FTESTS / "test_sample.log"
 
 # Clean files
@@ -52,10 +49,11 @@ if FLOG.exists():
     except:
         pass
 
-for f in FTESTS.glob("test_mv_censored_no_missing_vs_floodstan*.png"):
+for f in FTESTS.glob("test_mv_censored_vs_floodstan*.png"):
     f.unlink()
 
-LOGGER = fsample.get_logger(use_stan_logger=PROGRESS, flog=FLOG)
+def get_logger(debug_mode):
+    return fsample.get_logger(use_stan_logger=debug_mode, flog=FLOG)
 
 STAN_NCHAINS_DEFAULT = 3
 STAN_NWARM_DEFAULT = 5000
@@ -64,37 +62,20 @@ STAN_NSAMPLES_DEFAULT = 6000
 STAN_DIAG_METRICS = ["treedepth", "rhat", "ebfmi", "effsamplesz"]
 
 @pytest.mark.parametrize("pcensor", [0., 0.3])
-@pytest.mark.parametrize("no_missing", [False, True])
-def test_sample_data(pcensor, no_missing, allclose):
+@pytest.mark.parametrize("copula_spec", COPULA_SPECS)
+def test_sample_data(pcensor, copula_spec, allclose):
+    data, times, dows, _ = datahub.get_ams_concat()
+    censors = datahub.get_censors(pcensor)
 
-    data, times, dows, _ = datahub.get_ams_concat(no_missing=no_missing)
-    censors = datahub.get_censors(pcensor, no_missing=no_missing)
-    copula_type = 1
-    copula_shape = 2.5
-
-    sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type=copula_type,
-                                         copula_shape=copula_shape,
+    sv = sample.StanSamplingMultivariate(data,
+                                         copula_spec=copula_spec,
                                          censors=censors)
-
-    pisc = sv.pair_in_same_cluster
-    miss = sv.clusters_missing
-    s = pisc.sum(axis=1)
-    P = sv.data.shape[1]
-    s0 = (P * (P - 1) // 2) / 3
-    s1 = 2 * s0
-    for idx in np.where((miss == 0) & (s >= s0) & (s <= s1))[0]:
-        cl = sv.clusters[idx]
-        pi = pisc[idx]
-        M = np.zeros((P, P))
-        M[np.triu_indices(P, 1)] = pi
-        for i, j in combinations(range(P), 2):
-            same = M[i, j] == 1
-            expected = np.prod(cl[:, [i, j]], axis=1).sum() > 0
-            assert same == expected
-
     stan_data = sv.to_dict()
-    assert len(stan_data) == 26
+    assert len(stan_data) == 25
+    assert stan_data["P"] == 8
+    assert stan_data["F"] == sv.copula.copula_nfactors
+    assert stan_data["marginal_id"] == 0
+    assert stan_data["copula_id"] == sv.copula_id
 
     N = stan_data["N"]
     P = stan_data["P"]
@@ -103,15 +84,13 @@ def test_sample_data(pcensor, no_missing, allclose):
     assert data.shape == (N, P)
     assert data.notnull().any(axis=1).all()
 
-    clust = stan_data["clusters"]
-    assert clust.shape == (N, P, P)
-
-    pid = stan_data["partitions_id"]
-    assert pid.shape == (N, )
-
     nobs = stan_data["Nobs"]
     nmiss = stan_data["Nmiss"]
     ncens = stan_data["Ncens"]
+    if pcensor > 0:
+        assert ncens > 0
+    else:
+        assert ncens == 0
 
     nval = np.prod(data.shape)
     nok = data.notnull().sum().sum()
@@ -119,6 +98,10 @@ def test_sample_data(pcensor, no_missing, allclose):
     assert nobs + ncens + nmiss == nval
     assert nobs + ncens == nok
     assert nmiss == nval - nok
+
+    assert len(stan_data["ylocn_prior"]) == P
+    assert len(stan_data["ylogscale_prior"]) == P
+    assert len(stan_data["yshape1_prior"]) == P
 
     stan_inits = sv.initial_parameters
 
@@ -128,54 +111,40 @@ def test_sample_data(pcensor, no_missing, allclose):
 
     data = np.nan * np.zeros_like(data)
     with pytest.raises(ValueError, match="Expected at least"):
-        sv = sample.StanSamplingMultivariate(data, dows,
-                                             copula_type,
-                                             copula_shape)
+        sv = sample.StanSamplingMultivariate(data, copula_spec)
 
 
-def test_inits(allclose):
-    data, times, dows, _ = datahub.get_ams_concat()
-    censors = datahub.get_censors(pcensor=0.2)
-    copula_type = 0.
-    copula_shape = 0.
-    sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type,
-                                         copula_shape,
-                                         censors=censors)
-    inits = sv.initial_parameters
-    assert len(inits) == 6
-
-
-@pytest.mark.parametrize("config", ["censored", "uncensored"])
+@pytest.mark.parametrize("is_censored", [True])
+@pytest.mark.parametrize("is_missing", [True])
 @pytest.mark.parametrize("nvars", [3])
-@pytest.mark.parametrize("copula_shape", [0., 4.])
-def test_sampler(config, nvars, copula_shape, allclose):
-    data, times, dows, _ = datahub.get_ams_concat()
+@pytest.mark.parametrize("copula_spec", [
+    "Gaussian",
+    "Student_4",
+    "GaussianFactor_0_1",
+    "GaussianFactor_0_2"
+    ])
+def test_sampler(is_censored, is_missing, nvars, copula_spec,
+                 allclose, debug_mode):
+    data, _, _, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
-    dows = dows.iloc[:, :nvars]
 
-    if config.startswith("censored"):
+    if not is_missing:
+        data = data.loc[data.notnull().all(axis=1)]
+
+    if is_censored:
         pcensor = 0.3
         censors = datahub.get_censors(pcensor)
         censors = censors.loc[data.columns]
     else:
         censors = np.zeros(data.shape[1])
 
-    copula_type = get_type(copula_shape)
-    sv = sample.StanSamplingMultivariate(data, dows,
-                                         copula_type,
-                                         copula_shape,
+    sv = sample.StanSamplingMultivariate(data,
+                                         copula_spec,
                                          censors=censors)
     stan_data = sv.to_dict()
-
-    if config == "uncensored":
-        assert stan_data["Nobs"] == np.prod(data.shape)
-        assert stan_data["Ncens"] == 0
-        assert stan_data["Nmiss"] == 0
-
     stan_inits = sv.initial_parameters
 
-    fout = f"sampling_{config}_N{nvars}_C{copula_shape:0.0f}"
+    fout = f"sampling_{is_censored}_N{nvars}_C{copula_spec}"
     fout = FTESTS / "sampling" / fout
     fout.mkdir(parents=True, exist_ok=True)
     for f in fout.glob("*.*"):
@@ -191,25 +160,31 @@ def test_sampler(config, nvars, copula_shape, allclose):
               chains=STAN_NCHAINS_DEFAULT,
               parallel_chains=STAN_NCHAINS_DEFAULT,
               iter_warmup=STAN_NWARM_DEFAULT,
-              show_progress=PROGRESS)
+              show_progress=debug_mode)
+
+    # Choose sampler
+    if sv.copula_nfactors == 0:
+        sampler = mv_censored_sampling
+    else:
+        sampler = mv_censored_factors_sampling
 
     # Test sample size error
     kw["data"]["Ncens"] += 1
     with pytest.raises(RuntimeError):
-        mv_censored_no_missing_sampling(**kw)
+        sampler(**kw)
 
     kw["data"]["Ncens"] -= 1
 
     # Test copula shape error
-    if copula_type == 1:
+    if sv.copula_name == "Student":
         kw["data"]["copula_shape"] = 1.9
         with pytest.raises(RuntimeError):
-            mv_censored_no_missing_sampling(**kw)
+            sampler(**kw)
 
-    kw["data"]["copula_shape"] = copula_shape
+    kw["data"]["copula_shape"] = sv.copula_shape
 
     # Run sampler
-    smp = mv_censored_no_missing_sampling(**kw)
+    smp = sampler(**kw)
     df = smp.draws_pd()
     diag = report.process_stan_diagnostic(smp.diagnose())
 
@@ -220,22 +195,26 @@ def test_sampler(config, nvars, copula_shape, allclose):
     for met in STAN_DIAG_METRICS:
         assert diag[met] == "satisfactory"
 
-    if config == "censored" and WRITE_SAMPLE_DATA:
-        fd = fout / "data.zip"
+    if is_censored and is_missing and debug_mode:
+        fd = fout / "censored_missing_data.zip"
         comp = dict(method="zip", compresslevel=9)
         data.to_csv(fd, compression=comp)
 
-        fs = fout / "samples.zip"
+        fs = fout / "censored_missing_samples.zip"
+        if sv.copula_nfactors > 0:
+            fs = fout / "censored_missing_factors_samples.zip"
         df.to_csv(fs, compression=comp)
+
 
 @pytest.mark.parametrize("pcensor", [0., 0.4])
 @pytest.mark.parametrize("stationpair", [[0, 1], [4, 5], [1, 3]])
-def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
+def test_mv_censored_vs_floodstan(stationpair, pcensor, debug_mode,
+                                             allclose):
     # Two variables only
     data, _, dows, _ = datahub.get_ams_concat()
     data = data.iloc[:, stationpair]
-    dows = dows.iloc[:, stationpair]
     censors = data.quantile(pcensor)
+    data = data.loc[data.notnull().all(axis=1)]
 
     # -- floodstan --
     y, z = data.values.T
@@ -269,7 +248,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
               chains=STAN_NCHAINS_DEFAULT,
               parallel_chains=STAN_NCHAINS_DEFAULT,
               iter_warmup=nwarm,
-              show_progress=PROGRESS)
+              show_progress=debug_mode)
 
     smp1 = bivariate_censored_sampling(**kw)
     df1 = smp1.draws_pd()
@@ -284,17 +263,14 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     rho_min = np.floor(df1.rho.min() * 1e2) * 1e-2
     rho_max = 1.
     sv = sample.StanSamplingMultivariate(data,
-                                         dows,
-                                         copula_type=0.,
-                                         copula_shape=0,
+                                         copula_spec="Gaussian",
                                          censors=censors,
-                                         skip_clusters=True,
                                          rho_min=rho_min,
                                          rho_max=rho_max)
     kw["data"] = sv.to_dict()
     kw["inits"] = sv.initial_parameters
 
-    smp2 = mv_censored_no_missing_sampling(**kw)
+    smp2 = mv_censored_sampling(**kw)
     df2 = smp2.draws_pd()
     diag2 = report.process_stan_diagnostic(smp2.diagnose())
 
@@ -304,15 +280,16 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     pnames = df2.columns.to_series().filter(regex="^yl|^ys|^ucensor").to_list()
     pnames.append("corr_IW[2,1]")
 
-    LOGGER.info("")
-    LOGGER.info("-----------------")
+    logger = get_logger(debug_mode)
+    logger.info("")
+    logger.info("-----------------")
     sids = "/".join(data.columns.tolist())
-    LOGGER.info(f"stations={sids} pcensor={pcensor:0.2f}")
-    LOGGER.info(f"nwarm = {nwarm}")
-    LOGGER.info(f"nsamples = {nsamples}")
-    LOGGER.info(f"rho_min = {rho_min}")
-    LOGGER.info(f"rho_max = {rho_max}")
-    LOGGER.info("")
+    logger.info(f"stations={sids} pcensor={pcensor:0.2f}")
+    logger.info(f"nwarm = {nwarm}")
+    logger.info(f"nsamples = {nsamples}")
+    logger.info(f"rho_min = {rho_min}")
+    logger.info(f"rho_max = {rho_max}")
+    logger.info("")
 
     plt.close("all")
     n = len(pnames)
@@ -353,13 +330,13 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         msg = f"[{pname2:15s}] x1:m={x1.mean():6.2f} s={x1.std():6.2f}"\
               + f" // x2:m={x2.mean():6.2f} s={x2.std():6.2f}"\
               + f" // test: ks-logpv={kspv:4.1f} t-logpv={tpv:4.1f}"
-        LOGGER.info(msg)
+        logger.info(msg)
 
         # Test on matching the two dist
         # 10^-8 is very low for a p-value! Still looking ok visually though
         # Also skip correlation as it can be slightly different
         pv_thresh = -8
-        if not DEBUG and pname1 != "rho":
+        if not debug_mode and pname1 != "rho":
             assert kspv > pv_thresh
             assert tpv > pv_thresh
 
@@ -375,7 +352,7 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
         xb = max(x1.max(), x2.max())
         bins = np.linspace(xa, xb, 30)
         ax.hist(x1, bins=bins, label="floodstan", edgecolor="0.5", alpha=0.6)
-        ax.hist(x2, bins=bins, label="mv_censored_no_missing", edgecolor="0.5", alpha=0.6)
+        ax.hist(x2, bins=bins, label="mv_censored", edgecolor="0.5", alpha=0.6)
 
         title = f"{pname2} - ks-logpv={kspv:0.1f}"
         ax.set_title(title, fontweight="bold")
@@ -388,9 +365,53 @@ def test_mv_censored_no_missing_vs_floodstan(stationpair, pcensor, allclose):
     sids = "-".join(data.columns.tolist())
     fimg = FTESTS / "images"
     fimg.mkdir(exist_ok=True)
-    fp = f"test_mv_censored_no_missing_vs_floodstan_stations{sids}"\
+    fp = f"test_mv_censored_vs_floodstan_stations{sids}"\
         + f"_pcens{pcensor*100:0.02f}.png"
     fp = fimg / fp
 
     fig.savefig(fp)
+
+
+@pytest.mark.parametrize("nvars", [6, 8, 10])
+@pytest.mark.parametrize("nfactors", [1, 2, 3])
+def test_factors_correlation(nvars, nfactors, allclose, debug_mode):
+
+    kw = {"data": dict(P=nvars, F=nfactors)}
+    fout = FTESTS / "sampling" / "factors_correlation"
+    fout.mkdir(parents=True, exist_ok=True)
+    for f in fout.glob("*.*"):
+        f.unlink()
+
+    stan_data = dict(P=nvars, F=nfactors)
+    stan_inits = dict(rhos=uniform_direction(nfactors + 1).rvs(size=nvars))
+
+    nwarm = 5
+    nsamples = 1000
+    kw = dict(data=stan_data,
+              seed=SEED,
+              iter_sampling=nsamples + nwarm,
+              output_dir=fout,
+              inits=stan_inits,
+              chains=1,
+              parallel_chains=1,
+              iter_warmup=nwarm,
+              show_progress=debug_mode)
+
+    smp = factors_correlation_sampling(**kw)
+    df = smp.draws_pd()
+
+    # Ensure we only store rho and corr
+    #assert df.shape[1] == 10 + (nfactors + 1 + nvars) * nvars
+
+    cc = [f"corr[{i + 1},{j + 1}]"
+          for i, j in combinations(range(nvars), 2)]
+    corr = df.loc[:, cc]
+
+    assert np.all((corr.values >= 0) & (corr.values <= 1))
+
+    # test if correlation terms are widespread
+    (_, qt1), (_, qt2) = corr.quantile([0.01, 0.99]).iterrows()
+    assert all(qt1 < 0.2)
+    assert all(qt2 > 0.8)
+
 

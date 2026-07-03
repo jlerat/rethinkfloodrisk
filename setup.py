@@ -23,9 +23,9 @@ MODELS = [
     "test_indexing",
     "test_cor",
     "test_copula",
-    "test_clusters",
-    "mv_censored_no_missing",
-    "mv_censored_no_missing_no_clusters"
+    "factors_correlation",
+    "mv_censored",
+    "mv_censored_factors"
     ]
 
 CMDSTAN_VERSION = "2.36.0"

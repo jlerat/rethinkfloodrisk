@@ -10,7 +10,6 @@ functions {
 
     #include marginal.stanfunctions
     #include copula.stanfunctions
-    #include clusters.stanfunctions
 
 }
 
@@ -27,21 +26,28 @@ data {
   int<lower=0> Ncens;
   array[Ncens, 2] int idx_cens;
 
+  // Indexing - missing data
+  int<lower=0> Nmiss;
+  array[Nmiss, 2] int idx_miss;
+
+  // Choice of marginal (only GEV allowed for now)
+  int<lower=0, upper=0> marginal_id; 
+
   // Copula model
   // 0 : Gaussian, 1: Student
-  int copula_type;
+  int<lower=0, upper=1> copula_id;
   real copula_shape; 
 
   // Prior parameters
-  vector[2] ylocn_prior;
+  array[P] vector[2] ylocn_prior;
   real<lower=-1e10> locn_lower;
   real<lower=locn_lower, upper=1e10> locn_upper;
   
-  vector[2] ylogscale_prior;
+  array[P] vector[2] ylogscale_prior;
   real<lower=-20> logscale_lower;
   real<lower=logscale_lower, upper=20> logscale_upper;
   
-  vector[2] yshape1_prior;
+  array[P] vector[2] yshape1_prior;
   real shape1_lower;
   real<lower=shape1_lower> shape1_upper;
 
@@ -54,14 +60,14 @@ data {
 transformed data {
   // Check copula
   real copula_low;
-  if (copula_type == 1)
+  if (copula_id == 1)
     copula_low = 2.01;
   else
     copula_low = 0;
   real<lower=copula_low, upper=100> copula_test = copula_shape;
 
   // Check number of data in each category adds up 
-  int Ntest = N * P - Nobs - Ncens;
+  int Ntest = N * P - Nobs - Ncens - Nmiss;
   int<lower=0, upper=0> Ncheck = Ntest; 
 
   row_vector[P] zero_mean = zeros_row_vector(P);
@@ -81,6 +87,9 @@ parameters {
   // Correlation
   cholesky_factor_corr[P] L_IW;
   
+  // Latent variables for missing data
+  vector<lower=0, upper=1>[Nmiss] ulat_miss;
+
   // Latent variables for censored data
   vector<lower=0, upper=1>[Ncens] wlat_cens;
 }  
@@ -114,9 +123,11 @@ transformed parameters {
 
 model {
   // --- Priors ---
-  ylocn ~ normal(ylocn_prior[1], ylocn_prior[2]) T[locn_lower, locn_upper];
-  ylogscale ~ normal(ylogscale_prior[1], ylogscale_prior[2]) T[logscale_lower, logscale_upper];
-  yshape1 ~ normal(yshape1_prior[1], yshape1_prior[2]) T[shape1_lower, shape1_upper];
+  for(i in 1:P) {
+    ylocn[i] ~ normal(ylocn_prior[i][1], ylocn_prior[i][2]) T[locn_lower, locn_upper];
+    ylogscale[i] ~ normal(ylogscale_prior[i][1], ylogscale_prior[i][2]) T[logscale_lower, logscale_upper];
+    yshape1[i] ~ normal(yshape1_prior[i][1], yshape1_prior[i][2]) T[shape1_lower, shape1_upper];
+  }
 
   // Prior for cholesky factor of the correlation matrix
   L_IW ~ inv_wishart_cholesky(P + 1., Id);
@@ -135,31 +146,45 @@ model {
 
     real obs = y[ival][ivar];
     real zval = copula_marginal_quantile(gev_cdf(obs | tau, alpha, kappa), 
-                                         copula_type, copula_shape);
+                                         copula_id, copula_shape);
     z[ival][ivar] = zval;
 
     // log-Jacobian of z = inv_Phi(gev_cdf(obs))
     // dz/dobs = gev_pdf(obs) / phi(z)
     // Hence log(dz/dobs) =
     target += gev_lpdf(obs | tau, alpha, kappa) 
-        + copula_marginal_quantile_log_jac(zval, copula_type, copula_shape);
+        + copula_marginal_quantile_log_jac(zval, copula_id, copula_shape);
   }
+
+  // Set missing latent variables
+  for(i in 1:Nmiss) {
+    int ival = idx_miss[i][1]; 
+    int ivar = idx_miss[i][2]; 
+    real zmiss = copula_marginal_quantile(ulat_miss[i], 
+                                          copula_id,
+                                          copula_shape);
+    z[ival][ivar] = zmiss;
+    
+    // log-Jacobian of missing latent variable transform
+    target += copula_marginal_quantile_log_jac(zmiss, copula_id, copula_shape);
+  }
+
 
   // Set censored latent variables
   for(i in 1:Ncens) {
     int ival = idx_cens[i][1]; 
     int ivar = idx_cens[i][2]; 
     real zcens = copula_marginal_quantile(ulat_cens[i], 
-                                          copula_type,
+                                          copula_id,
                                           copula_shape);
     z[ival][ivar] = zcens;
     
     // log-Jacobian of censored latent variable transform
     target += log(ucensors[ivar]) 
-        + copula_marginal_quantile_log_jac(zcens, copula_type, copula_shape);
+        + copula_marginal_quantile_log_jac(zcens, copula_id, copula_shape);
   }
 
   // --- Likelihood ---
   for(i in 1:N)
-    target += copula_log_pdf(z[i], copula_type, copula_shape, corr_IW);
+    target += copula_log_pdf(z[i], copula_id, copula_shape, corr_IW);
 }

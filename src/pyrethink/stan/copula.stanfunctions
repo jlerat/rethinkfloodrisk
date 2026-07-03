@@ -170,10 +170,10 @@ real get_student_std_adjust(real copula_shape){
     return sqrt((copula_shape - 2.) / copula_shape);
 }
 
-real copula_marginal_prob(real z, int copula_type, real copula_shape) {
+real copula_marginal_prob(real z, int copula_id, real copula_shape) {
     real adj;
 
-    if(copula_type == 0)
+    if(copula_id == 0)
         return normal_cdf(z | 0, 1);
     else {
         adj = get_student_std_adjust(copula_shape);
@@ -181,10 +181,10 @@ real copula_marginal_prob(real z, int copula_type, real copula_shape) {
     }    
 }
 
-real copula_marginal_quantile(real p, int copula_type, real copula_shape) {
+real copula_marginal_quantile(real p, int copula_id, real copula_shape) {
     real adj;
 
-    if(copula_type == 0)
+    if(copula_id == 0)
         return inv_Phi(p);
     else {
         adj = get_student_std_adjust(copula_shape);
@@ -192,10 +192,10 @@ real copula_marginal_quantile(real p, int copula_type, real copula_shape) {
     }    
 }
 
-real copula_marginal_quantile_log_jac(real z, int copula_type, real copula_shape) {
+real copula_marginal_quantile_log_jac(real z, int copula_id, real copula_shape) {
     real adj;
 
-    if(copula_type == 0)
+    if(copula_id == 0)
         return -std_normal_lpdf(z);
     else {
         adj = get_student_std_adjust(copula_shape);
@@ -203,13 +203,13 @@ real copula_marginal_quantile_log_jac(real z, int copula_type, real copula_shape
     }    
 }
 
-real copula_log_pdf(vector z, int copula_type, real copula_shape, matrix corr) {
+real copula_log_pdf(vector z, int copula_id, real copula_shape, matrix corr) {
     int P = size(z);
     row_vector[P] zero_mean = zeros_row_vector(P);
     real adj1;
     real adj2;
 
-    if(copula_type == 0)
+    if(copula_id == 0)
         return multi_normal_lpdf(z | zero_mean, corr);
     else {
         // This is the inverse of the adjustment factor
@@ -225,12 +225,12 @@ real copula_log_pdf(vector z, int copula_type, real copula_shape, matrix corr) {
     }    
 }
 
-vector copula_rng(int copula_type, real copula_shape, matrix corr) {
+vector copula_rng(int copula_id, real copula_shape, matrix corr) {
     int P = rows(corr);
     row_vector[P] zero_mean = zeros_row_vector(P);
     real adj;
 
-    if(copula_type == 0) {
+    if(copula_id == 0) {
         return multi_normal_rng(zero_mean, corr);
     }
     else {

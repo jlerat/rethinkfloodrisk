@@ -8,10 +8,8 @@ from floodstan.report import QUANTILES
 from floodstan.report import DESIGN_ARIS
 from floodstan.report import _prepare_design_aris
 
-MARGINAL = GEV()
-
-
 def ffa_report(params,
+               marginal=GEV(),
                design_eris=DESIGN_ARIS,
                logger=None,
                iterlog=1000):
@@ -70,14 +68,14 @@ def ffa_report(params,
     for ivar in range(nvar):
         for pname in PARAMETERS:
             cn = f"y{pname}[{ivar + 1}]"
-            MARGINAL[pname] = params_df[pname].loc[:, cn].mean()
+            marginal[pname] = params_df[pname].loc[:, cn].mean()
 
-        xu = np.unique(MARGINAL.ppf(post_pred_cdf))
+        xu = np.unique(marginal.ppf(post_pred_cdf))
         xi[:len(xu), ivar] = xu
 
         # .. compute quantile distribution using mean params
         #    of design floods
-        design_meanp[:, ivar] = MARGINAL.ppf(design_cdf)
+        design_meanp[:, ivar] = marginal.ppf(design_cdf)
 
     xi = xi[np.any(~np.isnan(xi), axis=1)]
     xm = (xi[:-1] + xi[1:]) / 2
@@ -100,7 +98,7 @@ def ffa_report(params,
             try:
                 for pname in PARAMETERS:
                     cn = f"y{pname}[{ivar + 1}]"
-                    MARGINAL[pname] = params_df[pname].loc[isample, cn]
+                    marginal[pname] = params_df[pname].loc[isample, cn]
             except ValueError:
                 continue
 
@@ -108,14 +106,14 @@ def ffa_report(params,
             #    posterior distribution
             xxi = xi[:, ivar]
             xxi = xxi[~np.isnan(xxi)]
-            fi = MARGINAL.cdf(xxi)
-            x0, x1 = MARGINAL.support
+            fi = marginal.cdf(xxi)
+            x0, x1 = marginal.support
             fi[xxi < x0] = 0.
             fi[xxi > x1] = 1.
 
             xxm = xm[:, ivar]
             xxm = xxm[~np.isnan(xxm)]
-            fm = MARGINAL.cdf(xxm)
+            fm = marginal.cdf(xxm)
             fm[xxm < x0] = 0.
             fm[xxm > x1] = 1.
 
@@ -129,7 +127,7 @@ def ffa_report(params,
 
             # .. compute design streamflow
             cols = [f"{cn}[{ivar + 1}]" for cn in design_columns]
-            q = MARGINAL.ppf(design_cdf)
+            q = marginal.ppf(design_cdf)
             report_df.loc[isample, cols] = q
 
     # Standardize coefs of posterior predictive

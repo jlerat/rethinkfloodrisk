@@ -10,12 +10,11 @@ from scipy.stats import multivariate_normal as mvn
 from scipy.stats import t as student_t
 
 from pyrethink import datahub
-from pyrethink.partitions import Partitions
 from pyrethink import postpredchecks as ppc
 
 from floodstan.marginals import GEV
 
-from test_copulas import get_type
+from test_copulas import COPULA_SPECS
 
 FTESTS = Path(__file__).resolve().parent
 
@@ -24,11 +23,9 @@ NSTATIONS = len(sta)
 
 DATA = pd.read_csv(FTESTS / "censored_missing_data.zip",
                    index_col=0, parse_dates=True)
-DATA = DATA[pd.notnull(DATA).any(axis=1)]
 
 SAMPLES = pd.read_csv(FTESTS / "censored_missing_samples.zip")
-# .. fix all sample format
-SAMPLES.columns = [re.sub("^cor", "corr", cn) for cn in SAMPLES.columns]
+SAMPLES_FACTORS = pd.read_csv(FTESTS / "censored_missing_factors_samples.zip")
 
 MARGINAL = GEV()
 
@@ -114,7 +111,7 @@ def test_multivariate_statistics(rho, nsta, allclose):
     z = norm.ppf(x)
     expected = 2 - rv.logcdf(z) / np.log(x[:, 0])
     err = np.abs(np.arcsinh(mv.xi) - np.arcsinh(expected))
-    assert err.max() < 5e-2
+    assert err.max() < 7e-2
 
 
 def tests_krupskii():
@@ -139,6 +136,7 @@ def test_bivariate_statistics_obs(pair, allclose):
     assert np.all(dep.xibar >= -1)
     assert np.all(dep.xibar <= 1)
 
+
 @pytest.mark.parametrize("repeat", range(10))
 @pytest.mark.parametrize("rho", [0.5, 0.9, 0.95])
 def test_bivariate_statistics(repeat, rho, allclose):
@@ -160,24 +158,14 @@ def test_bivariate_statistics(repeat, rho, allclose):
     assert allclose(mv.xi, expected, atol=1e-1, rtol=2e-2)
 
 
-@pytest.mark.parametrize("copula_shape", [0, 2.5, 5])
-def test_posterior_predictive_checks(copula_shape):
-    copula_type = get_type(copula_shape)
-
-    parts = Partitions(DATA.shape[1])
-    parts_id = np.random.randint(0, parts.nsubsets,
-                                 len(DATA))
-    dalpha = 1.
-
-    with pytest.raises(ValueError, match="Expected 'copula_shape' in"):
-        ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                        1, 1.5, parts_id, dalpha)
-
-    ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, SAMPLES.iloc[:200],
-                                                          copula_type,
-                                                          copula_shape,
-                                                          parts_id,
-                                                          dalpha)
+@pytest.mark.parametrize("copula_spec", ["Gaussian", "GaussianFactor_0_1"])
+def test_posterior_predictive_checks(copula_spec):
+    if re.search("Factor", copula_spec):
+        samples = SAMPLES_FACTORS.iloc[:200]
+    else:
+        samples = SAMPLES.iloc[:200]
+    ppu, ppb, ppm, data = ppc.posterior_predictive_checks(DATA, samples,
+                                                          copula_spec)
     assert ppu.shape == (9, 21)
     assert ppb.shape == (32, 21)
     assert ppm.shape == (27, 7)

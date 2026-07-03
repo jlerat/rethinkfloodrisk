@@ -1,40 +1,43 @@
 from pathlib import Path
 import re
-import json
 import numpy as np
 import pandas as pd
 from hydrodiy.io import csv
 
 FHERE = Path(__file__).resolve().parent
 FROOT = FHERE.parent.parent
-
-ENV = "LOCAL"
-
-with (FHERE / "config.json").open("r") as fo:
-    CONFIG = json.load(fo)[ENV]
+DATA_FOLDER = FROOT / "data"
+DATA_VERSION = "5.0"
 
 
-def replace_root(path):
-    root_label = "package_root_folder"
-    if path.startswith(root_label):
-        return FROOT / re.sub(root_label + "/", "", path)
-    else:
-        return path
+def get_stations(richmond_only=True):
+    if richmond_only:
+        fs = DATA_FOLDER / f"AMS_stations_richmond_v{DATA_VERSION}.csv"
+        df, _ = csv.read_csv(fs, index_col="STATIONID",
+                             dtype={"STATIONID": str})
+        return df
 
-
-DATA_FOLDER = replace_root(CONFIG["data_folder"])
-
-DATA_VERSION = CONFIG["data_version"]
-
-
-def get_stations(no_missing=True):
     fs = DATA_FOLDER / f"AMS_stations_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(fs, index_col="STATIONID",
                          dtype={"STATIONID": str})
+
+    fr = DATA_FOLDER / f"rff_predictors_v{DATA_VERSION}.csv"
+    dfr, _ = csv.read_csv(fr, index_col="STATIONID",
+                          dtype={"STATIONID": str})
+    cc = list(set(dfr.columns) - set(df.columns))
+    df = pd.concat([df, dfr.loc[df.index, cc]], axis=1)
+
     return df
 
 
-def get_potpeaks(no_missing=True):
+def get_awra_cookies():
+    fs = DATA_FOLDER / "awra_v7_cookies_daily_cookies_list.csv"
+    df, _ = csv.read_csv(fs, index_col=0)
+    df.index.name = "STATIONID"
+    return df
+
+
+def get_potpeaks():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     df, _ = csv.read_csv(ft, index_col="DAY", parse_dates=True)
 
@@ -46,12 +49,8 @@ def get_potpeaks(no_missing=True):
     df = df.filter(regex="_PEAK", axis=1)
     df.columns = df.columns.str.replace("_PEAK", "")
 
-    ams, _, _, _ = get_ams_concat(no_missing)
+    ams, _, _, _ = get_ams_concat()
     df = df.loc[:, ams.columns]
-    if no_missing:
-        iok = df.notnull().all(axis=1)
-        df = df.loc[iok]
-        wy = wy.loc[iok]
 
     # Count number of events per year
     nu = wy.value_counts().mean()
@@ -59,11 +58,11 @@ def get_potpeaks(no_missing=True):
     return df, wy, nu
 
 
-def get_potpeaks_thresh(no_missing=True):
+def get_potpeaks_thresh():
     ft = DATA_FOLDER / f"peak_streamflow_concatenated_v{DATA_VERSION}.csv"
     _, comments = csv.read_csv(ft, index_col="DAY", parse_dates=True)
 
-    potpeaks, _, _ = get_potpeaks(no_missing)
+    potpeaks, _, _ = get_potpeaks()
 
     qthresh = {re.sub(".*_|\\[.*", "", key): float(val)
                for key, val in comments.items()
@@ -76,20 +75,47 @@ def get_potpeaks_thresh(no_missing=True):
     return qthresh
 
 
-def get_ams(stationid):
-    fa = f"AMS_streamflow_{stationid}_v{DATA_VERSION}.csv"
-    fa = DATA_FOLDER / "ams" / fa
+def get_ams(stationid=None):
+    fa0 = DATA_FOLDER / "ams" / f"AMS_streamflow_{stationid}_v{DATA_VERSION}.csv"
+    if fa0.exists():
+        ams, _ = csv.read_csv(fa0)
+        ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4]
+        ams = ams.set_index("YEAR")
+        return ams
+    else:
+        fa1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.csv"
+        fz1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.zip"
+        if not fz1.exists():
+            errmsg = "Cannot find ams data."
+            raise ValueError(errmsg)
 
-    if not fa.exists():
-        errmsg = f"Cannot find ams data for station {stationid}."
-        raise ValueError(errmsg)
+        ams, _ = csv.read_csv(fa1)
+        sids = ams.stationid.astype(str)
 
-    ams, _ = csv.read_csv(fa, parse_dates=True)
+        ams = ams.iloc[:, 1:].T
+        ams.columns = sids
 
-    return ams
+        if stationid is not None:
+            if (sids == stationid).sum() == 0:
+                errmsg = f"Cannot find ams data for station {stationid}."
+                raise ValueError(errmsg)
+
+            ams = ams.loc[:, [stationid]]
+            ams.columns = [f"{stationid}_PEAK"]
+
+        return ams
 
 
-def get_ams_concat(no_missing=True):
+def get_ams_awra(stationid, variable="QTOT"):
+    fa = DATA_FOLDER / "ams_awra" / f"awra_v7_cookies_daily_cookies_ams_{stationid}.csv"
+    ams, _ = csv.read_csv(fa)
+    ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4].astype(int)
+    ams = ams.set_index("YEAR")
+    return ams.loc[:, f"{stationid}_{variable}_PEAK"]
+
+
+
+def get_ams_concat():
     stations = get_stations()
     peaks = pd.DataFrame(np.nan,
                          columns=stations.index,
@@ -114,24 +140,24 @@ def get_ams_concat(no_missing=True):
         times.loc[wy, stationid] = time
         dows.loc[wy, stationid] = dow
 
-    if no_missing:
-        miss = peaks.isnull().sum()
-        selected = miss < 30
-        isok = peaks.loc[:, selected].notnull().all(axis=1)
-        peaks = peaks.loc[isok, selected]
-        times = times.loc[isok, selected]
-        dows = dows.loc[isok, selected]
-        stations = stations.loc[selected]
+    #if no_missing:
+    #    miss = peaks.isnull().sum()
+    #    selected = miss < 30
+    #    isok = peaks.loc[:, selected].notnull().all(axis=1)
+    #    peaks = peaks.loc[isok, selected]
+    #    times = times.loc[isok, selected]
+    #    dows = dows.loc[isok, selected]
+    #    stations = stations.loc[selected]
 
     return peaks, times, dows, stations
 
 
-def get_censors(pcensor, no_missing=True):
+def get_censors(pcensor):
     if pcensor < 0 or pcensor > 1:
         errmsg = f"Expected pcensor in [0, 1], got {pcensor}."
         raise ValueError(errmsg)
 
-    ams, _, _, _ = get_ams_concat(no_missing)
+    ams, _, _, _ = get_ams_concat()
     censors = pd.Series(np.nan, index=ams.columns)
 
     for stationid, qmax in ams.items():
@@ -168,32 +194,17 @@ def get_rating_curves(stationid, only_last=False):
         return rcs, metas
 
 
-def eep2aep(nu, eep):
-    return 1 - np.exp(-nu * eep)
+def get_params_lh_moments():
+    # Parameter data
+    fs = DATA_FOLDER / "priors" / "params_lh_moments.csv"
+    df, _ = csv.read_csv(fs, dtype={"stationid": str})
+    df = df.rename(columns={"stationid": "STATIONID"})
 
+    # Predictor data
+    fp = DATA_FOLDER / f"rff_predictors_v{DATA_VERSION}.csv"
+    dfp, _ = csv.read_csv(fp, dtype={"STATIONID": str})
+    dfp = dfp.drop("CENTER_OZ_METRIC[-]", axis=1)
+    dfp.columns = [cn if re.search("CENTROID|STATIONID", cn) else f"PREDICTOR_{cn}"
+                   for cn in dfp.columns]
+    return pd.merge(df, dfp, on="STATIONID")
 
-def linear_interpolation(xx, x, y):
-    """ Linear interpolation """
-    # Sort values
-    isort = np.argsort(x)
-    x = np.array(x)[isort]
-    if np.any(np.diff(x) <= 0):
-        errmsg = "Cannot process duplicates in x."
-        raise ValueError(errmsg)
-
-    if len(y) != len(x):
-        errmsg = "Expected x and y of same length."
-        raise ValueError(errmsg)
-
-    y = np.array(y)[isort]
-    xx = np.atleast_1d(xx)
-
-    # interpolation coefficients
-    D = np.abs(x[:, None] - x[None, 1:-1])
-    D = np.column_stack([D, np.ones(len(x)), x])
-    coefs = np.linalg.solve(D, y)
-
-    # Run interpolation
-    D = np.abs(xx[:, None] - x[None, 1:-1])
-    D = np.column_stack([D, np.ones(len(xx)), xx])
-    return (D @ coefs).squeeze()

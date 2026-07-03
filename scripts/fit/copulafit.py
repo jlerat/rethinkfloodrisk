@@ -3,10 +3,11 @@
 
 ## -- Script Meta Data --
 ## Author  : ler015
-## Created : 2025-10-21 13:01:43.360895
-## Comment : Fit mvt copula model
+## Created : 2026-06-26 10:26:52.387430
+## Comment : Fit copula to data
 ##
 ## ------------------------------
+
 
 import sys
 import os
@@ -15,6 +16,10 @@ import json
 import math
 import argparse
 from pathlib import Path
+from collections import namedtuple
+
+#import warnings
+#warnings.filterwarnings("ignore")
 
 import numpy as np
 import pandas as pd
@@ -23,235 +28,347 @@ from hydrodiy.io import csv, iutils, hyruns
 
 from floodstan import marginals
 from floodstan import report
-from floodstan.sample import get_logger
+from floodstan import sample as fsample
+from floodstan import univariate_censored_sampling
 
 from pyrethink import datahub
-from pyrethink import sample
-from pyrethink import mv_censored_no_missing_sampling
-from pyrethink import mv_censored_no_missing_no_clusters_sampling
+from pyrethink import sample as rsample
+from pyrethink import mv_censored_sampling
+from pyrethink import mv_censored_factors_sampling
 
-# ----------------------------------------------------------------------
-# @Config
-# ----------------------------------------------------------------------
-parser = argparse.ArgumentParser(description="Fit copula model",
-                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument("-v", "--version", help="version",
-                    type=int, required=True)
-parser.add_argument("-ns", "--nsamples", help="Number of MCMC samples",
-                    type=int, default=50000)
-parser.add_argument("-d", "--debug", help="Debug mode",
-                    action="store_true", default=False)
-parser.add_argument("-p", "--progress", help="Show progress",
-                    action="store_true", default=False)
-parser.add_argument("-t", "--taskid", help="JobID",
-                    type=int, default=-1)
-args = parser.parse_args()
+def get_options(version, version_priors=1, awraid="WILSONSRIVER"):
+    copula_specs = [
+        "Univariate",
+        "Gaussian",
+        "GaussianFactor_0_1",
+        "GaussianFactor_0_2",
+        "Student_5"
+        ]
+    pcensors = [0.3]
+    priors = ["uninformative", "informative"]
+    excludes = ["NONE",
+                "2016",
+                "2021"]
+    stations = datahub.get_stations()
 
-debug = args.debug
-version = args.version
-taskid = args.taskid
+    sids = stations.index.to_list()
+    groups = ["203014-203010-203024"] + ["-".join(sids)] + sids
 
-# Configure stan
-if debug:
-    stan_nwarm = 200
-    stan_nchains = 3
-    stan_nsamples = 200
-else:
-    stan_nwarm = 10000
-    stan_nchains = 10
-    stan_nsamples = args.nsamples
+    awra_covariate = [False, True]
 
-stan_progress = args.progress
+    opm = hyruns.OptionManager(version=version,
+                               version_priors=version_priors,
+                               awraid=awraid)
+    opm.from_cartesian_product(pcensor=pcensors,
+                               exclude=excludes,
+                               copula_spec=copula_specs,
+                               prior=priors,
+                               awra_covariate=awra_covariate,
+                               group=groups)
 
-stan_seed = 5446
+    # .. exclude options with a single stations and
+    # multivariate copula_spec
+    keep = []
+    for task in opm.tasks:
+        nsta = len(task["group"].split("-"))
+        if nsta == 1 and task["copula_spec"] != "Univariate":
+            continue
+        if nsta > 1 and task["copula_spec"] == "Univariate":
+            continue
+        if nsta < 8 and task["copula_spec"] == "GaussianFactor2":
+            continue
+        if nsta != 3 and task["awra_covariate"]:
+            continue
+        keep.append(task)
+    opm.tasks = keep
+    return opm
 
-stan_args = {} #"adapt_delta": 0.9}
 
-# Runner
-opm = hyruns.OptionManager(stan_nwarm=stan_nwarm,
-                           stan_nchains=stan_nchains,
-                           stan_nsamples=stan_nsamples)
+def get_script_paths(config):
+    source_file = Path(__file__).resolve()
+    froot = source_file.parent.parent.parent
+    fdata = froot / "data"
+    fout = froot / "outputs" / f"{source_file.stem}_v{config.version}" / f"TASK{config.taskid}"
 
-pcensors = [0.3]
+    flogs = froot / "logs" / source_file.stem
 
-copula_shapes = [0, 3, 5]
+    fpriors = froot / "outputs" / f"priorfit_v{config.version_priors}"
+    if not fpriors.exists():
+        errmsg = "Prior data folder does not exist"
+        raise ValueError(errmsg)
 
-excludes = ["NONE",
-            "2021",
-            "2007",
-            "2016"]
+    if config.debug:
+        fout = flogs / fout.stem
 
-rho_mins = [-1]
+    fstan = fout / f"stan_TASK{config.taskid}"
 
-has_clusters_all = [False]
+    ScriptPaths = namedtuple("ScriptPaths",
+                             ["source_file", "basename",
+                              "froot", "fdata", "fout", "flogs",
+                              "fstan", "fpriors"])
+    script_paths = ScriptPaths(source_file, source_file.stem,
+                               froot, fdata, fout, flogs,
+                               fstan, fpriors)
 
-opm.from_cartesian_product(pcensor=pcensors,
-                           exclude=excludes,
-                           copula_shape=copula_shapes,
-                           has_clusters=has_clusters_all,
-                           rho_min=rho_mins)
+    flogs.mkdir(exist_ok=True, parents=True)
+    fout.mkdir(exist_ok=True, parents=True)
+    fstan.mkdir(exist_ok=True, parents=True)
 
-# Load task
-task = opm.get_task(max(0, taskid))
-pcensor = task.pcensor
-exclude = task.exclude
-rho_min = task.rho_min
-copula_shape = task.copula_shape
+    return script_paths
 
-has_clusters = task.has_clusters
-if has_clusters:
-    stan_sampler = mv_censored_no_missing_sampling
-else:
-    stan_sampler = mv_censored_no_missing_no_clusters_sampling
 
-if debug:
-    pcensor = 0.3
-    exclude = "2007"
-    copula_shape = 3
-    has_clusters = False
+def get_logger(config, script_paths):
+    basename = script_paths.basename
+    fl = script_paths.flogs / f"{basename}_TASK{config.taskid}.log"
+    logger = iutils.get_logger(basename, flog=fl, console=True)
+    logger.info("", nret=1)
+    config.task.log(logger)
+    return logger
 
-copula_type = 1 if copula_shape > 0 else 0
 
-# ----------------------------------------------------------------------
-# @Folders
-# ----------------------------------------------------------------------
-source_file = Path(__file__).resolve()
-froot = source_file.parent.parent.parent
+def get_stationids(config):
+    stationids = config.task["group"].split("-")
+    if config.task.awra_covariate:
+        stationids += [f"AWRA-{config.awraid}"]
+    return stationids
 
-basename = source_file.stem
-fout = froot / "outputs" / f"copulafit_v{version}" / f"{basename}_TASK{taskid}"
-fout.mkdir(exist_ok=True, parents=True)
 
-fopm = fout.parent / f"{basename}_options.json"
-opm.save(fopm)
+def get_data(config, script_paths, logger):
+    df, _, _, _ = datahub.get_ams_concat()
 
-# ----------------------------------------------------------------------
-# @Logging
-# ----------------------------------------------------------------------
-flog = froot / "logs" / basename / f"{basename}_TASK{taskid}.log"
-flog.parent.mkdir(exist_ok=True, parents=True)
+    if config.task.awra_covariate:
+        awra = datahub.get_ams_awra(config.awraid)
+        awra.name = f"AWRA-{config.awraid}"
+        df = pd.concat([df, awra], axis=1).sort_index()
 
-LOGGER = iutils.get_logger(basename, flog=flog, console=debug,
-                           contextual=True)
-LOGGER.info(f"number of tasks: {opm.ntasks}", nret=1)
-LOGGER.context = f"TASK{taskid}"
-LOGGER.log_dict(vars(args), "Command line arguments")
+    excl = config.task.exclude
+    if excl != "NONE":
+        df = df.loc[df.index != int(excl)]
 
-task.log(LOGGER)
+    ams_times = df.index
+    stationids = get_stationids(config)
+    pcensor = config.task["pcensor"]
 
-if debug:
-    fout = flog.parent / f"copulafit_v{version}"
-    fout.mkdir(exist_ok=True)
+    copula_spec = config.task.copula_spec
 
-# ----------------------------------------------------------------------
-# @Get data
-# ----------------------------------------------------------------------
-LOGGER.info("Load data")
+    if copula_spec == "Univariate":
+        marginal = marginals.factory("GEV")
+        y = df.loc[:, stationids].squeeze()
+        censor = np.nanpercentile(y, pcensor * 100)
+        nchains = config.stan_nchains if hasattr(config, "stan_nchains")\
+                else 10
+        sv = fsample.StanSamplingVariable(marginal, y, censor,
+                                          ninits=nchains)
+    else:
+        y = df.loc[:, stationids]
+        censors = np.nanpercentile(y, pcensor * 100, axis=0)
+        sv = rsample.StanSamplingMultivariate(y,
+                                              copula_spec,
+                                              censors=censors)
 
-ams, times, dows, stations = datahub.get_ams_concat()
-censors = datahub.get_censors(pcensor)
+    stan_data = sv.to_dict()
 
-# Exclude time period
-if exclude != "NONE":
-    iok = ams.index != int(exclude)
-    ams = ams.loc[iok]
-    dows = dows.loc[iok]
+    # set priors
+    if config.task.prior == "informative":
+        fp = script_paths.fpriors / "priors.csv"
+        priors, _ = csv.read_csv(fp, dtype={"STATIONID": str})
 
-# ----------------------------------------------------------------------
-# @Process
-# ----------------------------------------------------------------------
-LOGGER.info("Configure stan sampler")
-LOGGER.info(f"nwarm    = {stan_nwarm}", ntab=1, nret=1)
-LOGGER.info(f"nchains  = {stan_nchains}", ntab=1)
-LOGGER.info(f"nsamples = {stan_nsamples}", ntab=1)
+        for isite, stationid in enumerate(stationids):
+            idx0 = priors.STATIONID == stationid
+            idx0 &= priors.MARGINAL == "GEV"
 
-sv = sample.StanSamplingMultivariate(ams, dows,
-                                     copula_type=copula_type,
-                                     copula_shape=copula_shape,
-                                     censors=censors,
-                                     skip_clusters=not has_clusters,
-                                     rho_min=rho_min,
-                                     rho_max=1.)
-stan_data = sv.to_dict()
+            for pn in ["loglocn", "logscale", "shape1"]:
+                idx = idx0 & (priors.PARAMETER == pn)
+                pred = "INTERCEPT" if pn == "shape1"\
+                        else "LOG10_CATCHMENTAREA_VALID[km2][-]"
+                idx &= priors.PREDICTORS == pred
 
-LOGGER.info(f"nobs    = {stan_data['Nobs']}", ntab=1, nret=1)
-LOGGER.info(f"ncens   = {stan_data['Ncens']}", ntab=1)
-LOGGER.info(f"nmiss   = {stan_data['Nmiss']}", ntab=1)
-LOGGER.info(f"rho_min = {stan_data['rho_min']}", ntab=1)
-LOGGER.info(f"rho_max = {stan_data['rho_max']}", ntab=1)
+                # Prior for one station is missing...
+                if idx.sum() == 0:
+                    logger.warning(f"No informative prior for {stationid} / {pn}")
+                    continue
 
-pcensors = (ams - censors < 0).sum() / ams.notnull().sum()
-for ipn, (pname, pcensor) in enumerate(pcensors.items()):
-    stationid = re.sub("_PEAK", "", pname)
-    LOGGER.info(f"Prob censor {stationid} = {pcensor:0.2f}", nret=int(ipn==0))
+                pv = priors.loc[idx].squeeze()
 
-stan_inits = sv.initial_parameters
+                mu = pv.PRIOR_MEAN
+                sig = pv.PRIOR_STD
+                if pn == "loglocn":
+                    # Need to transform back to raw from log
+                    pm = math.exp(mu + sig**2 / 2)
+                    pv = math.sqrt((math.exp(sig**2) - 1) * math.exp(2 * mu + sig**2))
+                    pn2 = "ylocn_prior"
+                else:
+                    pm, pv = float(mu), float(sig)
+                    pn2 = f"y{pn}_prior"
 
-# Clean stan folder
-fout_stan = fout / "stan"
-fout_stan.mkdir(exist_ok=True)
-for f in fout_stan.glob("*.*"):
-    f.unlink()
+                if config.task.copula_spec == "Univariate":
+                    stan_data[pn2] = [pm, pv]
+                else:
+                    stan_data[pn2][isite] = [pm, pv]
 
-# Stan arguments
-kw = dict(data=stan_data,
-          seed=stan_seed,
-          iter_sampling=stan_nsamples // stan_nchains,
-          output_dir=fout_stan,
-          chains=stan_nchains,
-          parallel_chains=stan_nchains,
-          iter_warmup=stan_nwarm,
-          show_progress=stan_progress,
-          inits=stan_inits)
-kw.update(stan_args)
+    stan_inits = sv.initial_parameters
+    Data = namedtuple("Data", ["stan_data", "stan_inits",
+                               "stationids", "ams_times"])
+    data = Data(stan_data, stan_inits, stationids,
+                ams_times)
+    return data
 
-LOGGER.info("Start sampling", nret=1)
-smp = stan_sampler(**kw)
 
-LOGGER.info("Process samples and save to disk", nret=1)
-df = smp.draws_pd()
+def process(config, script_paths, logger, data):
+    logger.info(f"Start processing", nret=1)
 
-diag = report.process_stan_diagnostic(smp.diagnose())
+    kw = dict(data=data.stan_data,
+              seed=config.seed,
+              iter_sampling=config.stan_nsamples // config.stan_nchains,
+              output_dir=script_paths.fstan,
+              inits=data.stan_inits,
+              chains=config.stan_nchains,
+              parallel_chains=config.stan_nchains,
+              iter_warmup=config.stan_nwarm,
+              show_progress=config.debug)
 
-# Report stan diagnostic
-for me in report.STAN_DIAGNOSTIC_VARIABLES:
-    LOGGER.info(f"Stan diagnostic {me}: {diag[me]}")
+    if config.task.copula_spec == "Univariate":
+        sampler = univariate_censored_sampling
+    elif re.search("GaussianFactor", config.task.copula_spec):
+        sampler = mv_censored_factors_sampling
+    else:
+        sampler = mv_censored_sampling
 
-diag["version"] = version
-diag["stan_nchains"] = stan_nchains
-diag["stan_nwarm"] = stan_nwarm
-diag["taskid"] = taskid
-task_opt = {f"task_{k}": v for k, v in task.to_dict()["options"].items()}
-diag.update(task_opt)
+    smp = sampler(**kw)
+    df = smp.draws_pd()
+    diag = report.process_stan_diagnostic(smp.diagnose())
 
-fd = fout / f"{basename}_samples_TASK{taskid}.csv"
-csv.write_csv(df, fd, f"STAN samples for task {taskid}",
-              source_file, compress=True)
+    # Clean stan folder
+    for f in script_paths.fstan.glob("*.*"):
+        f.unlink()
+    script_paths.fstan.rmdir()
 
-fd = fout / f"{basename}_diagnostic_TASK{taskid}.json"
-with fd.open("w") as fo:
-    json.dump(diag, fo, indent=4)
+    # Report stan diagnostic
+    for me in report.STAN_DIAGNOSTIC_VARIABLES:
+        logger.info(f"Stan diagnostic {me}: {diag[me]}")
 
-# Store data with additional info
-stan_data["pcensors"] = pcensors.to_dict()
-stan_data["ams_time"] = ams.index.tolist()
-stan_data["stationids"] = ams.columns.tolist()
-stan_data.update(task_opt)
+    diag["version"] = config.version
+    diag["stan_nchains"] = config.stan_nchains
+    diag["stan_nwarm"] = config.stan_nwarm
+    diag["taskid"] = config.taskid
+    task_opt = {f"task_{k}": v for k, v in config.task.to_dict()["options"].items()}
+    diag.update(task_opt)
 
-fdd = fout / f"{basename}_data_TASK{taskid}.json"
-for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors",
-          "clusters", "clusters_counts",
-          "partitions_id"]:
-    stan_data[n] = stan_data[n].tolist()
+    basename = script_paths.basename
+    fout = script_paths.fout
+    source_file = script_paths.source_file
+    fd = fout / f"{basename}_samples_TASK{taskid}.csv"
+    csv.write_csv(df, fd, f"STAN samples for task {taskid}",
+                  source_file, compress=True)
 
-with fdd.open("w") as fo:
-    json.dump(stan_data, fo, indent=4)
+    fd = fout / f"{basename}_diagnostic_TASK{taskid}.json"
+    with fd.open("w") as fo:
+        json.dump(diag, fo, indent=4)
 
-fi = fout / f"{basename}_inits_TASK{taskid}.json"
-for key, val in stan_inits.items():
-    stan_inits[key] = val.tolist()
-with fi.open("w") as fo:
-    json.dump(stan_inits, fo, indent=4)
+    # Store data with additional info
+    stan_data = data.stan_data
+    stan_data["pcensor"] = config.task.pcensor
+    stan_data["ams_time"] = data.ams_times.tolist()
+    stan_data["stationids"] = data.stationids
+    stan_data.update(task_opt)
 
-LOGGER.completed()
+    fdd = fout / f"{basename}_data_TASK{taskid}.json"
+    for n in ["y", "idx_cens", "idx_obs", "idx_miss", "censors"]:
+        if n not in stan_data:
+            continue
+        dt = stan_data[n]
+        if hasattr(dt, "tolist"):
+            dt = dt.tolist()
+        stan_data[n] = dt
 
+    with fdd.open("w") as fo:
+        json.dump(stan_data, fo, indent=4)
+
+    fi = fout / f"{basename}_inits_TASK{taskid}.json"
+    stan_inits = data.stan_inits
+    enum = stan_inits.items() if isinstance(stan_inits, dict) \
+            else enumerate(stan_inits)
+    for key, val in enum:
+        if hasattr(val, "tolist"):
+            val = val.tolist()
+        stan_inits[key] = val
+
+    with fi.open("w") as fo:
+        json.dump(stan_inits, fo, indent=4)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fit copula to data",
+                                     formatter_class=
+                                     argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("-v", "--version",
+                        help="Version number",
+                        type=str, required=True)
+    parser.add_argument("-t", "--taskid", help="JobID",
+                        type=int, default=-1)
+    parser.add_argument("-d", "--debug", help="Debug mode",
+                        action="store_true", default=False)
+    parser.add_argument("-o", "--overwrite", help="Overwrite data",
+                        action="store_true", default=False)
+    args = parser.parse_args()
+
+    # Config
+    version = args.version
+    taskid = args.taskid
+    overwrite = args.overwrite
+    debug = args.debug
+    seed = 5446
+    awraid = "WILSONSRIVER"
+
+    version_priors = 1
+
+    if debug:
+        stan_nwarm = 200
+        stan_nchains = 3
+        stan_nsamples = 200
+    else:
+        stan_nwarm = 10000
+        stan_nchains = 10
+        stan_nsamples = 10000
+
+
+    # .. options
+    opm = get_options(version, version_priors, awraid)
+
+    if debug:
+        ctype = "mv"
+        if ctype == "univ":
+            taskid = opm.search(copula_spec="Univariate",
+                                exclude="2021",
+                                prior="^informative",
+                                group="203014")[0]
+        else:
+            taskid = opm.search(copula_spec="GaussianFactor_0_2$",
+                                exclude="2021",
+                                prior="^informative",
+                                awra_covariate="True",
+                                group="203014-203010-203024")[0]
+
+    Config = namedtuple("Config",
+                        ["version", "taskid", "overwrite",
+                         "debug", "task", "version_priors",
+                         "stan_nwarm", "stan_nchains",
+                         "stan_nsamples", "seed", "awraid"])
+    config = Config(version, taskid, overwrite,
+                    debug, opm.get_task(taskid),
+                    version_priors, stan_nwarm,
+                    stan_nchains, stan_nsamples,
+                    seed, awraid)
+
+    # Baseline
+    script_paths = get_script_paths(config)
+    logger = get_logger(config, script_paths)
+    logger.info(f"Number of tasks : {opm.ntasks}", nret=1)
+
+    # Data
+    data = get_data(config, script_paths, logger)
+
+    # Process
+    process(config, script_paths, logger, data)
+
+    logger.completed()
