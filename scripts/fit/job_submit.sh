@@ -44,28 +44,28 @@ JOBCONFIGS["0,4"]="X"          # job dependency
 JOBCONFIGS["0,5"]="X"          # job id
 
 # General postprocessing job (depends on copula fitting)
-JOBCONFIGS["1,0"]="copulaprocess"  # Job name
+JOBCONFIGS["1,0"]="copulaprocess1"  # Job name
 JOBCONFIGS["1,1"]="1"            # number of cpus
 JOBCONFIGS["1,2"]=$ARRAYS_PROC   # arrays
-JOBCONFIGS["1,3"]="0"            # use user supplied array if any
+JOBCONFIGS["1,3"]="1"            # use user supplied array if any
 JOBCONFIGS["1,4"]="0"            # parent job number
 JOBCONFIGS["1,5"]="X"            # job id
 
-## MVN postprocessing job (depends on copula fitting)
-#JOBCONFIGS["2,0"]="mvnprocess"   # Job name
-#JOBCONFIGS["2,1"]="1"            # number of cpus
-#JOBCONFIGS["2,2"]=$ARRAYS_MVN    # arrays
-#JOBCONFIGS["2,3"]="0"            # use user supplied array if any
-#JOBCONFIGS["2,4"]="0"            # parent job number
-#JOBCONFIGS["2,5"]="X"            # job id
-#
-# MVN postprocessing concat job (depends on MVN postprocessing)
-JOBCONFIGS["2,0"]="copulaconcat"    # Job name
+# MVN postprocessing job (depends on copula fitting)
+JOBCONFIGS["2,0"]="copulaprocess2"   # Job name
 JOBCONFIGS["2,1"]="1"            # number of cpus
-JOBCONFIGS["2,2"]="0"            # arrays
-JOBCONFIGS["2,3"]="0"            # use user supplied array if any
-JOBCONFIGS["2,4"]="1"            # parent job number
+JOBCONFIGS["2,2"]=$ARRAYS_PROC    # arrays
+JOBCONFIGS["2,3"]="1"            # use user supplied array if any
+JOBCONFIGS["2,4"]="0"            # parent job number
 JOBCONFIGS["2,5"]="X"            # job id
+
+# MVN postprocessing concat job (depends on MVN postprocessing)
+JOBCONFIGS["3,0"]="copulaconcat"    # Job name
+JOBCONFIGS["3,1"]="1"            # number of cpus
+JOBCONFIGS["3,2"]="0"            # arrays
+JOBCONFIGS["3,3"]="0"            # use user supplied array if any
+JOBCONFIGS["3,4"]="1,2"          # parent job number
+JOBCONFIGS["3,5"]="X"            # job id
 
 
 LENGTH=${#JOBCONFIGS[@]}
@@ -95,13 +95,18 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
         arrays=$USER_SUPPLIED_ARRAYS        
     fi
     
-    # Get parent job id
+    # Loop through parent job ids
     if [ $parent_job != "X" ] 
     then
-        parent_ijob=$((parent_job))
-        parent_jobid=${JOBCONFIGS[$parent_ijob,5]}
+        parent_ijobs=$(echo $parent_job | tr "," "\n")
+        parent_jobids=""
+        for ijobs in parent_ijobs
+        do
+            ijobn=$((ijobs))
+            parent_jobids+=${JOBCONFIGS[$ijobn,5]}+","
+        done
     else    
-        parent_jobid="X"
+        parent_jobids="X"
     fi
 
     echo
@@ -111,7 +116,7 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     echo NCPUS     : $ncpus
     echo OVERWRITE : $overwrite_arrays
     echo ARRAYS    : $arrays
-    echo PJOBID    : $parent_jobid
+    echo PJOBID    : $parent_jobids
 
     # Create log folder
     FLOG=$FROOT/logs/$jobname
@@ -119,13 +124,13 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     echo .. created log folder logs/$jobname
 
     # Run job
-    if [ $parent_jobid = "X" ]
+    if [ $parent_jobids = "X" ]
     then
         echo .. submitting job with array $arrays and no dependency
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
             --array=$arrays --parsable --export=ALL,VERSION $JOBSCRIPT)
     else    
-        echo .. submitting job with array $arrays and dependency on $parent_jobid
+        echo .. submitting job with array $arrays and dependency on $parent_jobids
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
             --array=$arrays --parsable --dependency=afterany:${parent_jobid} \
             --export=ALL,VERSION $JOBSCRIPT)
