@@ -34,7 +34,8 @@ def get_script_paths(config):
     source_file = Path(__file__).resolve()
     froot = source_file.parent.parent.parent
     fdata = froot / "outputs" / f"copulafit_v{config.version}"
-    fout = froot / "outputs" / f"copulaprocess_v{config.version}"
+    fout1 = froot / "outputs" / f"copulaprocess1_v{config.version}"
+    fout2 = froot / "outputs" / f"copulaprocess2_v{config.version}"
 
     flogs = froot / "logs" / source_file.stem
 
@@ -43,12 +44,14 @@ def get_script_paths(config):
 
     ScriptPaths = namedtuple("ScriptPaths",
                              ["source_file", "basename",
-                              "froot", "fdata", "fout", "flogs"])
+                              "froot", "fdata",
+                              "fout1", "fout2",
+                              "flogs"])
     script_paths = ScriptPaths(source_file, source_file.stem,
-                               froot, fdata, fout, flogs)
+                               froot, fdata,
+                               fout1, fout2, flogs)
 
     flogs.mkdir(exist_ok=True, parents=True)
-    fout.mkdir(exist_ok=True, parents=True)
 
     return script_paths
 
@@ -68,12 +71,16 @@ def process(config, script_paths, logger):
         "ffa",
         "postpredcheck_univ",
         "postpredcheck_biv",
-        "postpredcheck_multivar"
+        "postpredcheck_multivar",
+        "multivar_aeps",
+        "sum_samples"
         ]
+
     for ftype in ftypes:
         logger.info(f"Concatenating {ftype} files")
         df = []
-        lf = list(script_paths.fout.glob(f"*/*{ftype}*.zip"))
+        lf = list(script_paths.fout1.glob(f"*/*{ftype}*.zip"))
+        lf += list(script_paths.fout2.glob(f"*/*{ftype}*.zip"))
         logger.info(f"{ftype} files ({len(lf)} found)", ntab=1)
         for f in lf:
             # Get data
@@ -85,8 +92,10 @@ def process(config, script_paths, logger):
             stationids = data["stationids"]
 
             # Get results
-            #ddf, _ = csv.read_csv(f)
             ddf = pd.read_csv(f, skiprows=15)
+            if ftype in ["multivar_aeps", "sum_samples"]:
+                continue
+
             ddf.columns = ["VARIABLE"] + ddf.columns[1:].to_list()
             ddf.loc[:, "TASKID"] = taskid
 

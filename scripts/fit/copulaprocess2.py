@@ -18,8 +18,8 @@ import argparse
 from pathlib import Path
 from collections import namedtuple
 
-import warnings
-warnings.filterwarnings("error")
+#import warnings
+#warnings.filterwarnings("error")
 
 import numpy as np
 import pandas as pd
@@ -125,22 +125,22 @@ def process(config, script_paths, logger, data):
         # Back transform raw space via marginal quantile
         y = np.empty(len(x))
         dd = {
-            "version": config.version,
-            "taskid": config.taskid,
-            "copula_spec": config.task.copula_spec,
-            "isample": ismp
+            "VERSION": config.version,
+            "TASKID": config.taskid,
+            "COPULA_SPEC": config.task.copula_spec,
+            "ISAMPLE": ismp
             }
         for ista, (sid, xx) in enumerate(zip(stationids, x)):
             thetas = smp.filter(regex=f"^y(log|loc|sh).*\\[{ista + 1}\\]")
             marginal.params = thetas
             y[ista] = max(0, marginal.ppf(xx))
-            dd[f"{sid}_sample"] = float(y[ista])
+            dd[f"{sid}_SAMPLE"] = float(y[ista])
 
         for grp in config.sum_groups:
             s = 0
             for sid in grp.split("-"):
                 s += dd[f"{sid}_sample"]
-            dd[f"{grp}_sum_sample"] = s
+            dd[f"{grp}_SUM_SAMPLE"] = s
 
         sum_samples.append(dd)
 
@@ -168,13 +168,13 @@ def process(config, script_paths, logger, data):
                 surv = subcop.survival(cdf_marginals)
                 l10 = math.log10(surv) if surv > 0 else np.nan
                 dd = {
-                    "version": config.version,
-                    "taskid": config.taskid,
-                    "copula_spec": config.task.copula_spec,
-                    "group": grp,
-                    "isample": ismp,
-                    "ari": ari,
-                    "log10_aep": l10,
+                    "VERSION": config.version,
+                    "TASKID": config.taskid,
+                    "COPULA_SPEC": config.task.copula_spec,
+                    "GROUP": grp,
+                    "ISAMPLE": ismp,
+                    "ARI": ari,
+                    "LOG10AEP": l10,
                     }
                 aeps.append(dd)
 

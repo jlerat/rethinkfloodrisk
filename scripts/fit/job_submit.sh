@@ -100,11 +100,12 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     then
         parent_ijobs=$(echo $parent_job | tr "," "\n")
         parent_jobids=""
-        for ijobs in parent_ijobs
+        for ipjob in $parent_ijobs
         do
-            ijobn=$((ijobs))
-            parent_jobids+=${JOBCONFIGS[$ijobn,5]}+","
+            parent_jobids+=${JOBCONFIGS["$ipjob,5"]}
+            parent_jobids+=","
         done
+        parent_jobids=$(echo "$parent_jobids" |  sed 's/,$//g')
     else    
         parent_jobids="X"
     fi
@@ -132,7 +133,7 @@ for ((ijob = 0; ijob < $NJOBS; ijob ++)); do
     else    
         echo .. submitting job with array $arrays and dependency on $parent_jobids
         jobid=$(sbatch -J $jobname --cpus-per-task=$ncpus \
-            --array=$arrays --parsable --dependency=afterany:${parent_jobid} \
+            --array=$arrays --parsable --dependency=afterany:${parent_jobids} \
             --export=ALL,VERSION $JOBSCRIPT)
     fi    
 
