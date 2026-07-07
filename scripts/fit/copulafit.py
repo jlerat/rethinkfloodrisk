@@ -36,7 +36,7 @@ from pyrethink import sample as rsample
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 
-def get_options(version, version_priors=1, awraid="WILSONSRIVER"):
+def get_options(version, version_priors, awraid="WILSONSRIVER"):
     copula_specs = [
         "Univariate",
         "Gaussian",
