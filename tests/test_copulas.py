@@ -134,7 +134,7 @@ def test_copulas(cspec, nstations, allclose):
         assert allclose(C, cop.corr, atol=2e-2)
 
         zr = np.random.uniform(-2, 2, size=(nstations, cop.copula_nfactors + 1))
-        cop.set_params_via_zrho(zr)
+        cop.set_params_via_zrhos(zr)
         rhos = zr[:, :-1] / np.sqrt((zr**2).sum(axis=1))[:, None]
         assert allclose(cop.params, rhos)
 

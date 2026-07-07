@@ -212,7 +212,7 @@ def posterior_predictive_checks(yobs, params,
         if re.search("Factor", cop.name):
             nfact = cop.copula_nfactors
             zrhos = param.filter(regex="zrhos").values.reshape((nsta, nfact + 1))
-            cop.set_params_via_zrho(zrhos)
+            cop.set_params_via_zrhos(zrhos)
         else:
             # Regular correlation matrix
             corr = param.filter(regex="corr_IW").values.reshape((nsta, nsta))

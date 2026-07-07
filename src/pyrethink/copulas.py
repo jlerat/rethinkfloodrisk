@@ -117,17 +117,24 @@ def to2d(x, nstations):
     return x
 
 
-def normal_cdf_approx(x, out=None):
+def normal_cdf_approx(x, out=None, max=500):
     """ Approximation from https://www.jiem.org/index.php/jiem/article/view/60
     """
     if out is None:
         out = np.empty(x.shape)
 
+    # Set bounds on x
+    np.minimum(x, 10, out=x)
+    np.maximum(x, -10, out=x)
+
     np.multiply(x, x, out=out)
     np.multiply(x, out, out=out)
+
+    # Phi(z) = 1 / (1 + exp[-(0.07056 z^3 + 1.5976 z)])
     np.exp(-0.07056 * out - 1.5976 * x, out=out)
     np.add(out, 1., out=out)
     np.reciprocal(out, out=out)
+
     return out
 
 
@@ -520,7 +527,7 @@ class GaussianFactorCopula(GaussianCopula):
     def sqr(self):
         return self._sqr
 
-    def set_params_via_zrho(self, zrhos):
+    def set_params_via_zrhos(self, zrhos):
         nsta = self.nstations
         nfact = self.copula_nfactors
         if zrhos.shape != (nsta, nfact + 1):
