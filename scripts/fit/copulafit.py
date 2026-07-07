@@ -49,15 +49,22 @@ def get_options(version, version_priors=1, awraid="WILSONSRIVER"):
     excludes = ["NONE",
                 "2016",
                 "2021"]
-    stations = datahub.get_stations()
 
+    marginal_name = "GEV"
+
+    stations = datahub.get_stations()
     sids = stations.index.to_list()
-    groups = ["203014-203010-203024"] + ["-".join(sids)] + sids
+    groups = ["203010-203014-203024"] \
+             + ["-".join(sids)] \
+             + sids
+    if int(version) >= 22:
+        groups += ["203004-203010-203014-203024"]
 
     awra_covariate = [False, True]
 
     opm = hyruns.OptionManager(version=version,
                                version_priors=version_priors,
+                               marginal_name=marginal_name,
                                awraid=awraid)
     opm.from_cartesian_product(pcensor=pcensors,
                                exclude=excludes,
@@ -149,10 +156,12 @@ def get_data(config, script_paths, logger):
     stationids = get_stationids(config)
     pcensor = config.task["pcensor"]
 
+    marginal_name = config.marginal_name
+
     copula_spec = config.task.copula_spec
 
     if copula_spec == "Univariate":
-        marginal = marginals.factory("GEV")
+        marginal = marginals.factory(marginal_name)
         y = df.loc[:, stationids].squeeze()
         censor = np.nanpercentile(y, pcensor * 100)
         nchains = config.stan_nchains if hasattr(config, "stan_nchains")\
@@ -175,7 +184,7 @@ def get_data(config, script_paths, logger):
 
         for isite, stationid in enumerate(stationids):
             idx0 = priors.STATIONID == stationid
-            idx0 &= priors.MARGINAL == "GEV"
+            idx0 &= priors.MARGINAL == marginal_name
 
             for pn in ["locn", "logscale", "shape1"]:
                 idx = idx0 & (priors.PARAMETER == pn)
@@ -326,6 +335,7 @@ if __name__ == "__main__":
 
     # .. options
     opm = get_options(version, version_priors, awraid)
+    marginal_name = opm.context["marginal_name"]
 
     if debug:
         ctype = "mv"
@@ -339,18 +349,19 @@ if __name__ == "__main__":
                                 exclude="2021",
                                 prior="^informative",
                                 awra_covariate="True",
-                                group="203014-203010-203024")[0]
+                                group="203010-203014-203024")[0]
 
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
                          "debug", "task", "version_priors",
                          "stan_nwarm", "stan_nchains",
-                         "stan_nsamples", "seed", "awraid"])
+                         "stan_nsamples", "seed", "awraid",
+                         "marginal_name"])
     config = Config(version, taskid, overwrite,
                     debug, opm.get_task(taskid),
                     version_priors, stan_nwarm,
                     stan_nchains, stan_nsamples,
-                    seed, awraid)
+                    seed, awraid, marginal_name)
 
     # Baseline
     script_paths = get_script_paths(config)
