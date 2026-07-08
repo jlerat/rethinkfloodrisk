@@ -102,7 +102,7 @@ def process(config, script_paths, logger, data):
     sum_samples = []
 
     for ismp, (i, smp) in enumerate(samples.iterrows()):
-        if ismp % 500 == 0:
+        if ismp % 50 == 0:
             logger.info(f"Processing sample {ismp + 1} / {nsamples}", nret=1)
 
         # Get copula
@@ -162,7 +162,7 @@ def process(config, script_paths, logger, data):
             ista = [stationids.index(sid) for sid in grp_sids]
             subparams = cop.params[ista]
             if not is_factor:
-                suparams = subparams[:, ista]
+                subparams = subparams[:, ista]
 
             subcop = copulas.factory(config.task.copula_spec, nsta_grp)
             subcop.params = subparams
