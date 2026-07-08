@@ -165,7 +165,7 @@ def process(config, script_paths, logger, data):
                 subparams = subparams[:, ista]
 
             subcop = copulas.factory(config.task.copula_spec, nsta_grp)
-            subcop.params = subparams
+            subcop.params = np.ascontiguousarray(subparams)
 
             # compute aeps
             for ari in config.design_eris:
