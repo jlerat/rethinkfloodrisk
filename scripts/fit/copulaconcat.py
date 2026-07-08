@@ -73,7 +73,8 @@ def process(config, script_paths, logger):
         "postpredcheck_biv",
         "postpredcheck_multivar",
         "multivar_aeps",
-        "sum_samples"
+        "sum_samples",
+        "sum_ffa"
         ]
 
     for ftype in ftypes:
@@ -93,7 +94,7 @@ def process(config, script_paths, logger):
 
             # Get results
             ddf = pd.read_csv(f, skiprows=15)
-            if ftype in ["multivar_aeps", "sum_samples"]:
+            if ftype in ["multivar_aeps", "sum_samples", "sum_ffa, "sum_ffa""]:
                 continue
 
             ddf.columns = ["VARIABLE"] + ddf.columns[1:].to_list()

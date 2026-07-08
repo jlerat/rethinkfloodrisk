@@ -165,13 +165,17 @@ if __name__ == "__main__":
 
         taskid = taskid[0]
 
+    marginal_name = opm.context["marginal_name"]
+
     Config = namedtuple("Config",
                         ["version", "taskid", "overwrite",
                          "debug", "task", "version_priors",
-                         "design_eris", "awraid"])
+                         "design_eris", "awraid",
+                         "marginal_name"])
     config = Config(version, taskid, overwrite,
                     debug, opm.get_task(taskid),
-                    version_priors, design_eris, awraid)
+                    version_priors, design_eris, awraid,
+                    marginal_name)
 
     # Baseline
     script_paths = get_script_paths(config)

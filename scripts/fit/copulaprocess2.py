@@ -139,7 +139,7 @@ def process(config, script_paths, logger, data):
         for grp in config.sum_groups:
             s = 0
             for sid in grp.split("-"):
-                s += dd[f"{sid}_sample"]
+                s += dd[f"{sid}_SAMPLE"]
             dd[f"{grp}_SUM_SAMPLE"] = s
 
         sum_samples.append(dd)
@@ -191,6 +191,28 @@ def process(config, script_paths, logger, data):
     csv.write_csv(sum_samples, fs, "Summation samples for task {taskid}",
                   source_file)
 
+    # Compute FFA of sums
+    sum_ffa = []
+    eris = config.sum_design_eris
+    idx = [f"DESIGN_ERI{e}" for e in eris]
+    probs = 1 - 1./np.array(eris)
+    for cn, se in sum_samples.filter(regex="_SAMPLE", axis=1).items():
+        q = pd.Series(se.quantile(probs).values, index=idx,
+                      name=re.sub("_SAMPLE",
+                                  "_POSTERIOR_PREDICTIVE", cn))
+        q.index.name = "ERI"
+        sum_ffa.append(q)
+
+    sum_ffa = pd.DataFrame(sum_ffa).T.reset_index()
+    sum_ffa.loc[:, "VERSION"] = config.version
+    sum_ffa.loc[:, "TASKID"] = config.taskid
+    sum_ffa.loc[:, "COPULA_SPEC"] = config.task.copula_spec
+
+    fs = fout / f"copulaprocess_sum_ffa_TASK{taskid}.csv"
+    csv.write_csv(sum_ffa, fs, "FFA on summation samples for task {taskid}",
+                  source_file)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fit copula to data",
                                      formatter_class=
@@ -215,6 +237,10 @@ if __name__ == "__main__":
     awraid = "WILSONSRIVER"
 
     design_eris = [10, 50, 100, 200]
+
+    sum_design_eris = [1.1, 1.2, 1.4, 1.6, 1.8,
+                       2, 5, 10, 20, 50, 70, 100, 150,
+                       200, 300, 500, 700, 1000]
 
     sum_groups = ["203010-203014-203024"] \
                  + ["203004-203010-203014-203024"]
@@ -244,11 +270,13 @@ if __name__ == "__main__":
                          "debug", "task", "version_priors",
                          "design_eris", "awraid",
                          "groups", "sum_groups",
-                         "marginal_name"])
+                         "marginal_name",
+                         "sum_design_eris"])
     config = Config(version, taskid, overwrite,
                     debug, opm.get_task(taskid),
                     version_priors, design_eris, awraid,
-                    groups, sum_groups, marginal_name)
+                    groups, sum_groups, marginal_name,
+                    sum_design_eris)
 
     # Baseline
     script_paths = get_script_paths(config)

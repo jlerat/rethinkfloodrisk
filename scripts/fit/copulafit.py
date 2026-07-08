@@ -330,8 +330,7 @@ if __name__ == "__main__":
     else:
         stan_nwarm = 10000
         stan_nchains = 10
-        stan_nsamples = 10000
-
+        stan_nsamples = 50000
 
     # .. options
     opm = get_options(version, version_priors, awraid)
