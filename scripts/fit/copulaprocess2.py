@@ -102,7 +102,7 @@ def process(config, script_paths, logger, data):
     sum_samples = []
 
     for ismp, (i, smp) in enumerate(samples.iterrows()):
-        if ismp % 50 == 0:
+        if ismp % 500 == 0:
             logger.info(f"Processing sample {ismp + 1} / {nsamples}", nret=1)
 
         # Get copula
@@ -120,7 +120,8 @@ def process(config, script_paths, logger, data):
             cop.params = corr
 
         # Sample
-        x = cop.sample(1)[0]
+        x = cop.sample(1)
+        x = x if x.ndim == 1 else x[0]
 
         # Back transform raw space via marginal quantile
         y = np.empty(len(x))
@@ -138,9 +139,13 @@ def process(config, script_paths, logger, data):
 
         for grp in config.sum_groups:
             s = 0
-            for sid in grp.split("-"):
-                s += dd[f"{sid}_SAMPLE"]
-            dd[f"{grp}_SUM_SAMPLE"] = s
+            try:
+                for sid in grp.split("-"):
+                    s += dd[f"{sid}_SAMPLE"]
+                dd[f"{grp}_SUM_SAMPLE"] = s
+            except:
+                # Stationid is missing in the group
+                continue
 
         sum_samples.append(dd)
 
