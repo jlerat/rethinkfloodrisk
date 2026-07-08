@@ -3,7 +3,7 @@
 #SBATCH --account=OD-228777
 #SBATCH --time=09:59:00
 #SBATCH --ntasks=1
-#SBATCH --mem=5gb
+#SBATCH --mem=15gb
 #SBATCH --output=logs/%x/%x_TASK%a_JOB%A.out
 #SBATCH --error=logs/%x/%x_TASK%a_JOB%A.err
 #SBATCH --mail-type=end # send email when job ends

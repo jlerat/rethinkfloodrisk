@@ -33,9 +33,12 @@ from pyrethink import postpredchecks as ppc
 def get_script_paths(config):
     source_file = Path(__file__).resolve()
     froot = source_file.parent.parent.parent
-    fdata = froot / "outputs" / f"copulafit_v{config.version}"
-    fout1 = froot / "outputs" / f"copulaprocess1_v{config.version}"
-    fout2 = froot / "outputs" / f"copulaprocess2_v{config.version}"
+    fdata0 = froot / "outputs" / f"copulafit_v{config.version}"
+    fdata1 = froot / "outputs" / f"copulaprocess1_v{config.version}"
+    fdata2 = froot / "outputs" / f"copulaprocess2_v{config.version}"
+    fout = froot / "outputs" / f"copulaconcat_v{config.version}"
+
+    fout.mkdir(exist_ok=True)
 
     flogs = froot / "logs" / source_file.stem
 
@@ -44,12 +47,13 @@ def get_script_paths(config):
 
     ScriptPaths = namedtuple("ScriptPaths",
                              ["source_file", "basename",
-                              "froot", "fdata",
-                              "fout1", "fout2",
-                              "flogs"])
+                              "froot", "fdata0",
+                              "fdata1", "fdata2",
+                              "fout", "flogs"])
     script_paths = ScriptPaths(source_file, source_file.stem,
-                               froot, fdata,
-                               fout1, fout2, flogs)
+                               froot, fdata0,
+                               fdata1, fdata2,
+                               fout, flogs)
 
     flogs.mkdir(exist_ok=True, parents=True)
 
@@ -72,21 +76,21 @@ def process(config, script_paths, logger):
         "postpredcheck_univ",
         "postpredcheck_biv",
         "postpredcheck_multivar",
-        "multivar_aeps",
-        "sum_samples",
         "sum_ffa"
         ]
+    #"multivar_aeps",
+    #"sum_samples",
 
     for ftype in ftypes:
         logger.info(f"Concatenating {ftype} files")
         df = []
-        lf = list(script_paths.fout1.glob(f"*/*{ftype}*.zip"))
-        lf += list(script_paths.fout2.glob(f"*/*{ftype}*.zip"))
+        lf = list(script_paths.fdata1.glob(f"*/*{ftype}*.zip"))
+        lf += list(script_paths.fdata2.glob(f"*/*{ftype}*.zip"))
         logger.info(f"{ftype} files ({len(lf)} found)", ntab=1)
         for f in lf:
             # Get data
-            taskid = re.sub(".*_TASK", "", f.stem)
-            fd = script_paths.fdata / f"TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
+            taskid = int(re.sub(".*_TASK", "", f.stem))
+            fd = script_paths.fdata0 / f"TASK{taskid}" / f"copulafit_data_TASK{taskid}.json"
             with fd.open("r") as fo:
                 data = json.load(fo)
 
@@ -94,7 +98,8 @@ def process(config, script_paths, logger):
 
             # Get results
             ddf = pd.read_csv(f, skiprows=15)
-            if ftype in ["multivar_aeps", "sum_samples", "sum_ffa, "sum_ffa""]:
+            if ftype in ["sum_ffa"]:
+                df.append(ddf)
                 continue
 
             ddf.columns = ["VARIABLE"] + ddf.columns[1:].to_list()
@@ -107,11 +112,12 @@ def process(config, script_paths, logger):
                 idx = ddf.VARIABLE.str.contains(f"\\[{istation + 1}\\]$", regex=True)
                 ddf.loc[idx, "STATIONID"] = stationid
 
-            ddf.loc[:, "VARIABLE"] = ddf.VARIABLE.str.replace("\[.*", "",
+            ddf.loc[:, "VARIABLE"] = ddf.VARIABLE.str.replace("\\[.*", "",
                                                               regex=True)
 
             df.append(ddf)
 
+        logger.info(f"Store concatenated {ftype} files")
         df = pd.concat(df)
         fr = script_paths.fout / f"copulaconcat_{ftype}.csv"
         csv.write_csv(df, fr, f"Concatenation of {ftype} results",
@@ -119,7 +125,7 @@ def process(config, script_paths, logger):
 
     # Zip everything
     logger.info("Creating zip files...")
-    for outname in ["fit", "process"]:
+    for outname in ["fit", "process1", "process2", "concat"]:
         logger.info(f"copula{outname} file", ntab=1)
         fz = script_paths.fout.parent / f"copula{outname}_v{config.version}.zip"
         make_archive(
