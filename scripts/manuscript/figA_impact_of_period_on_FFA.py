@@ -29,7 +29,6 @@ from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
 
 from floodstan import freqplots
-from floodstan.report import STAN_DIAGNOSTIC_VARIABLES as SDV
 from pyrethink import datahub, processing
 
 import importlib.util
@@ -42,17 +41,16 @@ spec.loader.exec_module(copulafit)
 
 def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
-    fdata = froot / "data"
-    fproc = froot / "outputs" / f"copulaprocess_v{config.version}"
+    fconcat = froot / "outputs" / f"copulaconcat_v{config.version}"
 
     basename = source_file.stem
     fimg = froot / "images" / "manuscript" / basename
 
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
-                     "froot", "fdata", "fproc", "fimg"])
-    script_paths = SP(source_file, basename, froot, fdata,
-                      fproc, fimg)
+                     "froot", "fconcat", "fimg"])
+    script_paths = SP(source_file, basename, froot,
+                      fconcat, fimg)
 
     fimg.mkdir(exist_ok=True)
     if config.clean:
@@ -78,7 +76,7 @@ def get_data(config, script_paths, logger):
 
     obs_data, _, _, stations = datahub.get_ams_concat()
 
-    fr = script_paths.fproc / "copulaconcat_ffa.csv"
+    fr = script_paths.fconcat / "copulaconcat_ffa.csv"
     ffa, _ = csv.read_csv(fr, dtype={"STATIONID": str})
 
     DT = namedtuple("Data", ["stations", "ffa", "obs_data",
@@ -87,8 +85,8 @@ def get_data(config, script_paths, logger):
 
 
 def process(config, script_paths, logger, data):
-    grp3 = next(g for g in data.options.options["group"] if len(g.split("-")) == 3)
-    stationids = grp3.split("-")
+    grp_mv = next(g for g in data.options.options["group"] if len(g.split("-")) == 3)
+    stationids = grp_mv.split("-")
     stations = data.stations.loc[stationids]
 
     options = data.options
@@ -97,8 +95,8 @@ def process(config, script_paths, logger, data):
 
     copula_specs = options.options["copula_spec"][1:]
     if config.debug:
-        #copula_specs = [copula_specs[0]]
-        copula_specs = ["Gaussian", "GaussianFactor_0_1"]
+        copula_specs = ["Gaussian"]
+        stations = stations.iloc[:1]
 
     excludes = config.excludes + ["NONE"]
     fptype = config.freq_plot_type
@@ -124,8 +122,8 @@ def process(config, script_paths, logger, data):
             plt.close("all")
             cop_prior = "inf" if config.use_informative else "noninf"
             mosaic = [[f"{ex}_univ-noninf",
-                       f"{ex}_univ-inf",
                        f"{ex}_mv-{cop_prior}"] for ex in excludes]
+                       #f"{ex}_univ-inf",
             nrows = len(mosaic)
             ncols = len(mosaic[0])
             figsize = (ncols * config.awidth, nrows * config.aheight)
@@ -138,17 +136,22 @@ def process(config, script_paths, logger, data):
 
                 # Find tasks
                 if re.search("univ", axcfg):
+                    model = "Univariate"
                     cs = "Univariate"
                 else:
+                    model = "Multivariate"
+                    if config.use_awra:
+                        model += " including AWRAL covariate"
                     cs = copula_spec
 
                 prior = "uninformative" if re.search("noninf", axcfg) \
                     else "informative"
 
-                group = stationid if cs == "Univariate" else grp3
-                awra_covariate = False if cs == "Univariate" else config.use_awra
+                group = stationid if model == "Univariate" else grp_mv
+                awra_covariate = False if model == "Univariate" else config.use_awra
 
-                taskid = options.find(prior=prior, copula_spec=cs,
+                taskid = options.find(prior=prior,
+                                      copula_spec=cs,
                                       exclude=exclude,
                                       awra_covariate=awra_covariate,
                                       group= f"^{group}$")
@@ -224,7 +227,7 @@ def process(config, script_paths, logger, data):
                     ev = int(re.sub("-.*", "", exclude)) + 1
                     exctxt = f"Without {ev} flood"
 
-                title = f"({letters[iax]}) {exctxt} - {cs} - {prior} prior"
+                title = f"({letters[iax]}) {exctxt} - {model}"
                 xlab = "Gumbel reduced variable $-log(-log(P))$ [-]" if iax >=  ncols else ""
                 ylab = "Peak flow [m3.s-1]" if iax % ncols == 0 else ""
                 ylim = (0, peaks.max() * 1.3)
@@ -234,22 +237,28 @@ def process(config, script_paths, logger, data):
                 i100 = df.ERI == 100
                 q100 = quantiles.loc[i100].squeeze()
 
-                txt = "Uncertainty in the 1:100 event\n\n"
-                kw = dict(va="top", ha="left", transform=ax.transAxes)
-                ax.text(0.03, 0.97, txt, **kw, fontweight="bold")
-
-                delta = 0.06
-                for ist, st in enumerate(["5%", "POSTERIOR_PREDICTIVE", "95%"]):
+                design = {}
+                cn_pp = "POSTERIOR_PREDICTIVE"
+                for ist, st in enumerate(["5%", cn_pp, "95%"]):
                     q = q100.loc[st]
                     h = processing.linear_interpolation(q, rc_q, rc_h)
-                    stt = "post pred" if st.startswith("POST") else st
+                    design[st] = {"q": q, "h": h}
 
-                    txt = f"{stt:<12s}"
-                    ytxt = 0.97 - delta * (ist + 1)
-                    ax.text(0.03, ytxt, txt, **kw)
+                design = pd.DataFrame(design).T
+                design.loc["CI90", :] = design.loc["95%"] - design.loc["5%"]
 
-                    txt = f"{q:>5,.0f} $m^3.s^{{{-1}}}$ ({h:>4.1f}m)"
-                    ax.text(0.18, ytxt, txt, **kw)
+                txt = f"Flow [1% AEP] = {design.loc[cn_pp, 'q']:0.0f}"
+                txt += f" $\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
+                kw = dict(va="top", ha="left", transform=ax.transAxes,
+                          fontsize="large",
+                          fontdict = {"family": "monospace"})
+                ytxt = 0.97
+                ax.text(0.03, ytxt, txt, **kw)
+
+                txt = f"Stage[1% AEP] = {design.loc[cn_pp, 'h']:0.1f}"
+                txt += f" $\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
+                ytxt = 0.9
+                ax.text(0.03, ytxt, txt, fontweight="bold", **kw)
 
             ftitle = f"{sinfo.NAME} ({stationid})"
             fig.suptitle(ftitle, fontweight="bold")
