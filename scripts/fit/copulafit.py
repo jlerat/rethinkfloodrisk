@@ -36,18 +36,15 @@ from pyrethink import sample as rsample
 from pyrethink import mv_censored_sampling
 from pyrethink import mv_censored_factors_sampling
 
-def get_options(version, version_priors, awraid="WILSONSRIVER"):
+def get_options(version, version_priors=2, awraid="WILSONSRIVER"):
     copula_specs = [
         "Univariate",
         "Gaussian",
-        "GaussianFactor_0_1",
-        "GaussianFactor_0_2",
         "Student_5"
         ]
     pcensors = [0.3]
-    priors = ["uninformative", "informative"]
+    priors = ["uninformative"]
     excludes = ["NONE",
-                "2016",
                 "2021"]
 
     marginal_name = "GEV"
@@ -55,7 +52,6 @@ def get_options(version, version_priors, awraid="WILSONSRIVER"):
     stations = datahub.get_stations()
     sids = stations.index.to_list()
     groups = ["203010-203014-203024"] \
-             + ["-".join(sids)] \
              + sids
     if int(version) >= 22:
         groups += ["203004-203010-203014-203024"]
@@ -82,12 +78,13 @@ def get_options(version, version_priors, awraid="WILSONSRIVER"):
             continue
         if nsta > 1 and task["copula_spec"] == "Univariate":
             continue
-        if nsta < 8 and task["copula_spec"] == "GaussianFactor2":
+        if nsta < 8 and task["copula_spec"] == "GaussianFactor_0_2":
             continue
         if nsta != 3 and task["awra_covariate"]:
             continue
         keep.append(task)
     opm.tasks = keep
+
     return opm
 
 
@@ -319,9 +316,6 @@ if __name__ == "__main__":
     overwrite = args.overwrite
     debug = args.debug
     seed = 5446
-    awraid = "WILSONSRIVER"
-
-    version_priors = 2
 
     if debug:
         stan_nwarm = 200
@@ -330,23 +324,25 @@ if __name__ == "__main__":
     else:
         stan_nwarm = 10000
         stan_nchains = 10
-        stan_nsamples = 20000
+        stan_nsamples = 50000
 
     # .. options
-    opm = get_options(version, version_priors, awraid)
+    opm = get_options(version)
+    version_priors = opm.context["version_priors"]
     marginal_name = opm.context["marginal_name"]
+    awraid = opm.context["awraid"]
 
     if debug:
         ctype = "mv"
         if ctype == "univ":
             taskid = opm.search(copula_spec="Univariate",
                                 exclude="2021",
-                                prior="^informative",
+                                prior="^uninformative",
                                 group="203014")[0]
         else:
-            taskid = opm.search(copula_spec="GaussianFactor_0_2$",
+            taskid = opm.search(copula_spec="Gaussian",
                                 exclude="2021",
-                                prior="^informative",
+                                prior="^uninformative",
                                 awra_covariate="True",
                                 group="203010-203014-203024")[0]
 
