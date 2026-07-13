@@ -18,11 +18,12 @@ from hydrodiy.stat import sutils
 
 COPULA_NAMES = ["Gaussian", "Student",
                 "GaussianFactor", "Independence",
-                "Comonotone", "Gumbel"]
+                "Comonotone", "Gumbel",
+                "Countermonotone"]
 
 SYMETRICAL_COPULAS = ["Independence", "Comonotone",
                       "Gaussian", "GaussianFactor",
-                      "Student"]
+                      "Student", "Countermonotone"]
 
 MARGINAL_EXCEEDANCE_SCORE_KINDS = ["AND", "OR",
                                    "KENDALL"]
@@ -185,6 +186,8 @@ def factory(copula_spec, nstations):
         return IndependenceCopula(nstations)
     if name == "Comonotone":
         return ComonotoneCopula(nstations)
+    if name == "Countermonotone":
+        return CountermonotoneCopula(nstations)
     elif name == "Gaussian":
         return GaussianCopula(nstations)
     elif name == "Student":
@@ -281,8 +284,10 @@ class Copula():
 
     def cdf_main_diagonal(self, u):
         if self._u_data is None:
-            u_data = np.repeat(np.atleast_2d(u),
-                               self.nstations, 1)
+            if u.ndim != 1:
+                errmsg = "Expected u of dimension 1."
+                raise ValueError(errmsg)
+            u_data = np.repeat(u[:, None], self.nstations, 1)
         else:
             u_data = self._u_data
             if isinstance(u, np.ndarray):
@@ -370,6 +375,40 @@ class ComonotoneCopula(Copula):
 
     def inverse_kendall_function(self, p):
         return p
+
+
+class CountermonotoneCopula(Copula):
+    def __init__(self, nstations):
+        if nstations != 2:
+            errmsg = "No countermonotone copula if nstations!=2."
+            raise ValueError(errmsg)
+
+        super(CountermonotoneCopula, self).__init__("Countermonotone",
+                                                    nstations)
+
+    def pdf(self, u):
+        u = to2d(u, 2)
+        return (np.abs(np.sum(u, axis=1) - 1) < 1e-10).astype(float)
+
+    def cdf(self, u):
+        u = to2d(u, 2)
+        return np.maximum(u.sum(axis=1) - 1, 0)
+
+    def marginal_ppf(self, u):
+        return u
+
+    def marginal_cdf(self, x):
+        return x
+
+    def sample(self, nsamples):
+        u = np.random.uniform(0, 1, nsamples)
+        return np.column_stack([u, 1 - u])
+
+    def kendall_function(self, cdf):
+        return np.where(cdf > 0, 1., 0.)
+
+    def inverse_kendall_function(self, p):
+        return np.where(p == 1., 1., 0.)
 
 
 class IndependenceCopula(Copula):

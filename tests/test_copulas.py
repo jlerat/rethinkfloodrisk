@@ -31,6 +31,7 @@ COPULA_SPECS = [
     "GaussianFactor_0_2",
     "Independence",
     "Comonotone",
+    "Countermonotone",
     "Gumbel"
     ]
 
@@ -79,6 +80,12 @@ def test_copulas(cspec, nstations, allclose):
     if re.search("Gumbel", cspec):
         pytest.skip("Gumbel not ready yet.")
 
+    if re.search("Countermonotone", cspec) and nstations != 2:
+        with pytest.raises(ValueError, match="No countermonotone"):
+            cop = copulas.factory(cspec, nstations)
+
+        return
+
     cop = copulas.factory(cspec, nstations)
     print(cop)
     cop.logger = LOGGER
@@ -117,14 +124,19 @@ def test_copulas(cspec, nstations, allclose):
     assert np.all(np.isfinite(surv))
     assert np.all((surv >= 0) & (surv <= 1))
 
+    # Kendall function K(z) >= z
+    z = np.linspace(0, 1, 100)
+    k = cop.kendall_function(z)
+    assert all(k >= z)
+
     for mex_kind in copulas.MARGINAL_EXCEEDANCE_SCORE_KINDS:
         aep = cop.aep(smp, mex_kind)
-
         assert len(aep) == nsmp
 
-        if mex_kind == "KENDALL":
+        if mex_kind == "KENDALL" and not re.search("Counter", cspec):
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
+
             assert pv > 1e-3
 
     if re.search("GaussianFactor", cspec):
