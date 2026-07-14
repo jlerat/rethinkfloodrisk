@@ -141,7 +141,7 @@ def process(config, script_paths, logger, data):
                 else:
                     model = "Multivariate"
                     if config.use_awra:
-                        model += " including AWRAL covariate"
+                        model += " with AWRAL covariate"
                     cs = copula_spec
 
                 prior = "uninformative" if re.search("noninf", axcfg) \
@@ -218,21 +218,22 @@ def process(config, script_paths, logger, data):
                                                   facecolor="tab:blue",
                                                   edgecolor="k")
 
-                retp = [10, 100, 500]
-                aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
-
                 if exclude == "NONE":
-                    exctxt = "All data"
+                    exctxt = "Fitting using all data"
                 else:
                     ev = int(re.sub("-.*", "", exclude)) + 1
-                    exctxt = f"Without {ev} flood"
+                    exctxt = f"Fitting without {ev} flood"
 
                 title = f"({letters[iax]}) {exctxt} - {model}"
                 xlab = "Gumbel reduced variable $-log(-log(P))$ [-]" if iax >=  ncols else ""
                 ylab = "Peak flow [m3.s-1]" if iax % ncols == 0 else ""
                 ylim = (0, peaks.max() * 1.3)
-                ax.set(title=title, ylabel=ylab, xlabel=xlab,
+                ax.set(ylabel=ylab, xlabel=xlab,
                        ylim=ylim)
+                ax.set_title(title, fontsize="large")
+
+                retp = [10, 100, 500]
+                aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
 
                 i100 = df.ERI == 100
                 q100 = quantiles.loc[i100].squeeze()
@@ -259,9 +260,6 @@ def process(config, script_paths, logger, data):
                 txt += f" $\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
                 ytxt = 0.9
                 ax.text(0.03, ytxt, txt, fontweight="bold", **kw)
-
-            ftitle = f"{sinfo.NAME} ({stationid})"
-            fig.suptitle(ftitle, fontweight="bold")
 
             basename = script_paths.basename
             use_a = config.use_awra

@@ -8,7 +8,7 @@
 ##
 ## ------------------------------
 
-import sys
+import math
 from collections import namedtuple
 from itertools import product as prod
 import re
@@ -24,11 +24,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
+
+import matplotlib as mpl
+mpl.rcParams["axes3d.mouserotationstyle"] = "azel"
 
 from hydrodiy.io import csv, iutils
-from hydrodiy.plot import putils, violinplot
+from hydrodiy.plot import violinplot
 
 from pyrethink import datahub
+
+from floodstan import freqplots
 
 import importlib.util
 
@@ -112,53 +118,124 @@ def process(config, script_paths, logger, data):
     obs_data = data.obs_data
     sum_samples = data.sum_samples
 
-    # FFA threshold
-    sum_ffa = data.sum_ffa
-    cn = f"{group}_SUM_POSTERIOR_PREDICTIVE"
-    idx = sum_ffa.loc[:, "ERI"] == f"DESIGN_ERI{config.ari}"
-    Qsum_thresh = sum_ffa.loc[idx, cn].squeeze()
-
-    # Samples above threshold
-    cc = [f"{sid}_SAMPLE" for sid in stationids]
-    nval = len(sum_samples)
-    cst = 0.3
-    ppos = (sum_samples.loc[:, cc].rank() - cst) / (nval + 1 - 2 * cst)
-
-    cn = re.sub("POSTERIOR.*", "SAMPLE", cn)
-    eps = Qsum_thresh * 1e-1
-    idx = sum_samples.loc[:, cn] >= Qsum_thresh - eps
-    idx &= sum_samples.loc[:, cn] < Qsum_thresh + eps
-
-    aeps = (1 - ppos.loc[idx]) * 100
-    aeps.columns = [re.sub("_.*", "", cn) for cn in aeps.columns]
-
     # plot
     plt.close("all")
-    ncols, nrows = 2, 1
+    mosaic = [["FFA", "BARPLOT"]]
+    ncols, nrows = len(mosaic[0]), len(mosaic)
     figsize = (ncols * config.awidth, nrows * config.aheight)
-    fig, axs = plt.subplots(ncols=2, figsize=figsize, layout="constrained")
+    fig = plt.figure(figsize=figsize, layout="compressed")
+    kw = dict(width_ratios=[1., 1.])
+    axs = fig.subplot_mosaic(mosaic,
+                             gridspec_kw=kw,
+                             per_subplot_kw={
+                                 "BARPLOT": {"projection": "3d"}
+                             })
+    # FFA plot
+    aris = np.logspace(math.log10(3), math.log10(300), 500)
+    qt = sum_samples.filter(regex="SAMPLE", axis=1).quantile(1 - 1. / aris, axis=0)
+    qt = pd.DataFrame(qt.values, columns=qt.columns, index=aris)
+    df = qt.filter(regex="\d_SAMPLE", axis=1)
+    qt.loc[:, "SUM_QT"] = df.sum(axis=1)
 
-    def draw(ax, aeps, sid1, sid2):
-        x = aeps.loc[:,  sid1]
-        y = aeps.loc[:,  sid2]
-        ax.plot(x, y, "o", alpha=0.5)
+    ptype = "gumbel"
+    cns1 = next(cn for cn in qt.columns if re.search("SUM", cn))
+    ax = axs["FFA"]
+    lab = "Q(" + ", ".join(stationids) + ")"
+    freqplots.plot_marginal_quantiles(ax, aris, qt, ptype,
+                                      label=lab, color="tab:blue",
+                                      center_column=cns1, lw=2)
+    cns2 = "SUM_QT"
+    lab = "+ ".join([f"Q({s})" for s in stationids])
+    freqplots.plot_marginal_quantiles(ax, aris, qt, ptype,
+                                      label=lab, color="tab:red",
+                                      center_column=cns2, lw=2)
 
-        xy = aeps.loc[:, [sid1, sid2]].values
-        xx, yy, zz = putils.kde(xy, logx=True, logy=True)
-        ax.contourf(xx, yy, zz, cmap="Blues")
+    retp = [10, 100]
+    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, return_periods=retp)
+    xa, xb = ax.get_ylim()
+    ya, yb = ax.get_ylim()
+    for r, x in zip(retp, xpos):
+        ia = aris[np.argmin(np.abs(aris - r))]
+        v2 = qt.loc[ia, cns2]
+        r1 = qt.loc[np.abs(qt.loc[:, cns1] - v2).idxmin()].name
+        x1 = freqplots.cdf_to_reduced_variate(1 - 1. / r1, ptype)
 
-        ax.set(xscale="log", yscale="log")
-        tk = [0.1, 1, 10]
-        ax.set_xticks(tk)
-        ax.set_xticklabels([f"{t}%" for t in tk])
-        ax.set_yticks(tk)
-        ax.set_yticklabels([f"{t}%" for t in tk])
+        dy = (yb - ya) * 0.05
+        ax.plot([x, x1, x1], [v2, v2, ya + dy / 2], color="tab:red", lw=0.9, ls="--")
+        ax.plot(x, v2, "o", mec="tab:red", mfc="w", ms=8)
+        ax.plot(x1, v2, "o", color="tab:red", ms=8)
 
-    ax = axs[0]
-    draw(ax, aeps, "203014", "203010")
+        ax.annotate("", xytext=(x1, ya + dy), xy=(x1, ya),
+            arrowprops=dict(arrowstyle="-|>", color="tab:red"),
+            size=15)
 
-    ax = axs[1]
-    draw(ax, aeps, "203024", "203010")
+        ax.text(x1, ya + (yb - ya) * 0.04,
+                f" 1:{r1:0.0f}",
+                va="bottom", ha="left",
+                fontweight="bold", fontsize="large",
+                color="tab:red")
+
+    freqplots.set_xlabel(ax, ptype)
+    ax.set_xlim((1, 5))
+    ax.set_xticks(np.arange(1, 7))
+    ax.legend(loc=2)
+
+    title = "(a) Frequency curves for sum of flows\n"\
+            + "and sum of frequency curves"
+    ax.set_title(title)
+    ax.set_ylabel("Streamflow [$m^3.s^{-1}$]")
+
+    # BARPLOT plot
+    ax = axs["BARPLOT"]
+
+    # .. compute aeps
+    df = sum_samples.filter(regex="^[\d].*_S", axis=1)
+    df.columns = [re.sub("_.*", "", cn) for cn in df.columns]
+    cns1 = re.sub("_.*", "", cns1)
+
+    cst = 0.3
+    nsamples = len(df)
+    ppos = (df.rank() - cst) / (nsamples + 1 - 2 * cst)
+
+    ps = ppos.loc[:, cns1]
+
+    aep = 100
+    th = df.loc[:, cns1].quantile(1 - 1. / aep)
+    diff =  np.abs(df.loc[:, cns1] - th)
+    nselect = 40
+    idx = diff.rank() < nselect
+    logger.info(f"Barplot - max error = {diff.loc[idx].max():0.2f} m3.s-1")
+
+    aeps = (1 - ppos.loc[idx].drop(cns1, axis=1)) * 100
+    ddf = df.loc[idx].drop(cns1, axis=1)
+    x = np.arange(len(ddf))
+    norm = Normalize(vmin=0, vmax=2)
+    cmap = plt.cm.PiYG
+
+    for i, (cn, se) in enumerate(ddf.items()):
+        col = [cmap(norm(a)) for a in aeps.loc[:, cn]]
+        ax.bar(x, se, zs=i, zdir="y", color=col, alpha=0.8)
+
+    ax.view_init(elev=30, azim=50, roll=0)
+
+    ax.set_yticks(np.arange(ddf.shape[1]))
+    ax.set_yticklabels(ddf.columns)
+    ax.set_xticks([])
+    ax.set_zticks(np.arange(0, 2000, 500))
+    title = "(b) Flow values which sum\nhas a 1% AEP"
+    ax.set(xlabel="Samples",
+           zlabel="Streamflow [$m^3.s^{-1}$]",
+           title=title)
+
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    cm = fig.colorbar(sm, ax=ax, extend="max",
+                      shrink=0.5)
+    cm.ax.set_yticks([0.2, 1, 2])
+    cm.ax.set_yticklabels(["1:500", "1:100", "1:50"], fontsize="small")
+    cm.ax.set_title("Marginal\nAEP", fontsize="small")
+
+    ax.set_box_aspect(None, zoom=1.1)
+    ax.set_proj_type("ortho")
 
     # save
     fp = f"{script_paths.basename}_v{config.version}.png"
