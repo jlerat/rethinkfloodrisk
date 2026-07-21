@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 from hydrodiy.io import csv, iutils, hyruns
 from hydrodiy.plot import putils
 
-from floodstan import freqplots
+from floodstan import freqplots, marginals
 from pyrethink import datahub, processing
 
 import importlib.util
@@ -171,11 +171,16 @@ def process(config, script_paths, logger, data):
                 ERI = df.VARIABLE.replace(".*ERI|\.$", "", regex=True)
                 df.loc[:, "ERI"] = ERI.astype(float)
 
-                # Plot obs data
+                # Get data
                 peaks_excluded = peaks.copy()
                 if exclude != "NONE":
                     peaks_excluded.loc[int(exclude)] = np.nan
 
+                # Fit GEV
+                gev = marginals.factory("GEV")
+                gev.fit_lh_moments(peaks_excluded, eta=2)
+
+                # Plot obs data
                 x, y = freqplots.plot_data(ax, peaks_excluded, fptype, zorder=10)
 
                 same = np.abs(y[:, None] - peaks.values[None, :]) < 1e-10
@@ -217,6 +222,11 @@ def process(config, script_paths, logger, data):
                                                   alpha=0.3,
                                                   facecolor="tab:blue",
                                                   edgecolor="k")
+
+                if re.search("univ", axcfg):
+                    freqplots.plot_marginal_cdf(ax, gev, fptype,
+                                                label="LH moment fit",
+                                                linestyle="--")
 
                 if exclude == "NONE":
                     exctxt = "Fitting using all data"
