@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 from hydrodiy.io import csv
@@ -79,31 +80,18 @@ def get_ams(stationid=None):
     fa0 = DATA_FOLDER / "ams" / f"AMS_streamflow_{stationid}_v{DATA_VERSION}.csv"
     if fa0.exists():
         ams, _ = csv.read_csv(fa0)
-        ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4]
-        ams = ams.set_index("YEAR")
-        return ams
     else:
-        fa1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.csv"
-        fz1 = DATA_FOLDER / f"AMS_data_v{DATA_VERSION}.zip"
-        if not fz1.exists():
-            errmsg = "Cannot find ams data."
-            raise ValueError(errmsg)
-
-        ams, _ = csv.read_csv(fa1)
-        sids = ams.stationid.astype(str)
-
-        ams = ams.iloc[:, 1:].T
-        ams.columns = sids
-
-        if stationid is not None:
-            if (sids == stationid).sum() == 0:
-                errmsg = f"Cannot find ams data for station {stationid}."
+        fz = DATA_FOLDER / "ams" / "ams_all_stations.zip"
+        with ZipFile(fz, "r") as archive:
+            try:
+                ams, _ = csv.read_csv(fa0.name, archive=archive)
+            except:
+                errmsg = f"Cannot extract data for stationid {stationid}."
                 raise ValueError(errmsg)
 
-            ams = ams.loc[:, [stationid]]
-            ams.columns = [f"{stationid}_PEAK"]
-
-        return ams
+    ams.loc[:, "YEAR"] = ams.WATER_YEAR_START.str[:4]
+    ams = ams.set_index("YEAR")
+    return ams
 
 
 def get_ams_awra(stationid, variable="QTOT"):
@@ -185,7 +173,10 @@ def get_rating_curves(stationid, only_last=False):
     rcs = {}
     metas = {}
     for time in times:
-        rcs[time] = rc.loc[rc.TIME_VALIDITY == time]
+        r = rc.loc[rc.TIME_VALIDITY == time]
+        ipos = r.loc[:, "STREAMFLOW[m3_s-1]"] > 1e-2
+        ipos &= r.loc[:, "WATERLEVEL[m]"] > 0
+        rcs[time] = r.loc[ipos]
         metas[time] = meta.loc[meta.time_validity == time]
 
     if only_last:
