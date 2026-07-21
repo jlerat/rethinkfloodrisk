@@ -36,13 +36,13 @@ def test_potpeaks_thresh():
     thresh = datahub.get_potpeaks_thresh()
     assert len(thresh) == 8
 
-def test_get_ams_concat():
-    ams, times, dows, stations = datahub.get_ams_concat()
-    assert ams.shape[1] == 8
-    assert stations.shape[0] == 8
-    assert ams.shape == times.shape
-    assert ams.shape == dows.shape
-    assert all([dt == np.int64 for dt in dows.dtypes])
+
+@pytest.mark.parametrize("stationid",
+                         ["203014", "203010", "002101", "003301"])
+def test_get_ams(stationid):
+    ams = datahub.get_ams(stationid)
+    assert ams.shape[1] == 5
+
 
 @pytest.mark.parametrize("stationid",
                          datahub.get_awra_cookies().index.tolist())
