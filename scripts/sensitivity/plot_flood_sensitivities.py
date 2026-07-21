@@ -23,6 +23,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from hydrodiy.io import csv, iutils
+from hydrodiy.plot import putils
 
 from pyrethink import datahub
 
@@ -50,7 +51,7 @@ def get_logger(config, script_paths):
 
 
 def get_data(config, script_paths, logger):
-    fs = script_paths.fdata / "sensitivity_Q100.csv"
+    fs = script_paths.fdata / "sensitivity.csv"
     sens, _ = csv.read_csv(fs, index_col="STATIONID")
     data = namedtuple("Data", ["sensitivity"])(sens)
     return data
@@ -68,68 +69,71 @@ def process(config, script_paths, logger, data):
     etas = [2]
 
     aris = [re.search("(?<=^Q)\\d+", cn) for cn in sensitivity.columns]
-    aris = set([int(a.group()) for a in aris if a is not None])
+    aris = list(set([int(a.group()) for a in aris if a is not None]))
+    aris.sort()
 
     plt.close("all")
+    ncols = config.ncols
     cfg = [f"{a}_{e}_{o}" for a in aris for e in etas for o in [1, 2]]
-    mosaic = [[f"hist_{c}", f"scatter_{c}"] for c in cfg]
-    ncols, nrows = len(mosaic[0]), len(mosaic)
-    aw, ah = 8, 7
+    ncfg = len(cfg)
+    nrows = ncfg // ncols + (1 if ncfg % ncols != 0 else 0)
+    mosaic = [[cfg[ir * ncols + ic] if ir * ncols + ic < ncfg else "."
+               for ic in range(ncols)] for ir in range(nrows)]
+
+    aw, ah = 6, 6
     fig = plt.figure(figsize=(aw * ncols, ah * nrows),
                      layout="constrained")
     axs = fig.subplot_mosaic(mosaic)
 
+    tforward = lambda x, nu: nu * np.asinh(x / nu)
+    tbackward = lambda y, nu: nu * np.sinh(y / nu)
+    nu = 1e-3
+
     x = sensitivity.loc[:, cna]
-    X = np.column_stack([np.ones_like(x), np.log(x)])
+    X = np.column_stack([np.ones_like(x), tforward(x, nu)])
+    iok = ~np.isnan(X[:, 1])
 
-    for c in cfg:
-        ax_h = axs[f"hist_{c}"]
-        ax_s = axs[f"scatter_{c}"]
-
-        ari, eta, order = c.split("_")
+    tforward = lambda x, nu: nu * np.asinh(x / nu)
+    for aname, ax in axs.items():
+        ari, eta, order = aname.split("_")
         logger.info(f"Plotting ari={ari} eta={eta} order={order}")
-        cns = f"Q{ari}_SENSITIVITY{order}_ETA{eta}[%/%dQ]"
-        sens = sensitivity.loc[:, cns].copy()
-        if order == "1":
-            smin, smax = 0, 2
-        else:
-            smin, smax = -1e1, 1e1
-        sens = sens.clip(smin, smax)
-
-        sens.plot(ax=ax_h, kind="hist", bins=20,
-                  ec="0.5", fc="lightblue",
-                  density=True,
-                  orientation="horizontal")
-        title = f"Distribution of Q{ari} sensitivity - η={eta}"
-        ylab = f"Sensitivity Q{ari} / ΔQmax [%/%]"
-        xlab = "Density [-]"
-        x0, x1 = ax_h.get_xlim()
-        ax_h.set(title=title, xlabel=xlab, ylabel=ylab, xlim=[x1, x0])
-        if order == "2":
-            ax_h.set_yscale("asinh")
 
         # Scatter plot
-        y = sensitivity.loc[:, cns].clip(0, smax)
-        ax_s.plot(x, y, "o")
+        pos = {}
+        for method in ["DIFF", "OLS"]:
+            cns = f"Q{ari}_SENSITIVITY{order}_ETA{eta}_{method}[%/%dQ]"
+            y = sensitivity.loc[:, cns]
+            pos[method] = (y > 0).sum() / len(y)
+            ax.plot(x, y, "o", label=method, alpha=0.5)
+            col = ax.get_lines()[-1].get_color()
 
-        iok = sensitivity.loc[:, cns] > smin
-        iok &= sensitivity.loc[:, cns] < smax
-        theta, _, _, _ = np.linalg.lstsq(X[iok], np.log(y[iok]), rcond=1e-6)
-        xx = np.linspace(x.min(), x.max(), 100)
+            ty = tforward(y, nu)
+            theta, _, _, _ = np.linalg.lstsq(X[iok], ty[iok], rcond=1e-6)
+            xx = np.linspace(x.min(), x.max(), 100)
 
-        a = math.exp(theta[0])
-        b = theta[1]
-        yy = a * xx**b
-        lab = f"y = {a:+0.1f} x$^{{{b:+0.2f}}}$"
-        ax_s.plot(xx, yy, "k--", label=lab)
+            a = theta[0]
+            b = theta[1]
+            yy = tbackward(a + b * tforward(xx, nu), nu)
+            lab = f"{method}: y = t({a:+3.1e} {b:+3.1e}x)"
+            ax.plot(xx, yy, "--", label=lab, color=col)
 
-        title = f"Q{ari} sensitivity versus record duration - η={eta}"
+        title = f"Q{ari} sensitivity versus record duration\n" \
+                + f"Order={order} η={eta}"
         xlab = "Record duration [yr]"
-        ax_s.set(title=title, xlabel=xlab, ylabel="")
+        ylab = f"Sensitivity Q{ari} [%/%dQ]"
+        ax.set(title=title, xlabel=xlab, ylabel=ylab)
         if order == "2":
-            ax_s.set_yscale("asinh")
-        ax_s.sharey(ax_h)
-        ax_s.legend()
+            ax.set_yscale("asinh", linear_width=1e-3)
+            putils.line(ax, 1, 0, 0, 0, "k-", lw=0.8)
+
+            txt = "\n".join([f"%pos({m}) = {p * 100:0.1f}%"
+                             for m, p in pos.items()])
+            ax.text(0.98, 0.98, txt,
+                    transform=ax.transAxes, va="top",
+                    ha="right", fontweight="bold")
+            ax.set(ylim=[-1e-1, 1e-1])
+
+        ax.legend()
 
     fp = script_paths.fimg / "sensitivity.png"
     fig.savefig(fp)
@@ -146,9 +150,10 @@ if __name__ == "__main__":
     # Config
     debug = args.debug
     eta = 2
+    ncols = 2
 
-    Config = namedtuple("Config", ["debug", "lh_moment_eta"])
-    config = Config(debug, eta)
+    Config = namedtuple("Config", ["debug", "lh_moment_eta", "ncols"])
+    config = Config(debug, eta, ncols)
 
     # Baseline
     script_paths = get_script_paths(config)

@@ -81,59 +81,56 @@ def process(config, script_paths, logger, data):
     # Configure gev fit sensitivity analysis
     aris = config.aris
     csens1 = [f"H{ari}_SENSITIVITY_QMAX[cm/%dQmax]" for ari in aris]
-    csens2 = [f"Q{ari}_SENSITIVITY_QMAX[%Q/%dQmax]" for ari in aris]
+    csens2 = [f"Q{ari}_SENSITIVITY_QMAX[%dQ/%dQmax]" for ari in aris]
     charac.loc[:, csens1 + csens2] = np.nan
 
     eta = config.eta
     eps = 1e-6
 
     for stationid, ams in obs.items():
-        y = ams.loc[ams.notnull()].values
+        y = ams.loc[ams.notnull()].values.copy()
         logger.info(f"Station {stationid} len(ams)={len(y)}", nret=1)
         imax = np.argmax(y)
         Qmax = y.max()
 
-        gev0 = marginals.factory("GEV")
-        gev0.fit_lh_moments(y, eta=eta)
-
-        gev1 = marginals.factory("GEV")
-        y1 = y.copy()
-        y1[imax] -= eps
-        gev1.fit_lh_moments(y1, eta=eta)
-
-        gev2 = marginals.factory("GEV")
-        y2 = y.copy()
-        y2[imax] += eps
-        gev2.fit_lh_moments(y2, eta=eta)
-
         rc = data.rating_curves[stationid]
 
+        Qref = {a: {} for a in aris}
+        Href = {a: {} for a in aris}
+        for i in [-1, 0, 1]:
+            y[imax] = Qmax + i * eps
+            gev = marginals.factory("GEV")
+            gev.fit_lh_moments(y, eta=eta)
+
+            for ari in aris:
+                prob = 1 - 1. / ari
+                Q = gev.ppf(prob)
+                H = processing.linear_interpolation(Q, rc.Q, rc.H)
+
+                Qref[ari][i] = Q
+                Href[ari][i] = H
+
         for iari, ari in enumerate(aris):
-            prob = 1 - 1. / ari
-            Q0 = gev0.ppf(prob)
-            H0 = processing.linear_interpolation(Q0, rc.Q, rc.H)
-
-            Q1 = gev1.ppf(prob)
-            H1 = processing.linear_interpolation(Q1, rc.Q, rc.H)
-
-            Q2 = gev2.ppf(prob)
-            H2 = processing.linear_interpolation(Q2, rc.Q, rc.H)
-
-            Sh = (H2 - H1) / 2 / eps * Qmax
+            Sh = (Href[ari][1] - Href[ari][-1]) / 2 / eps * Qmax
             charac.loc[stationid, csens1[iari]] = Sh
             logger.info(f"\tSensitivity H{ari} = {Sh:0.2f} cm/%dQmax")
 
-            Sq = (Q2 - Q1) / 2 / eps * Qmax / Q0
+            Sq = (Qref[ari][1] - Qref[ari][-1]) / 2 / eps * Qmax / Qref[ari][0]
             charac.loc[stationid, csens2[iari]] = Sq
-            logger.info(f"\tSensitivity Q{ari} = {Sq:0.2f} %Q/%dQmax")
+            logger.info(f"\tSensitivity Q{ari} = {Sq:0.2f} %dQ/%dQmax")
 
     fd = script_paths.fout / "tabA_site_characteristics.csv"
     charac_s = charac.astype(str)
     for cn, se in charac.items():
         if cn == "NAME":
             continue
-        digit = 1 if cn in csens1 + csens2 else 0
-        charac_s.loc[:, cn] = se.apply(lambda x: f"{float(x):0.{digit}f}")
+        if cn in csens1:
+            digit = 1
+        elif cn in csens2:
+            digit = 2
+        else:
+            digit = 0
+        charac_s.loc[:, cn] = se.apply(lambda x: f"{float(x):03.{digit}f}")
 
     csv.write_csv(charac_s, fd, "Site characteristics",
                   script_paths.source_file, compress=False,

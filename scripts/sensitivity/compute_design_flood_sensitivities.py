@@ -68,7 +68,10 @@ def process(config, script_paths, logger, data):
     etas = config.lh_moment_etas
 
     for ari, eta, order in prod(aris, etas, [1, 2]):
-        cns = f"Q{ari}_SENSITIVITY{order}_ETA{eta}[%/%dQ]"
+        cns = f"Q{ari}_SENSITIVITY{order}_ETA{eta}_DIFF[%/%dQ]"
+        stations.loc[:, cns] = np.nan
+
+        cns = f"Q{ari}_SENSITIVITY{order}_ETA{eta}_OLS[%/%dQ]"
         stations.loc[:, cns] = np.nan
 
     cna = "LENGTH_AMS[yr]"
@@ -99,16 +102,34 @@ def process(config, script_paths, logger, data):
                 Qref[i] = gev.ppf(1 - 1. / ari)
 
             ratio = Qmax / Qref[0]
-            s1 = (Qref[1] - Qref[-1]) / 2 / eps * ratio
-            cns1 = f"Q{ari}_SENSITIVITY1_ETA{eta}[%/%dQ]"
-            stations.loc[stationid, cns1] = s1
+            s1 = (Qref[1] - Qref[-1]) / 2 / eps
+            cns1 = f"Q{ari}_SENSITIVITY1_ETA{eta}_DIFF[%/%dQ]"
+            stations.loc[stationid, cns1] = s1 * ratio
 
-            s2 = (Qref[1] - 2 * Qref[0] + Qref[-1]) / eps**2 * ratio**2
-            cns2 = f"Q{ari}_SENSITIVITY2_ETA{eta}[%/%dQ]"
-            stations.loc[stationid, cns2] = s2
+            s2 = (Qref[1] - 2 * Qref[0] + Qref[-1]) / eps**2
+            cns2 = f"Q{ari}_SENSITIVITY2_ETA{eta}_DIFF[%/%dQ]"
+            stations.loc[stationid, cns2] = s2 * ratio**2
 
-    fs = script_paths.fout / "sensitivity_Q100.csv"
-    csv.write_csv(stations, fs, "Sensitivity of Q100 to max obs",
+            qqi = Qmax * np.linspace(1, 2, 10)
+            qqo = np.zeros_like(qqi)
+            for iq, q in enumerate(qqi):
+                y[imax] = q
+                gev.fit_lh_moments(y, eta=eta)
+                qqo[iq] = gev.ppf(1 - 1. / ari)
+
+            dq = qqi - Qmax
+            X = np.column_stack([dq, dq**2])
+            theta, _, _, _ = np.linalg.lstsq(X, qqo - Qref[0], rcond=1e-6)
+
+            cns1 = f"Q{ari}_SENSITIVITY1_ETA{eta}_OLS[%/%dQ]"
+            stations.loc[stationid, cns1] = theta[0] * ratio
+
+            s2 = (Qref[1] - 2 * Qref[0] + Qref[-1]) / eps**2
+            cns2 = f"Q{ari}_SENSITIVITY2_ETA{eta}_OLS[%/%dQ]"
+            stations.loc[stationid, cns2] = theta[1] * ratio**2
+
+    fs = script_paths.fout / "sensitivity.csv"
+    csv.write_csv(stations, fs, "Sensitivity of reference floods to max obs",
                   script_paths.source_file,
                   compress=False, write_index=True,
                   lineterminator="\n")
@@ -124,7 +145,7 @@ if __name__ == "__main__":
 
     # Config
     debug = args.debug
-    etas = [1, 2, 3]
+    etas = [2]
     aris = [10, 100, 500]
 
     Config = namedtuple("Config", ["debug", "lh_moment_etas", "aris"])
