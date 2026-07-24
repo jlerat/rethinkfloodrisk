@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2
+from scipy.stats import spearmanr
 
 import matplotlib.pyplot as plt
 from matplotlib import ticker
@@ -46,6 +46,15 @@ def process(config, script_paths, logger, data):
     ams = data.obs_data.loc[:, config.stationids]
     wy = ams.index
 
+    awra = datahub.get_ams_awra(config.awraid)
+    # .. convert mm/day -> m3/s
+    area  = datahub.get_awra_cookies().loc[config.awraid, "CATCHMENTAREA_SRTM[km2]"]
+    awra *= area / 86.4
+
+    awra.name = "AWRA-L"
+    start = ams.index[0]
+    ams = pd.concat([ams, awra], axis=1).sort_index().loc[start:]
+
     nstations = ams.shape[1]
     nplots = nstations * (nstations - 1) // 2
     nc = config.ncols
@@ -53,7 +62,6 @@ def process(config, script_paths, logger, data):
 
     putils.set_mpl(font_size=22)
     plt.close("all")
-
     fig, axs = plt.subplots(ncols=nc, nrows=nr,
                             figsize=(nc * config.awidth, nr * config.awidth),
                             layout="constrained")
@@ -82,31 +90,44 @@ def process(config, script_paths, logger, data):
 
         ax.contourf(xx, yy, zz, cmap="Blues")
 
-        ax.set(xlabel="", ylabel="",
-               xlim=config.lims, ylim=config.lims)
-        tk = [1, 2, 3]
-        tkl = ["$10^1$", "$10^2$", "$10^3$"]
-        stk = [i * 10**j for j in tk for i in range(1, 10)]
-        stk = [math.log10(s) for s in stk if s < 3000]
-        ytkl = [] if iplot % nc != 0 else tkl
-        xtkl = [] if iplot < nc * (nr - 1) else tkl
-        ax.set_xticks(tk, labels=xtkl)
-        ax.set_xticks(stk, minor=True)
-        ax.set_yticks(tk, labels=ytkl)
-        ax.set_yticks(stk, minor=True)
+        xlim = config.lims
+        xtk = [2, 3]
+        ylim = config.lims
+        ytk = [2, 3]
 
+        xtkl = [f"$10^{{{k}}}$" for k in xtk]
+        xstk = [i * 10**j for j in xtk for i in range(1, 10)]
+        xstk = [math.log10(s) for s in xstk if s < xlim[1]]
+        xtkl = [] if iplot < nc * (nr - 1) else xtkl
+
+        ytkl = [f"$10^{{{k}}}$" for k in ytk]
+        ystk = [i * 10**j for j in ytk for i in range(1, 10)]
+        ystk = [math.log10(s) for s in ystk if s < ylim[1]]
+        ytkl = [] if iplot % nc != 0 else ytkl
+
+        ax.set(xlabel="", ylabel="",
+               xlim=xlim, ylim=ylim)
+        ax.set_xticks(xtk, labels=xtkl)
+        ax.set_xticks(xstk, minor=True)
+        ax.set_yticks(ytk, labels=ytkl)
+        ax.set_yticks(ystk, minor=True)
 
         ax.grid(axis="both", color="0.5", lw=0.5)
 
-        title = f"({iplot + 1}) x={sidx} y={sidy}"
+        title = f"({iplot + 1}) X={sidx} Y={sidy}"
         ax.set_title(title, x=0.02, y=0.96,
                      fontsize=22,
                      va="top", ha="left")
 
-    lab = "Annual streamflow\nmaximum " + r"[$m^3.s^{-1}$]"
-    fig.supxlabel(lab, fontsize=25)
+        iok = np.all(~np.isnan(xy), axis=1)
+        rho = spearmanr(xy[iok, 0], xy[iok, 1])[0]
+        ax.text(0.98, 0.02, f"ρ={rho:0.2f}",
+                transform=ax.transAxes, va="bottom",
+                ha="right")
+
 
     lab = r"Annual streamflow maximum [$m^3.s^{-1}$]"
+    fig.supxlabel(lab, fontsize=25)
     fig.supylabel(lab, fontsize=25)
 
     basename = script_paths.basename
@@ -128,22 +149,26 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-s", "--stationids", help="Selected stationids",
                         type=str, default="203010-203024-203014")
+    parser.add_argument("-a", "--awraid", help="Selected AWRA-L covariate catchment",
+                        type=str, default="WILSONSRIVER")
     args = parser.parse_args()
     stationids = args.stationids.split("-")
 
     # Config
     CF = namedtuple("Config", ["version", "awidth", "aheight",
                                 "fdpi", "ncols", "clean", "lims",
-                                "stationids"])
+                                "stationids", "awraid", "awra_lims"])
     awidth = 6
     aheight = 5
     fdpi = 300
-    ncols = 1
-    lims = [math.log10(10), math.log10(3e3)]
+    ncols = 2
+    lims = [math.log10(20), math.log10(4e3)]
+    alims = [math.log10(20), math.log10(4e3)]
 
     config = CF(args.version,
                 awidth, aheight, fdpi, ncols,
-                args.clean, lims, stationids)
+                args.clean, lims, stationids,
+                args.awraid, alims)
 
     # Baseline
     source_file = Path(__file__).resolve()

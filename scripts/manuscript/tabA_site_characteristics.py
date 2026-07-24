@@ -35,15 +35,18 @@ from floodstan import marginals
 
 from pyrethink import datahub, processing
 
+from figA_impact_of_period_on_FFA import copulafit
+
 def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
     basename = source_file.stem
     fout = froot / "images" / "manuscript"
+    fdata = froot / "outputs" / f"copulaconcat_v{config.version}"
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
-                     "froot", "fout"])
+                     "froot", "fdata", "fout"])
     script_paths = SP(source_file, basename, froot,
-                      fout)
+                      fdata, fout)
     return script_paths
 
 
@@ -59,15 +62,40 @@ def get_data(config, script_paths, logger):
     stations = stations.loc[stationids]
     obs_data = obs_data.loc[:, stationids]
 
-    rating_curves = {}
-    for stationid in config.stationids:
-        rc, _ = datahub.get_rating_curves(stationid, True)
-        ch, cq = "WATERLEVEL[m]", "STREAMFLOW[m3_s-1]"
-        rc = rc.loc[:, [ch, cq]].rename(columns={ch:"H", cq:"Q"})
-        rating_curves[stationid] = rc
+    version = config.version
+    opm = copulafit.get_options(version)
 
-    DT = namedtuple("Data", ["stations", "obs_data", "rating_curves"])
-    return DT(stations, obs_data, rating_curves)
+    grp = "-".join(stationids)
+    cspec = config.copula_spec
+    acov = "True"
+    taskid = opm.find(exclude=config.exclude,
+                      awra_covariate=acov,
+                      group=grp,
+                      copula_spec=cspec)
+    taskid = next(t for t in taskid)
+
+    ppred = {}
+    for vtype in ["multivar", "univ"]:
+        fp = script_paths.fdata / f"copulaconcat_postpredcheck_{vtype}.zip"
+        pp = pd.read_csv(fp, skiprows=15)
+        idx = pp.TASKID == taskid
+        cns = ["obs", "simmean", "simstd"]
+
+        if vtype == "multivar":
+            idx &= pp.VARIABLE == config.multivar_metric
+            pp = pp.loc[idx, cns].squeeze()
+            ppred[vtype] = pp
+        else:
+            idx &= pp.VARIABLE == config.univar_metric
+            pp = pp.loc[idx].filter(regex="^(obs|simmean|simstd)", axis=1).squeeze()
+            df = pd.DataFrame({cn: np.nan for cn in cns}, index=stationids)
+            for ista, sid in enumerate(stationids):
+                for cn in cns:
+                    df.loc[sid, cn] = pp.loc[f"{cn}[{ista + 1}]"]
+            ppred[vtype] = df
+
+    DT = namedtuple("Data", ["stations", "obs_data", "ppred"])
+    return DT(stations, obs_data, ppred)
 
 
 def process(config, script_paths, logger, data):
@@ -78,56 +106,22 @@ def process(config, script_paths, logger, data):
     charac = stations.loc[:, cc]
     charac.loc[:, "RECORD_LENGTH[yr]"] = obs.notnull().sum()
 
-    # Configure gev fit sensitivity analysis
-    aris = config.aris
-    csens1 = [f"H{ari}_SENSITIVITY_QMAX[cm/%dQmax]" for ari in aris]
-    csens2 = [f"Q{ari}_SENSITIVITY_QMAX[%dQ/%dQmax]" for ari in aris]
-    charac.loc[:, csens1 + csens2] = np.nan
+    um = config.univar_metric
+    pp = data.ppred["univ"]
+    charac.loc[:, f"{um}_obs"] = pp.loc[:, "obs"].apply(lambda x: f"{x:0.2f}")
+    fun = lambda x: f"{x.iloc[0]:0.2f} ±{x.iloc[1]:0.2f}"
+    charac.loc[:, f"{um}_sim"] = pp.loc[:, ["simmean", "simstd"]].apply(fun, axis=1)
 
-    eta = config.eta
-    eps = 1e-6
-
-    for stationid, ams in obs.items():
-        y = ams.loc[ams.notnull()].values.copy()
-        logger.info(f"Station {stationid} len(ams)={len(y)}", nret=1)
-        imax = np.argmax(y)
-        Qmax = y.max()
-
-        rc = data.rating_curves[stationid]
-
-        Qref = {a: {} for a in aris}
-        Href = {a: {} for a in aris}
-        for i in [-1, 0, 1]:
-            y[imax] = Qmax + i * eps
-            gev = marginals.factory("GEV")
-            gev.fit_lh_moments(y, eta=eta)
-
-            for ari in aris:
-                prob = 1 - 1. / ari
-                Q = gev.ppf(prob)
-                H = processing.linear_interpolation(Q, rc.Q, rc.H)
-
-                Qref[ari][i] = Q
-                Href[ari][i] = H
-
-        for iari, ari in enumerate(aris):
-            Sh = (Href[ari][1] - Href[ari][-1]) / 2 / eps * Qmax
-            charac.loc[stationid, csens1[iari]] = Sh
-            logger.info(f"\tSensitivity H{ari} = {Sh:0.2f} cm/%dQmax")
-
-            Sq = (Qref[ari][1] - Qref[ari][-1]) / 2 / eps * Qmax / Qref[ari][0]
-            charac.loc[stationid, csens2[iari]] = Sq
-            logger.info(f"\tSensitivity Q{ari} = {Sq:0.2f} %dQ/%dQmax")
+    mm = config.multivar_metric
+    pp = data.ppred["multivar"]
+    charac.loc[stations.index[0], f"{mm}_obs"] = f"{pp.loc['obs']:0.2f}"
+    charac.loc[stations.index[0], f"{mm}_sim"] = fun(pp.loc[["simmean", "simstd"]])
 
     fd = script_paths.fout / "tabA_site_characteristics.csv"
     charac_s = charac.astype(str)
     for cn, se in charac.items():
-        if cn == "NAME":
+        if cn == "NAME" or re.search("obs|sim", cn):
             continue
-        if cn in csens1:
-            digit = 1
-        elif cn in csens2:
-            digit = 2
         else:
             digit = 0
         charac_s.loc[:, cn] = se.apply(lambda x: f"{float(x):03.{digit}f}")
@@ -143,17 +137,31 @@ if __name__ == "__main__":
                                      formatter_class=
                                      argparse.ArgumentDefaultsHelpFormatter)
 
+    parser.add_argument("-v", "--version", help="version",
+                        type=int, required=True)
     parser.add_argument("-s", "--stationids", help="Selected stationids",
-                        type=str, default="203010-203024-203014")
+                        type=str, default="203010-203014-203024")
     parser.add_argument("-e", "--eta", help="LH moment shift",
                         type=int, default=2)
     args = parser.parse_args()
     stationids = args.stationids.split("-")
     aris = [100, 500]
 
+    # Copula config
+    exclude = "NONE"
+    copula_spec = "Gaussian"
+
+    # Evaluation
+    multivar_metric = "tau_q50"
+    univar_metric = "lskewness2"
+
     # Config
-    CF = namedtuple("Config", ["stationids", "eta", "aris"])
-    config = CF(stationids, args.eta, aris)
+    CF = namedtuple("Config", ["version", "stationids", "eta", "aris",
+                               "exclude", "copula_spec",
+                               "multivar_metric", "univar_metric"])
+    config = CF(args.version, stationids, args.eta, aris,
+                exclude, copula_spec,
+                multivar_metric, univar_metric)
 
     # Baseline
     source_file = Path(__file__).resolve()
