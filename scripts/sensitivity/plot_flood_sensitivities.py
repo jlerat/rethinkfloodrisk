@@ -64,6 +64,14 @@ def process(config, script_paths, logger, data):
 
     cna = "LENGTH_AMS[yr]"
 
+    #cratio = "RATIO_QMAX_QMAX2[-]"
+    #plt.close("all")
+    #x = sensitivity.loc[:, cna]
+    #y = sensitivity.loc[:, cratio]
+    #plt.plot(x, y, "o")
+    #plt.show()
+    #import pdb; pdb.set_trace()
+
     #etas = [re.search("(?<=_ETA)\\d", cn) for cn in sensitivity.columns]
     #etas = set([int(e.group()) for e in etas if e is not None])
     etas = [2]

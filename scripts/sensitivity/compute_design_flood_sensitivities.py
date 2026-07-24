@@ -75,7 +75,11 @@ def process(config, script_paths, logger, data):
         stations.loc[:, cns] = np.nan
 
     cna = "LENGTH_AMS[yr]"
-    stations.loc[:, cna] = np.nan
+    cmax = "QMAX[m3.s-1]"
+    cmax2 = "QMAX2[m3.s-1]"
+    cratio = "RATIO_QMAX_QMAX2[-]"
+    for cn in [cna, cmax, cmax2, cratio]:
+        stations.loc[:, cn] = np.nan
 
     gev = marginals.factory("GEV")
 
@@ -92,6 +96,11 @@ def process(config, script_paths, logger, data):
         stations.loc[stationid, cna] = len(y)
 
         Qmax = np.max(y)
+        Q2 = np.max(y[y < Qmax])
+        stations.loc[stationid, cmax] = Qmax
+        stations.loc[stationid, cmax2] = Q2
+        stations.loc[stationid, cratio] = Qmax / Q2
+
         imax = np.argmax(y)
 
         for ari, eta in prod(aris, etas):
