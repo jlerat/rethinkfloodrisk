@@ -121,21 +121,54 @@ def process(config, script_paths, logger, data):
             # Plot
             plt.close("all")
             cop_prior = "inf" if config.use_informative else "noninf"
-            mosaic = [[f"{ex}_univ-noninf",
-                       f"{ex}_mv-{cop_prior}"] for ex in excludes]
-                       #f"{ex}_univ-inf",
+            models = ["univ-noninf", f"mv-{cop_prior}"]
+            mosaic = [["."] + [f"col_title/{m}" for m in models]]
+            mosaic += [[f"row_title/{ex}"] + [f"data/{ex}/{m}" for m in models]
+                       for ex in excludes]
+
             nrows = len(mosaic)
             ncols = len(mosaic[0])
-            figsize = (ncols * config.awidth, nrows * config.aheight)
+            figsize = ((ncols - 1) * config.awidth, (nrows - 1) * config.aheight)
             fig = plt.figure(figsize=figsize,
                              layout="constrained")
-            axs = fig.subplot_mosaic(mosaic, sharey=True)
-
+            kw = dict(width_ratios=[1] + [9] * (ncols - 1),
+                      height_ratios=[1] + [9] * (nrows - 1))
+            axs = fig.subplot_mosaic(mosaic,
+                                     gridspec_kw=kw)
+            iplot = 0
             for iax, (aname, ax) in enumerate(axs.items()):
-                exclude, axcfg = aname.split("_")
+                pcfg = aname.split("/")
+                if pcfg[0] == "col_title":
+                    mod = pcfg[1]
+                    model = "Univariate" if re.search("univ", mod) else "Multivariate"
+                    model += " model"
+                    ax.text(0.5, 0.5, model,
+                            va="center", ha="center",
+                            fontsize="x-large",
+                            fontweight="bold")
+                    ax.axis("off")
+                    continue
+
+                elif pcfg[0] == "row_title":
+                    exclude = pcfg[1]
+                    if exclude == "NONE":
+                        exctxt = "Fitting using all data"
+                    else:
+                        ev = int(re.sub("-.*", "", exclude)) + 1
+                        exctxt = f"Fitting without {ev} flood"
+
+                    ax.text(0.5, 0.5, exctxt,
+                            va="center", ha="center",
+                            fontweight="bold",
+                            fontsize="x-large",
+                            rotation=90)
+                    ax.axis("off")
+                    continue
+
+                exclude, mod = pcfg[1:]
 
                 # Find tasks
-                if re.search("univ", axcfg):
+                if re.search("univ", mod):
                     model = "Univariate"
                     cs = "Univariate"
                 else:
@@ -144,7 +177,7 @@ def process(config, script_paths, logger, data):
                         model += " with AWRAL covariate"
                     cs = copula_spec
 
-                prior = "uninformative" if re.search("noninf", axcfg) \
+                prior = "uninformative" if re.search("noninf", mod) \
                     else "informative"
 
                 group = stationid if model == "Univariate" else grp_mv
@@ -168,7 +201,7 @@ def process(config, script_paths, logger, data):
                     continue
 
                 df = ffa.loc[idx].copy()
-                ERI = df.VARIABLE.replace(".*ERI|\.$", "", regex=True)
+                ERI = df.VARIABLE.replace(".*ERI|\\.$", "", regex=True)
                 df.loc[:, "ERI"] = ERI.astype(float)
 
                 # Get data
@@ -223,24 +256,34 @@ def process(config, script_paths, logger, data):
                                                   facecolor="tab:blue",
                                                   edgecolor="k")
 
-                if re.search("univ", axcfg):
-                    freqplots.plot_marginal_cdf(ax, gev, fptype,
-                                                label="LH moment fit",
-                                                linestyle="--")
+                # plot LH moment fit
+                #if re.search("univ", mod):
+                #    freqplots.plot_marginal_cdf(ax, gev, fptype,
+                #                                label="LH moment fit",
+                #                                linestyle="--")
 
-                if exclude == "NONE":
-                    exctxt = "Fitting using all data"
+                if iplot >= ncols - 1:
+                    xlab = "Gumbel reduced variable $-log(-log(P))$ [-]"
+                    xticks = None
                 else:
-                    ev = int(re.sub("-.*", "", exclude)) + 1
-                    exctxt = f"Fitting without {ev} flood"
+                    xlab = ""
+                    xticks = []
 
-                title = f"({letters[iax]}) {exctxt} - {model}"
-                xlab = "Gumbel reduced variable $-log(-log(P))$ [-]" if iax >=  ncols else ""
-                ylab = "Peak flow [m3.s-1]" if iax % ncols == 0 else ""
+                if iplot % (ncols - 1) == 0:
+                    ylab = "Peak flow [m3.s-1]"
+                    yticks = None
+                else:
+                    ylab = ""
+                    yticks = []
+
                 ylim = (0, peaks.max() * 1.3)
-                ax.set(ylabel=ylab, xlabel=xlab,
+                ax.set(xlabel=xlab,
+                       ylabel=ylab,
                        ylim=ylim)
-                ax.set_title(title, fontsize="large")
+                if xticks is not None:
+                    ax.set_xticks(xticks)
+                if yticks is not None:
+                    ax.set_yticks(yticks)
 
                 retp = [10, 100, 500]
                 aeps, xpos = freqplots.add_aep_to_xaxis(ax, fptype, True, retp)
@@ -258,18 +301,25 @@ def process(config, script_paths, logger, data):
                 design = pd.DataFrame(design).T
                 design.loc["CI90", :] = design.loc["95%"] - design.loc["5%"]
 
-                txt = f"Flow [1% AEP] = {design.loc[cn_pp, 'q']:0.0f}"
-                txt += f" $\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
+                txt = f"({letters[iplot]})"
+                ytxt = 0.96
                 kw = dict(va="top", ha="left", transform=ax.transAxes,
                           fontsize="large",
                           fontdict = {"family": "monospace"})
-                ytxt = 0.97
+                ax.text(0.03, ytxt, txt, **kw)
+
+                txt = f"Flow [1% AEP] = {design.loc[cn_pp, 'q']:0.0f}"
+                txt += f" $\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
+                dy = 0.06
+                ytxt -= dy
                 ax.text(0.03, ytxt, txt, **kw)
 
                 txt = f"Stage[1% AEP] = {design.loc[cn_pp, 'h']:0.1f}"
                 txt += f" $\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
-                ytxt = 0.9
+                ytxt -= dy
                 ax.text(0.03, ytxt, txt, fontweight="bold", **kw)
+
+                iplot += 1
 
             basename = script_paths.basename
             use_a = config.use_awra
