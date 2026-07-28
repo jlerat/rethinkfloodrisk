@@ -33,6 +33,8 @@ from hydrodiy.io import csv, iutils
 from hydrodiy.plot import violinplot
 
 from pyrethink import datahub
+from floodstan import marginals
+from pyrethink import copulas
 
 from floodstan import freqplots
 
@@ -47,15 +49,16 @@ spec.loader.exec_module(copulafit)
 def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
     fsum = froot / "outputs" / f"copulaprocess2_v{config.version}"
+    fparams = froot / "outputs" / f"copulafit_v{config.version}"
 
     basename = source_file.stem
     fimg = froot / "images" / "manuscript" / basename
 
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
-                     "froot", "fsum", "fimg"])
+                     "froot", "fsum", "fparams", "fimg"])
     script_paths = SP(source_file, basename, froot,
-                      fsum, fimg)
+                      fsum, fparams, fimg)
 
     fimg.mkdir(exist_ok=True)
     if config.clean:
@@ -84,12 +87,14 @@ def get_data(config, script_paths, logger):
     exclude = config.exclude
     awra_covariate = config.awra_covariate
     group = config.group
+    stationids = group.split("-")
     taskid = opm.find(prior=prior,
                       copula_spec=copula_spec,
                       exclude=exclude,
                       awra_covariate=awra_covariate,
                       group= f"^{group}$")
     taskid = next(t for t in taskid)
+    task = opm.get_task(taskid)
 
     obs_data, _, _, stations = datahub.get_ams_concat()
 
@@ -101,12 +106,79 @@ def get_data(config, script_paths, logger):
         f"copulaprocess_sum_ffa_TASK{taskid}.csv"
     sum_ffa, _ = csv.read_csv(fa)
 
+    # Get parameters and sample
+    fs = script_paths.fimg / "conditional_samples.csv"
+    fz = fs.parent / f"{fs.stem}.zip"
+    if not fz.exists():
+        nsta = len(stationids) + (1 if awra_covariate else 0)
+        cop = copulas.factory(copula_spec, nsta)
+
+        # Set conditional and target variables
+        scond = "203010"
+        icond = stationids.index(scond)
+        starg = ["203014", "203024"]
+        itarg = [stationids.index(s) for s in starg]
+
+        # Compute posterior conditional flow for conditional variable
+        aricond = 100
+        marginal = marginals.factory(task.context["marginal_name"])
+        qcond = sum_ffa.loc[sum_ffa.ERI == f"DESIGN_ERI{aricond}",
+                            f"{scond}_POSTERIOR_PREDICTIVE"].squeeze()
+
+        fp = script_paths.fparams / f"TASK{taskid}" / \
+            f"copulafit_samples_TASK{taskid}.zip"
+        params = pd.read_csv(fp, skiprows=15)
+        if config.debug:
+            params = params.iloc[:1000]
+
+        samples_cond = pd.DataFrame(columns=starg + [scond], index=params.index)
+        samples_cond.loc[:, scond] = qcond
+
+        for ismp, smp in params.iterrows():
+            if ismp % 100 == 0:
+                logger.info(f"Sampling conditional {ismp} / {len(params)}")
+
+            # retrieve correlation matrix
+            if re.search("Factor", copula_spec):
+                is_factor = True
+                nf = cop.copula_nfactors
+                zrhos = smp.filter(regex="zrhos").values.reshape((nsta, nf + 1))
+                cop.set_params_via_zrhos(zrhos)
+            else:
+                is_factor = False
+                corr = smp.filter(regex="corr_IW").values.reshape((nsta, nsta)).T
+                cop.params = corr
+
+            p = smp.filter(regex=f"y(l|sh).*\\[{icond + 1}\\]")
+            marginal.params = p
+            zcond = cop.marginal_ppf(marginal.cdf(qcond))
+            ztarg = cop.sample_conditional([icond], np.array([zcond]))
+            utarg = cop.marginal_cdf(ztarg)
+
+            for j, sid in enumerate(starg):
+                itarg = stationids.index(sid)
+                p = smp.filter(regex=f"y(l|sh).*\\[{itarg + 1}\\]")
+                marginal.params = p
+                samples_cond.loc[ismp, sid] = marginal.ppf(utarg[j])
+
+        # Sum of conditional samples
+        samples_cond.loc[:, f"{group}_SUM"] = samples_cond.sum(axis=1)
+
+        csv.write_csv(samples_cond, fs, "Conditional samples",
+                      script_paths.source_file,
+                      compress=True, write_index=False,
+                      lineterminator="\n")
+    else:
+        logger.info("Loading samples conditional")
+        samples_cond, _ = csv.read_csv(fs)
+
+
     DT = namedtuple("Data", ["stations", "obs_data",
                              "sum_samples", "sum_ffa",
-                             "options"])
+                             "options", "samples_cond"])
     return DT(stations, obs_data,
               sum_samples, sum_ffa,
-              opm)
+              opm, samples_cond)
 
 
 def process(config, script_paths, logger, data):
@@ -120,16 +192,14 @@ def process(config, script_paths, logger, data):
 
     # plot
     plt.close("all")
-    mosaic = [["FFA", "BARPLOT"]]
+    mosaic = [["FFA", "SCATTER"]]
     ncols, nrows = len(mosaic[0]), len(mosaic)
     figsize = (ncols * config.awidth, nrows * config.aheight)
     fig = plt.figure(figsize=figsize, layout="compressed")
     kw = dict(width_ratios=[1., 1.])
     axs = fig.subplot_mosaic(mosaic,
-                             gridspec_kw=kw,
-                             per_subplot_kw={
-                                 "BARPLOT": {"projection": "3d"}
-                             })
+                             gridspec_kw=kw)
+
     # FFA plot
     aris = np.logspace(math.log10(3), math.log10(300), 500)
     qt = sum_samples.filter(regex="SAMPLE", axis=1).quantile(1 - 1. / aris, axis=0)
@@ -154,6 +224,8 @@ def process(config, script_paths, logger, data):
     aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, return_periods=retp)
     xa, xb = ax.get_ylim()
     ya, yb = ax.get_ylim()
+
+    retp, xpos = [retp[-1]], [xpos[-1]]
     for r, x in zip(retp, xpos):
         ia = aris[np.argmin(np.abs(aris - r))]
         v2 = qt.loc[ia, cns2]
@@ -180,62 +252,44 @@ def process(config, script_paths, logger, data):
     ax.set_xticks(np.arange(1, 7))
     ax.legend(loc=2)
 
-    title = "(a) Frequency curves for sum of flows\n"\
-            + "and sum of frequency curves"
+    title = "(a) Quantiles of flow sum and sum of quantiles"
     ax.set_title(title)
     ax.set_ylabel("Streamflow [$m^3.s^{-1}$]")
 
-    # BARPLOT plot
-    ax = axs["BARPLOT"]
+    # scatter plot
+    ax = axs["SCATTER"]
 
-    # .. compute aeps
+    # .. compute aep of sum corresponding to 1:100
     df = sum_samples.filter(regex="^[\d].*_S", axis=1)
     df.columns = [re.sub("_.*", "", cn) for cn in df.columns]
     cns1 = re.sub("_.*", "", cns1)
 
-    cst = 0.3
-    nsamples = len(df)
-    ppos = (df.rank() - cst) / (nsamples + 1 - 2 * cst)
-
-    ps = ppos.loc[:, cns1]
-
     aep = 100
     th = df.loc[:, cns1].quantile(1 - 1. / aep)
-    diff =  np.abs(df.loc[:, cns1] - th)
-    nselect = 40
-    idx = diff.rank() < nselect
-    logger.info(f"Barplot - max error = {diff.loc[idx].max():0.2f} m3.s-1")
 
-    aeps = (1 - ppos.loc[idx].drop(cns1, axis=1)) * 100
-    ddf = df.loc[idx].drop(cns1, axis=1)
+    # .. get conditional samples that match sum = th
+    samples_cond = data.samples_cond
+    cn = next(cn for cn in samples_cond.columns if cn.endswith("SUM"))
+    diff =  np.abs(samples_cond.loc[:, cn] - th)
+    tol = 10
+    idx = (diff < tol)
+
+    logger.info(f"Scatter plot", nret=1)
+    logger.info(f"\tQ{aep} = {th:0.1f}")
+    logger.info(f"\tmax error = {diff.max():0.2f} m3.s-1")
+    cc = [cn for cn in df.columns if cn not in [group, cns1]]
+    ddf = samples_cond.iloc[idx, :2]
+
     x = np.arange(len(ddf))
-    norm = Normalize(vmin=0, vmax=2)
-    cmap = plt.cm.PiYG
+    norm = Normalize(vmin=0, vmax=6)
+    cmap = plt.cm.Reds_r
 
-    for i, (cn, se) in enumerate(ddf.items()):
-        col = [cmap(norm(a)) for a in aeps.loc[:, cn]]
-        ax.bar(x, se, zs=i, zdir="y", color=col, alpha=0.8)
+    ax.scatter(ddf.iloc[:, 0], ddf.iloc[:, 1], alpha=0.3)
 
-    ax.view_init(elev=30, azim=50, roll=0)
-
-    ax.set_yticks(np.arange(ddf.shape[1]))
-    ax.set_yticklabels(ddf.columns)
-    ax.set_xticks([])
-    ax.set_zticks(np.arange(0, 2000, 500))
-    title = "(b) Flow values which sum\nhas a 1% AEP"
-    ax.set(xlabel="Samples",
-           zlabel="Streamflow [$m^3.s^{-1}$]",
+    title = "(b) Flows with a sum having a 1% AEP"
+    ax.set(xlabel="Random samples",
+           ylabel="Streamflow [$m^3.s^{-1}$]",
            title=title)
-
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-    cm = fig.colorbar(sm, ax=ax, extend="max",
-                      shrink=0.5)
-    cm.ax.set_yticks([0.2, 1, 2])
-    cm.ax.set_yticklabels(["1:500", "1:100", "1:50"], fontsize="small")
-    cm.ax.set_title("Marginal\nAEP", fontsize="small")
-
-    ax.set_box_aspect(None, zoom=1.1)
-    ax.set_proj_type("ortho")
 
     # save
     fp = f"{script_paths.basename}_v{config.version}.png"
