@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import percentileofscore
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
@@ -30,7 +31,7 @@ import matplotlib as mpl
 mpl.rcParams["axes3d.mouserotationstyle"] = "azel"
 
 from hydrodiy.io import csv, iutils
-from hydrodiy.plot import violinplot
+from hydrodiy.plot import putils
 
 from pyrethink import datahub
 from floodstan import marginals
@@ -220,13 +221,13 @@ def process(config, script_paths, logger, data):
                                       label=lab, color="tab:red",
                                       center_column=cns2, lw=2)
 
-    retp = [10, 100]
-    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, return_periods=retp)
+    return_periods_plotted = [10, 100]
+    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, return_periods=return_periods_plotted)
     xa, xb = ax.get_ylim()
     ya, yb = ax.get_ylim()
 
-    retp, xpos = [retp[-1]], [xpos[-1]]
-    for r, x in zip(retp, xpos):
+    return_periods_plotted, xpos = [return_periods_plotted[-1]], [xpos[-1]]
+    for r, x in zip(return_periods_plotted, xpos):
         ia = aris[np.argmin(np.abs(aris - r))]
         v2 = qt.loc[ia, cns2]
         r1 = qt.loc[np.abs(qt.loc[:, cns1] - v2).idxmin()].name
@@ -252,7 +253,8 @@ def process(config, script_paths, logger, data):
     ax.set_xticks(np.arange(1, 7))
     ax.legend(loc=2)
 
-    title = "(a) Quantiles of flow sum and sum of quantiles"
+    title = "(a) Quantiles of inflow sum versus\n" \
+            + "sum of quantiles at inflow stations"
     ax.set_title(title)
     ax.set_ylabel("Streamflow [$m^3.s^{-1}$]")
 
@@ -265,32 +267,43 @@ def process(config, script_paths, logger, data):
     cns1 = re.sub("_.*", "", cns1)
 
     aep = 100
-    th = df.loc[:, cns1].quantile(1 - 1. / aep)
+    qref = df.loc[:, cns1].quantile(1 - 1. / aep)
 
-    # .. get conditional samples that match sum = th
+    # .. get conditional samples that match sum = qref
     samples_cond = data.samples_cond
     cn = next(cn for cn in samples_cond.columns if cn.endswith("SUM"))
-    diff =  np.abs(samples_cond.loc[:, cn] - th)
-    tol = 10
-    idx = (diff < tol)
+    diff =  np.abs(samples_cond.loc[:, cn] - qref)
+    idx = diff.nsmallest(500).index
+    samples_cond = samples_cond.iloc[idx, :2].reset_index(drop=True)
 
     logger.info(f"Scatter plot", nret=1)
-    logger.info(f"\tQ{aep} = {th:0.1f}")
-    logger.info(f"\tmax error = {diff.max():0.2f} m3.s-1")
-    cc = [cn for cn in df.columns if cn not in [group, cns1]]
-    ddf = samples_cond.iloc[idx, :2]
+    logger.info(f"\tQ{aep} = {qref:0.1f}")
+    logger.info(f"\tNcond = {len(idx)}")
+    logger.info(f"\tmax error = {diff.loc[idx].max():0.2f} m3.s-1")
 
-    x = np.arange(len(ddf))
-    norm = Normalize(vmin=0, vmax=6)
-    cmap = plt.cm.Reds_r
+    # .. compute aep
+    probs = samples_cond.copy()
+    aeps = samples_cond.copy()
+    for stationid, se in samples_cond.items():
+        p = percentileofscore(sum_samples.loc[:, f"{stationid}_SAMPLE"], se) / 100
+        probs.loc[:, stationid] = p
+        aeps.loc[:, stationid] = -np.log(-np.log(p))
 
-    ax.scatter(ddf.iloc[:, 0], ddf.iloc[:, 1], alpha=0.3)
+    bins = np.linspace(1, 6, 50)
+    aeps.columns = [f"{cn}  mean(aep)=1:{1/(1 - probs.loc[:, cn].mean()):0.1f}"
+                    for cn in aeps.columns]
+    aeps.plot.hist(bins=bins, ax=ax, edgecolor="0.5", alpha=0.5,
+                   legend=False)
 
-    title = "(b) Flows with a sum having a 1% AEP"
-    ax.set(xlabel="Random samples",
-           ylabel="Streamflow [$m^3.s^{-1}$]",
+    title = "(b) AEP of two secondary tributaries if both the\n"\
+            "flow sum and the dominant tributary have an AEP of 1:100"
+    ax.set(ylabel="Sample count [-]",
            title=title)
 
+    freqplots.set_xlabel(ax, ptype)
+    aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype,
+                                            return_periods=return_periods_plotted)
+    ax.legend(loc=2, framealpha=1.)
     # save
     fp = f"{script_paths.basename}_v{config.version}.png"
     fp = script_paths.fimg / fp
