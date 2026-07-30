@@ -28,7 +28,6 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 
 import matplotlib as mpl
-mpl.rcParams["axes3d.mouserotationstyle"] = "azel"
 
 from hydrodiy.io import csv, iutils
 from hydrodiy.plot import putils
@@ -41,10 +40,7 @@ from floodstan import freqplots
 
 import importlib.util
 
-ffit = Path(__file__).resolve().parent.parent / "fit" / "copulafit.py"
-spec = importlib.util.spec_from_file_location("copulafit", ffit)
-copulafit = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(copulafit)
+from figA_impact_of_period_on_FFA import copulafit
 
 
 def get_script_paths(config, source_file):
@@ -205,7 +201,7 @@ def process(config, script_paths, logger, data):
     aris = np.logspace(math.log10(3), math.log10(300), 500)
     qt = sum_samples.filter(regex="SAMPLE", axis=1).quantile(1 - 1. / aris, axis=0)
     qt = pd.DataFrame(qt.values, columns=qt.columns, index=aris)
-    df = qt.filter(regex="\d_SAMPLE", axis=1)
+    df = qt.filter(regex="\\d_SAMPLE", axis=1)
     qt.loc[:, "SUM_QT"] = df.sum(axis=1)
 
     ptype = "gumbel"
@@ -262,7 +258,7 @@ def process(config, script_paths, logger, data):
     ax = axs["SCATTER"]
 
     # .. compute aep of sum corresponding to 1:100
-    df = sum_samples.filter(regex="^[\d].*_S", axis=1)
+    df = sum_samples.filter(regex="^[\\d].*_S", axis=1)
     df.columns = [re.sub("_.*", "", cn) for cn in df.columns]
     cns1 = re.sub("_.*", "", cns1)
 

@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import percentileofscore
 
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
@@ -36,225 +37,224 @@ from hydrodiy.plot import putils
 
 from pyrethink import datahub
 from pyrethink import sample
-from pyrethink import marginal_exceedance_score as mes
-from pyrethink.marginal_exceedance_score import MARGINAL_EXCEEDANCE_SCORE_KINDS\
-    as MEXS_KINDS
 from floodstan import marginals
 
-import figA_impact_of_period_on_FFA
-from figA_impact_of_period_on_FFA import get_script_paths
-from figA_impact_of_period_on_FFA import get_logger, get_taskids, get_data
-from figA_impact_of_period_on_FFA import get_iter_options, select_data
+from figA_impact_of_period_on_FFA import get_logger
+from figA_impact_of_period_on_FFA import copulafit
 
-# Schematic
-RIVERS = {
-    "richmond": [
-        [0.026, 0.876],
-        [0.144, 0.815],
-        [0.144, 0.556],
-        [0.535, 0.369],
-        [0.535, 0.303],
-        [0.590, 0.274],
-        [0.683, 0.351]
-        ],
-    "wilsons": [
-        [0.867, 0.776],
-        [0.540,	0.580],
-        [0.535,	0.369]
-        ],
-    "leycester": [
-        [0.272, 0.725],
-        [0.540,	0.580]
-        ],
-    "coopers": [
-        [0.687, 0.670],
-        [0.791,	0.907]
-        ]
-    }
+X_FLOW_SUM = 153.2720137
+Y_FLOW_SUM = -28.8171849
 
-STATIONS = {
-        "203004": [0.200, 0.532],
-        "203005": [0.144, 0.815],
-        "203010": [0.336, 0.694],
-        "203014": [0.754, 0.707],
-        "203012": [0.867, 0.776],
-        "203002": [0.773, 0.873]
-    }
+def get_script_paths(config, source_file):
+    froot = source_file.parent.parent.parent
+    fdata = froot / "data"
+    fsum = froot / "outputs" / f"copulaprocess2_v{config.version}"
+
+    basename = source_file.stem
+    fimg = froot / "images" / "manuscript" / basename
+
+    SP = namedtuple("ScriptPaths",
+                    ["source_file", "basename",
+                     "froot", "fsum", "fdata", "fimg"])
+    script_paths = SP(source_file, basename, froot,
+                      fsum, fdata, fimg)
+
+    fimg.mkdir(exist_ok=True)
+    if config.clean:
+        for f in fimg.glob("*"):
+            for ff in f.glob("*.*"):
+                ff.unlink()
+            if f.is_dir():
+                f.rmdir()
+            else:
+                f.unlink()
+
+    return script_paths
+
+
+def get_data(config, script_paths, logger):
+    opm = copulafit.get_options(config.version)
+    prior = "uninformative"
+    copula_spec = config.copula_spec
+    exclude = config.exclude
+    awra_covariate = True
+    group = config.group
+    stationids = group.split("-")
+    taskid = opm.find(prior=prior,
+                      copula_spec=copula_spec,
+                      exclude=exclude,
+                      awra_covariate=awra_covariate,
+                      group= f"^{group}$")
+    taskid = next(t for t in taskid)
+    task = opm.get_task(taskid)
+
+    obs_data, _, _, stations = datahub.get_ams_concat()
+    obs_data = obs_data.loc[:, stationids]
+    obs_data.loc[:, "YEAR"] = obs_data.index + 1
+    obs_data = obs_data.set_index("YEAR")
+
+    stations = stations.loc[stationids]
+
+    fs = script_paths.fdata / "schematic_rivers.geojson"
+    with fs.open("r") as fo:
+        rivers = json.load(fo)["features"]
+
+    fs = script_paths.fsum / f"TASK{taskid}" / \
+        f"copulaprocess_sum_samples_TASK{taskid}.csv"
+    sum_samples, _ = csv.read_csv(fs)
+
+    DT = namedtuple("Data", ["stations", "obs_data",
+                             "sum_samples", "rivers"])
+    return DT(stations, obs_data,
+              sum_samples, rivers)
 
 
 def process(config, script_paths, logger, data):
-    for pcensor, rho_min, has_cluster, copula_shape in get_iter_options(data):
-        _, obs_data, mvnproc, expected, _ = select_data(data,
-                                                        pcensor=pcensor,
-                                                        rho_min=rho_min,
-                                                        has_cluster=has_cluster,
-                                                        copula_shape=copula_shape)
-        if len(mvnproc) == 0:
+    ams = data.obs_data
+    ams = ams.loc["1999":]
+
+    stations = data.stations
+    stationids = list(stations.index)
+    sum_samples = data.sum_samples
+    rivers = data.rivers
+
+    nstations = len(stations)
+    nval = len(ams)
+    aeps = pd.DataFrame(np.nan,
+                        index=ams.index,
+                        columns=stationids + ["", "Gauged\nInflows"])
+    for stationid in aeps.columns:
+        if stationid in stationids:
+            s = sum_samples.loc[:, f"{stationid}_SAMPLE"]
+            a = ams.loc[:, stationid]
+        elif stationid.startswith("Gauged"):
+            s = sum_samples.loc[:, f"{config.group}_SUM_SAMPLE"]
+            a = ams.loc[:, stationids].sum(axis=1)
+        else:
+            continue
+        p = percentileofscore(s, a)
+        aeps.loc[:, stationid] = 100 - p
+
+    # Configure
+    ncols_years = config.ncols_years
+    nev = len(config.years)
+    nrows = nev // ncols_years + (nev % ncols_years != 0)
+    mosaic = [["grid"] + [config.years[ir * ncols_years + ic]
+                          for ic in range(ncols_years)]
+              for ir in range(nrows)]
+    nrows = len(mosaic)
+    plt.close("all")
+    fig = plt.figure(figsize=((ncols_years + 1) * awidth,
+                              nrows * aheight),
+                     layout="constrained")
+    wr = [1] + [1.5] * ncols_years
+    kw = dict(hspace=0.15, wspace=0.05, width_ratios=wr)
+    axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
+
+    for iax, (aname, ax) in enumerate(axs.items()):
+        logger.info(f"Plotting {aname}", ntab=1)
+
+        if aname == "grid":
+            im = ax.imshow(aeps, cmap="Reds_r",
+                           vmin=0, vmax=config.aep_max)
+
+            # Show AEP values
+            #for i in np.arange(nval):
+            #    a = aeps[i, -1]
+            #    if a > 20:
+            #        continue
+            #    ax.text(nstations + 1, i, f"{a:0.1f}",
+            #            color="w", ha="center",
+            #            va="center", fontweight="bold",
+            #            fontsize="x-small")
+
+            labs = aeps.columns.to_list()
+            ax.set_xticks(np.arange(len(labs)),
+                          labels=labs,
+                          rotation=90)
+            ax.set_yticks(np.arange(nval), labels=ams.index)
+
+            xtk = list(range(nstations)) + [nstations + 1]
+            ax.set_xticks(xtk)
+
+            cbar = fig.colorbar(im,
+                                ticks=np.arange(10, config.aep_max, 10),
+                                shrink=0.5)
+            cbar.ax.set(title="AEP\n[%]")
+            ax.set(title=f"({letters[iax]}) AEP from posterior\n"
+                         + "predictive distribution")
             continue
 
-        assert len(mvnproc) == 1
+        year = aname
 
-        rn = next(rn for rn in mvnproc if rn.exclude == "NONE")
+        # River lines
+        for river in data.rivers:
+            pts = np.array(river["geometry"]["coordinates"])[0]
+            ax.plot(pts[:, 0], pts[:, 1], "-",
+                    color=config.river_color,
+                    lw=8, solid_capstyle="round")
 
-        logger.info(f"-- Plotting {rn.text} --", nret=1)
+        # Stations
+        for sid, sinfo in data.stations.iterrows():
+            # AEP data
+            pm = aeps.loc[year, sid]
 
-        ams = obs_data[rn].set_index("WATER_YEAR")
-        stationids = ams.columns
-        nstations = len(stationids)
+            # Station data
+            x = sinfo.loc["LONGITUDE[arc_degree]"]
+            y = sinfo.loc["LATITUDE[arc_degree]"]
+            col = cm.Reds_r(Normalize(vmin=0, vmax=config.aep_max)(pm))
+            ax.plot(x, y, "o",
+                    ms=14, mec="w", mfc=col,
+                    markeredgewidth=2)
 
-        mvnproc = mvnproc[rn]
-        #expected = expected[rn]
+            xy = [x, y]
+            delta = 18
+            txt = f"{sid}\n" if year == config.years[0] else ""
+            txt += f"{pm:0.1f}%"
 
-        ## Dependence
-        #cop = mes.GaussianCopula(nstations)
-        #cor = pd.Series(expected["corr_IW"]).values.reshape((nstations, nstations))
-        #cop.params = cor
-        #cop.logger = logger
+            if sid == "203014":
+                xytext = [delta, -1.5 * delta]
+                va = "top"
+                ha = "left"
+            elif sid == "203024":
+                xytext = [-delta, delta]
+                va = "bottom"
+                ha = "right"
+            else:
+                xytext = [delta, delta]
+                va = "bottom"
+                ha = "left"
 
-        ## Historical grid
-        ## nstations + multivar
-        #nval = len(ams)
-        #marg_cdf = np.nan * np.zeros((nval, nstations))
-        #aep = np.zeros(nval)
-        #gev = marginals.GEV()
+            ax.annotate(txt, xy,
+                        ha=ha, va=va,
+                        xytext=xytext,
+                        fontsize="large",
+                        textcoords="offset pixels")
 
-        #for k in range(nstations):
-        #    gev.locn = expected["ylocs"][f"ylocn[{k + 1}]"]
-        #    gev.logscale = expected["ylogscales"][f"ylogscale[{k + 1}]"]
-        #    gev.shape1 = expected["yshape1"][f"yshape1[{k + 1}]"]
-        #    marg_cdf[:, k] = gev.cdf(ams.iloc[:, k])
+        ax.axis("off")
 
-        #aeps = np.nan * np.zeros((nval, nstations + 2))
-        ## .. marginal aeps
-        #aeps[:, :nstations] = (1 - marg_cdf) * 1e2
-        ## .. joint aep
-        #aeps[:, -1] = cop.aep(marg_cdf, "KENDALL") * 1e2
+        pm = aeps.loc[year, "Gauged\nInflows"]
+        txt = f"Lismore gauged inflows\n" if year == config.years[0] else ""
+        txt += f"{pm:4.1f}%"
+        x0 = X_FLOW_SUM
+        y0 = Y_FLOW_SUM
+        ax.plot(x0, y0, "o",
+                ms=14, mec="w", mfc=col,
+                markeredgewidth=2)
+        xytext = (delta, -delta)
+        ax.annotate(txt, (x0, y0),
+                    ha="left", va="top",
+                    xytext=xytext,
+                    fontsize="large",
+                    textcoords="offset pixels")
 
-        nval = len(ams)
-        aeps = np.nan * np.zeros((nval, nstations + 2))
-        for iyear, year in enumerate(ams.index):
-            for ista, stationid in enumerate(stationids):
-                lp = mvnproc.loc[:, f"G{stationid}_ams_UNIV_{year - 1}_log10aep"]
-                aeps[iyear, ista] = (10**lp).mean() * 1e2
+        ax.set_title(f"({letters[iax]}) Details of {year} AEPs",
+                     x=0.01, y=1, ha="left", va="top")
 
-            lp = mvnproc.loc[:, f"GALL_ams_KENDALL_{year - 1}_log10aep"]
-            aeps[iyear, -1] = (10**lp).mean() * 1e2
-
-        # Configure
-        ncols_years = config.ncols_years
-        nev = len(config.years)
-        nrows = nev // ncols_years + (nev % ncols_years != 0)
-        mosaic = [["grid"] + [config.years[ir * ncols_years + ic]
-                              for ic in range(ncols_years)]
-                  for ir in range(nrows)]
-        nrows = len(mosaic)
-        plt.close("all")
-        fig = plt.figure(figsize=((ncols_years + 1) * awidth,
-                                  nrows * aheight),
-                         layout="constrained")
-        wr = [1] + [1.5] * ncols_years
-        kw = dict(hspace=0.05, wspace=0.05, width_ratios=wr)
-        axs = fig.subplot_mosaic(mosaic, gridspec_kw=kw)
-
-        for iax, (aname, ax) in enumerate(axs.items()):
-            logger.info(f"Plotting {aname}", ntab=1)
-
-            if aname == "grid":
-                im = ax.imshow(aeps, cmap="Reds_r",
-                               vmin=0, vmax=config.aep_max)
-
-                # Show AEP values
-                #for i in np.arange(nval):
-                #    a = aeps[i, -1]
-                #    if a > 20:
-                #        continue
-                #    ax.text(nstations + 1, i, f"{a:0.1f}",
-                #            color="w", ha="center",
-                #            va="center", fontweight="bold",
-                #            fontsize="x-small")
-
-                labs = ams.columns.to_list() + ["", "Multiv. K."]
-
-                ax.set_xticks(np.arange(nstations + 2),
-                              labels=labs,
-                              rotation=90)
-                ax.set_yticks(np.arange(nval), labels=ams.index)
-
-                cbar = fig.colorbar(im,
-                                    ticks=np.arange(10, config.aep_max, 10),
-                                    shrink=0.5)
-                cbar.ax.set(title="AEP\n[%]")
-                ax.set(title=f"({letters[iax]}) Expected AEP")
-                continue
-
-            year = aname
-            # River lines
-            for rname, pts in RIVERS.items():
-                pts = np.array(pts)
-                ax.plot(pts[:, 0], pts[:, 1], "-",
-                        color=config.river_color,
-                        lw=8, solid_capstyle="round")
-
-            # Stations
-            for sid, pts in STATIONS.items():
-                # AEP data
-                cn = f"G{sid}_ams_UNIV_{year - 1}_log10aep"
-                p = 10**mvnproc.loc[:, cn]
-                pm = p.mean() * 100
-                ps = p.std() * 100
-
-                x, y = pts
-                col = cm.Reds_r(Normalize(vmin=0, vmax=config.aep_max)(pm))
-                ax.plot(x, y, "o",
-                        ms=14, mec="w", mfc=col,
-                        markeredgewidth=2)
-
-                xy = [x, y]
-                delta = 18
-                txt = f"({sid})\n" if year == config.years[0] else ""
-                txt += f"{pm:0.1f}% $\\pm$ {ps:0.1f}%"
-
-                if sid == "203014":
-                    xytext = [delta, -1.5 * delta]
-                    va = "top"
-                    ha = "left"
-                elif sid == "203002":
-                    xytext = [-delta, delta]
-                    va = "bottom"
-                    ha = "right"
-                else:
-                    xytext = [delta, delta]
-                    va = "bottom"
-                    ha = "left"
-
-                ax.annotate(txt, xy,
-                            ha=ha, va=va,
-                            xytext=xytext,
-                            textcoords="offset pixels")
-
-            ax.axis("off")
-
-            kind = "KENDALL"
-            cn = f"GALL_ams_{kind}_{year - 1}_log10aep"
-            p = 10**mvnproc.loc[:, cn]
-            pm = p.mean() * 100
-            ps = p.std() * 100
-            txt = "Multivariate 'KENDALL'\n"\
-                  + f"AEP = {pm:4.1f}% $\\pm$ {ps:4.1f}%"
-            x0 = 0.65
-            y0 = 0.35
-            ax.annotate(txt, (x0, y0),
-                        xycoords="axes fraction",
-                        ha="left", va="top",
-                        fontsize="large")
-
-            ax.set_title(f"({letters[iax]}) Details of {year} AEPs",
-                         x=0.01, y=1, ha="left", va="top")
-
-        basename = script_paths.basename
-        fp = f"{basename}_{rn.text}_v{config.version}.png"
-        fp = script_paths.fimg / fp
-        fig.savefig(fp, dpi=config.fdpi)
+    basename = script_paths.basename
+    fp = f"{basename}_v{config.version}.png"
+    fp = script_paths.fimg / fp
+    fig.savefig(fp, dpi=config.fdpi)
 
 
 if __name__ == "__main__":
@@ -264,54 +264,41 @@ if __name__ == "__main__":
 
     parser.add_argument("-v", "--version", help="version",
                         type=int, required=True)
-    parser.add_argument("-p", "--pcensor", help="Censoring threshold value",
-                        type=float, default=0.3)
     parser.add_argument("-d", "--debug", help="Debug mode",
                         action="store_true", default=False)
-    parser.add_argument("-r", "--rho_mins", help="Minimum rho value",
-                        type=str, default="-1")
-    parser.add_argument("-s", "--copula_shapes", help="Copula shapes selected",
-                        type=str, default="0")
+    parser.add_argument("-c", "--clean", help="Clean image folder",
+                        action="store_true", default=False)
+    parser.add_argument("-s", "--copula_spec", help="Copula specification selected",
+                        type=str, default="Gaussian")
     args = parser.parse_args()
 
     # Config
-    CF = namedtuple("Config", ["version", "pcensor", "rho_mins",
+    CF = namedtuple("Config", ["version", "group",
                                "awidth", "aheight", "fdpi",
                                "ncols_years",
-                               "excludes", "copula_shapes",
+                               "excludes", "copula_spec",
                                "debug", "diag",
-                               "load_obs_data",
-                               "load_ffa",
-                               "load_mvnproc",
-                               "load_expected_params",
-                               "load_postpred_checks",
                                "years", "exclude",
                                "river_color",
-                               "aep_max"])
-    awidth = 4
+                               "aep_max", "clean"])
+    awidth = 3.5
     aheight = 5
     fdpi = 300
     ncols_years = 1
-    load_ffa = False
-    load_obs_data = True
-    load_mvnproc = True
-    load_expected_params = True
-    load_postpred_checks = False
-    excludes = ["NONE"]
+    group = "203010-203014-203024"
+    excludes = "NONE"
     years = [2017, 2022]
     aep_max = 40
 
     river_color = "0.5"
 
-    config = CF(args.version, args.pcensor,
-                args.rho_mins.split("|"),
+    config = CF(args.version, group,
                 awidth, aheight, fdpi, ncols_years, excludes,
-                args.copula_shapes.split("|"),
+                args.copula_spec,
                 args.debug, False,
-                load_obs_data, load_ffa,
-                load_mvnproc, load_expected_params,
-                load_postpred_checks, years,
-                excludes, river_color, aep_max)
+                years,
+                excludes, river_color, aep_max,
+                args.clean)
 
     # Baseline
     source_file = Path(__file__).resolve()
