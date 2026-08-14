@@ -152,10 +152,10 @@ def process(config, script_paths, logger, data):
                 elif pcfg[0] == "row_title":
                     exclude = pcfg[1]
                     if exclude == "NONE":
-                        exctxt = "Fitting using all data"
+                        exctxt = f"Including {ev} flood"
                     else:
                         ev = int(re.sub("-.*", "", exclude)) + 1
-                        exctxt = f"Fitting without {ev} flood"
+                        exctxt = f"Excluding {ev} flood"
 
                     ax.text(0.5, 0.5, exctxt,
                             va="center", ha="center",
@@ -173,7 +173,7 @@ def process(config, script_paths, logger, data):
                     cs = "Univariate"
                 else:
                     model = "Multivariate"
-                    if config.use_awra:
+                    if not config.do_not_use_awra:
                         model += " with AWRAL covariate"
                     cs = copula_spec
 
@@ -181,7 +181,7 @@ def process(config, script_paths, logger, data):
                     else "informative"
 
                 group = stationid if model == "Univariate" else grp_mv
-                awra_covariate = False if model == "Univariate" else config.use_awra
+                awra_covariate = False if model == "Univariate" else not config.do_not_use_awra
 
                 taskid = options.find(prior=prior,
                                       copula_spec=cs,
@@ -228,7 +228,8 @@ def process(config, script_paths, logger, data):
                 for wy, xx, yy in zip(time, x, y):
                     if yy < ythresh:
                         continue
-                    txt = str(wy)
+                    # Add 1 because the data refers to water year
+                    txt = str(wy + 1)
                     ax.annotate(txt, xy=(xx, yy),
                                 xycoords="data",
                                 xytext=(40, -40),
@@ -309,22 +310,22 @@ def process(config, script_paths, logger, data):
                 ax.text(0.03, ytxt, txt, **kw)
 
                 txt = f"Flow [1% AEP] = {design.loc[cn_pp, 'q']:0.0f}"
-                txt += f" $\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
+                txt += f" $\\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
                 dy = 0.06
                 ytxt -= dy
                 ax.text(0.03, ytxt, txt, **kw)
 
                 txt = f"Stage[1% AEP] = {design.loc[cn_pp, 'h']:0.1f}"
-                txt += f" $\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
+                txt += f" $\\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
                 ytxt -= dy
                 ax.text(0.03, ytxt, txt, fontweight="bold", **kw)
 
                 iplot += 1
 
             basename = script_paths.basename
-            use_a = config.use_awra
+            no_a = config.do_not_use_awra
             use_i = config.use_informative
-            fp = f"{basename}_{stationid}_{copula_spec}_A{use_a}_I{use_i}_v{config.version}.png"
+            fp = f"{basename}_{stationid}_{copula_spec}_NoAWRA{no_a}_I{use_i}_v{config.version}.png"
             fp = script_paths.fimg / fp
             fp.parent.mkdir(exist_ok=True)
             fig.savefig(fp, dpi=config.fdpi)
@@ -341,7 +342,7 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-c", "--clean", help="Clean image folder",
                         action="store_true", default=False)
-    parser.add_argument("-a", "--use_awra", help="Use copula including awra covariate",
+    parser.add_argument("-na", "--do_not_use_awra", help="Use copula including awra covariate",
                         action="store_true", default=False)
     parser.add_argument("-i", "--use_informative", help="Use copula including informative prior",
                         action="store_true", default=False)
@@ -351,7 +352,7 @@ if __name__ == "__main__":
     CF = namedtuple("Config", ["version", "debug",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max", "excludes",
-                               "freq_plot_type", "use_awra",
+                               "freq_plot_type", "do_not_use_awra",
                                "use_informative", "clean"])
     awidth = 6
     aheight = 5
@@ -365,7 +366,8 @@ if __name__ == "__main__":
                 awidth, aheight, fdpi, ptype, ari_max,
                 excludes,
                 freq_plot_type,
-                args.use_awra, args.use_informative,
+                args.do_not_use_awra,
+                args.use_informative,
                 args.clean)
 
     # Baseline

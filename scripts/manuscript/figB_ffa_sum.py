@@ -26,6 +26,7 @@ import pandas as pd
 from scipy.stats import percentileofscore
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+import matplotlib.patheffects as pe
 
 import matplotlib as mpl
 
@@ -217,13 +218,15 @@ def process(config, script_paths, logger, data):
                                       label=lab, color="tab:red",
                                       center_column=cns2, lw=2)
 
-    return_periods_plotted = [10, 100]
+    return_periods_plotted = [10, 50, 100]
     aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype, return_periods=return_periods_plotted)
     xa, xb = ax.get_ylim()
     ya, yb = ax.get_ylim()
 
-    return_periods_plotted, xpos = [return_periods_plotted[-1]], [xpos[-1]]
     for r, x in zip(return_periods_plotted, xpos):
+        if r != 100:
+            continue
+
         ia = aris[np.argmin(np.abs(aris - r))]
         v2 = qt.loc[ia, cns2]
         r1 = qt.loc[np.abs(qt.loc[:, cns1] - v2).idxmin()].name
@@ -297,8 +300,18 @@ def process(config, script_paths, logger, data):
            title=title)
 
     freqplots.set_xlabel(ax, ptype)
+    col = "0.3"
+    kwp = {
+        "color": col
+        }
+    kwt = {
+        "color": col,
+        "path_effects": [pe.withStroke(linewidth=6, foreground="w")]
+        }
     aeps, xpos = freqplots.add_aep_to_xaxis(ax, ptype,
-                                            return_periods=return_periods_plotted)
+                                            return_periods=return_periods_plotted,
+                                            kwargs_plot=kwp,
+                                            kwargs_text=kwt)
     ax.legend(loc=2, framealpha=1.)
     # save
     fp = f"{script_paths.basename}_v{config.version}.png"

@@ -88,8 +88,9 @@ def get_data(config, script_paths, logger):
         else:
             idx &= pp.VARIABLE == config.univar_metric
             pp = pp.loc[idx].filter(regex="^(obs|simmean|simstd)", axis=1).squeeze()
-            df = pd.DataFrame({cn: np.nan for cn in cns}, index=stationids)
-            for ista, sid in enumerate(stationids):
+            sids = stationids + ["AWRA-L"]
+            df = pd.DataFrame({cn: np.nan for cn in cns}, index=sids)
+            for ista, sid in enumerate(sids):
                 for cn in cns:
                     df.loc[sid, cn] = pp.loc[f"{cn}[{ista + 1}]"]
             ppred[vtype] = df
@@ -105,9 +106,16 @@ def process(config, script_paths, logger, data):
     cc = ["NAME", "CATCHMENTAREA[km2]"]
     charac = stations.loc[:, cc]
     charac.loc[:, "RECORD_LENGTH[yr]"] = obs.notnull().sum()
+    dd = {
+          "NAME": "Lismore catchment",
+          "CATCHMENTAREA[km2]": 1390,
+          "RECORD_LENGTH[yr]": 110
+          }
+    charac.loc["AWRA-L"] = dd
 
     um = config.univar_metric
     pp = data.ppred["univ"]
+
     charac.loc[:, f"{um}_obs"] = pp.loc[:, "obs"].apply(lambda x: f"{x:0.2f}")
     fun = lambda x: f"{x.iloc[0]:0.2f} ±{x.iloc[1]:0.2f}"
     charac.loc[:, f"{um}_sim"] = pp.loc[:, ["simmean", "simstd"]].apply(fun, axis=1)
