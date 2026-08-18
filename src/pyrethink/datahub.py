@@ -85,7 +85,7 @@ def get_ams(stationid=None):
         with ZipFile(fz, "r") as archive:
             try:
                 ams, _ = csv.read_csv(fa0.name, archive=archive)
-            except:
+            except Exception:
                 errmsg = f"Cannot extract data for stationid {stationid}."
                 raise ValueError(errmsg)
 
