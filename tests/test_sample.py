@@ -132,6 +132,7 @@ def test_sample_data(pcensor, copula_spec, allclose):
     ])
 def test_sampler(is_censored, is_missing, nvars, copula_spec,
                  allclose, debug_mode):
+    logger = get_logger(debug_mode)
     data, _, _, _ = datahub.get_ams_concat()
     data = data.iloc[:, :nvars]
 
@@ -158,15 +159,24 @@ def test_sampler(is_censored, is_missing, nvars, copula_spec,
         f.unlink()
 
     # Sample arguments
-    nsmp = STAN_NSAMPLES_DEFAULT // STAN_NCHAINS_DEFAULT
+    if debug_mode:
+        nchains = 2
+        nsamples = 500
+        nwarm = 500
+    else:
+        nchains = STAN_NCHAINS_DEFAULT
+        nsamples = STAN_NSAMPLES_DEFAULT
+        nwarm = STAN_NWARM_DEFAULT
+
+    nsmp = nsamples // nchains
     kw = dict(data=stan_data,
               seed=SEED,
               iter_sampling=nsmp,
               output_dir=fout,
               inits=stan_inits,
-              chains=STAN_NCHAINS_DEFAULT,
-              parallel_chains=STAN_NCHAINS_DEFAULT,
-              iter_warmup=STAN_NWARM_DEFAULT,
+              chains=nchains,
+              parallel_chains=nchains,
+              iter_warmup=nwarm,
               show_progress=debug_mode)
 
     # Choose sampler
@@ -207,8 +217,8 @@ def test_sampler(is_censored, is_missing, nvars, copula_spec,
         else:
             # If there are problems, they should be only with zrhos
             dparams = re.sub("^[^:]+:", "", dtxt)
-            dparams = [re.sub("\\[.*", "", d) for d in dparams.split(",")]
-            assert all([re.search("zrhos", pn) for pn in dparams])
+            dparams = [re.sub("\\[.*", "", d).strip() for d in dparams.split("],")]
+            assert all([pn == "zrhos" for pn in dparams])
 
     if is_censored and is_missing and debug_mode:
         fd = fout / "censored_missing_data.zip"
