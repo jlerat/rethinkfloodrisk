@@ -89,7 +89,7 @@ def test_copulas(cspec, nstations, allclose):
     cop = copulas.factory(cspec, nstations)
     print(cop)
     cop.logger = LOGGER
-    cop.printlog = 1000
+    cop.printlog = 0
 
     rho = 0.95
     if cop.name in ["Gaussian", "Student"]:
@@ -173,6 +173,7 @@ def test_gaussian_cdf_and_pdf(nstations, rho, nfactors, allclose):
     u = expit(np.linspace(-10, 10, 20))
     atol = 5e-3
     for iu, uu in enumerate(u):
+        uu = np.atleast_1d(uu)
         c1 = rv.cdf(norm.ppf(uu) * np.ones((1, nstations)))
         c2 = cop.cdf_main_diagonal(uu)
         assert allclose(c1, c2, atol=atol)

@@ -70,7 +70,7 @@ def test_rating_curves(stationid):
 @pytest.mark.parametrize("stationid",
                          ["419005"] + datahub.get_stations().index.tolist())
 def test_ams(stationid):
-    with pytest.raises(ValueError, match="Cannot find ams data"):
+    with pytest.raises(ValueError, match="Cannot extract data"):
         ams = datahub.get_ams("bidule")
 
     ams = datahub.get_ams(stationid)
