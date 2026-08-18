@@ -12,6 +12,7 @@ __pycache__/
 *.log
 *.db
 tests/*.stat
+tests/snipets
 *.png
 tests/sampling/*
 src/pyrethink/stan/factors_correlation
