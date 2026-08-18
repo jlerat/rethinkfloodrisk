@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import pytest
 import subprocess
 
@@ -19,11 +20,16 @@ def test_readme_snipet():
         iend = istart + next(iline for iline, line in enumerate(txt[istart:])
                              if line.strip() == "```")
 
+        # Modify code if needed
+        # .. prevent stan showing progresses
+        snipet = [re.sub("show_progress=True", "show_progress=False", l)
+                  for l in txt[istart: iend]]
+
         # Write code
         fsn = FTEST / "snipets" / f"README_{isnip}.py"
         fsn.parent.mkdir(exist_ok=True)
         with fsn.open("w") as fo:
-            fo.write("".join(txt[istart: iend]))
+            fo.write("".join(snipet))
 
         # Style
         subprocess.run(["uv", "run", "ruff", "check", fsn], check=True)

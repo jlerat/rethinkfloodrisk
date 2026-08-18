@@ -158,7 +158,7 @@ def test_sampler(is_censored, is_missing, nvars, copula_spec,
         f.unlink()
 
     # Sample arguments
-    nsmp = STAN_NSAMPLES_DEFAULT//STAN_NCHAINS_DEFAULT
+    nsmp = STAN_NSAMPLES_DEFAULT // STAN_NCHAINS_DEFAULT
     kw = dict(data=stan_data,
               seed=SEED,
               iter_sampling=nsmp,
@@ -200,10 +200,15 @@ def test_sampler(is_censored, is_missing, nvars, copula_spec,
         json.dump(diag, fo, indent=4)
 
     for met in STAN_DIAG_METRICS:
-        # Skip rhat because some zrhos can be badly sampled
-        if met == "rhat":
+        dtxt = diag[met]
+        if dtxt == "satisfactory":
+            # All good
             continue
-        assert diag[met] == "satisfactory"
+        else:
+            # If there are problems, they should be only with zrhos
+            dparams = re.sub("^[^:]+:", "", dtxt)
+            dparams = [re.sub("\\[.*", "", d) for d in dparams.split(",")]
+            assert all([re.search("zrhos", pn) for pn in dparams])
 
     if is_censored and is_missing and debug_mode:
         fd = fout / "censored_missing_data.zip"
