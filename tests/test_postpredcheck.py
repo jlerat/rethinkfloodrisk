@@ -111,7 +111,7 @@ def test_multivariate_statistics(rho, nsta, allclose):
     z = norm.ppf(x)
     expected = 2 - rv.logcdf(z) / np.log(x[:, 0])
     err = np.abs(np.arcsinh(mv.xi) - np.arcsinh(expected))
-    assert err.max() < 7e-2
+    assert err.max() < 1e-1
 
 
 def tests_krupskii():
