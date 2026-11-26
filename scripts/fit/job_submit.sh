@@ -20,7 +20,7 @@ else
 fi
 
 # Configure array numbers
-NTASKS=28
+NTASKS=12
 ARRAYS_FIT="0-$(($NTASKS - 1))"    
 ARRAYS_PROC=$ARRAYS_FIT
 

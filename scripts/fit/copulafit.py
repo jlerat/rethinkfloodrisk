@@ -40,21 +40,26 @@ def get_options(version, version_priors=2, awraid="WILSONSRIVER"):
     copula_specs = [
         "Univariate",
         "Gaussian",
+        "Student_3",
         "Student_5"
         ]
     pcensors = [0.3]
+
     priors = ["uninformative"]
+
     excludes = ["NONE",
                 "2021"]
 
     marginal_name = "GEV"
 
-    stations = datahub.get_stations()
-    sids = stations.index.to_list()
-    groups = ["203010-203014-203024"] \
-             + sids
-    if int(version) >= 22:
-        groups += ["203004-203010-203014-203024"]
+    #stations = datahub.get_stations()
+    #sids = stations.index.to_list()
+    #groups = ["203010-203014-203024"] \
+    #         + sids
+    #if int(version) >= 22:
+    #    groups += ["203004-203010-203014-203024"]
+    stations = ["203010", "203014", "203024"]
+    groups = stations + ["203010-203014-203024"]
 
     awra_covariate = [False, True]
 
@@ -81,6 +86,8 @@ def get_options(version, version_priors=2, awraid="WILSONSRIVER"):
         if nsta < 8 and task["copula_spec"] == "GaussianFactor_0_2":
             continue
         if nsta != 3 and task["awra_covariate"]:
+            continue
+        if nsta > 1 and not task["awra_covariate"]:
             continue
         keep.append(task)
     opm.tasks = keep
@@ -171,7 +178,6 @@ def get_data(config, script_paths, logger):
         sv = rsample.StanSamplingMultivariate(y,
                                               copula_spec,
                                               censors=censors)
-
     stan_data = sv.to_dict()
 
     # set priors
