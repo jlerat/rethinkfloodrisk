@@ -136,7 +136,6 @@ def test_copulas(cspec, nstations, allclose):
         if mex_kind == "KENDALL" and not re.search("Counter", cspec):
             # The aep computed from kendall should be uniform
             st, pv = kstest(aep, "uniform")
-
             assert pv > 1e-3
 
     if re.search("GaussianFactor", cspec):
