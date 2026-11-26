@@ -50,6 +50,7 @@ def get_script_paths(config, source_file):
     fparams = froot / "outputs" / f"copulafit_v{config.version}"
 
     basename = source_file.stem
+    taskid = config.task.taskid
     fimg = froot / "images" / "manuscript" / basename
 
     SP = namedtuple("ScriptPaths",
@@ -78,22 +79,8 @@ def get_logger(config, script_paths):
 
 
 def get_data(config, script_paths, logger):
-    opm = copulafit.get_options(config.version)
-
-    prior = config.prior
-    copula_spec = config.copula_spec
-    exclude = config.exclude
-    awra_covariate = config.awra_covariate
-    group = config.group
-    stationids = group.split("-")
-    taskid = opm.find(prior=prior,
-                      copula_spec=copula_spec,
-                      exclude=exclude,
-                      awra_covariate=awra_covariate,
-                      group= f"^{group}$")
-    taskid = next(t for t in taskid)
-    task = opm.get_task(taskid)
-
+    task = config.task
+    stationids = task.group.split("-")
     obs_data, _, _, stations = datahub.get_ams_concat()
 
     fs = script_paths.fsum / f"TASK{taskid}" / \
@@ -331,23 +318,19 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-c", "--clean", help="Clean image folder",
                         action="store_true", default=False)
-    parser.add_argument("-a", "--use_awra", help="Use copula including awra covariate",
-                        action="store_true", default=False)
-    parser.add_argument("-i", "--use_informative", help="Use copula including informative prior",
-                        action="store_true", default=False)
+    #parser.add_argument("-a", "--use_awra", help="Use copula including awra covariate",
+    #                    action="store_true", default=False)
+    #parser.add_argument("-i", "--use_informative", help="Use copula including informative prior",
+    #                    action="store_true", default=False)
     args = parser.parse_args()
 
+    version = args.version
+
     # Config
-    CF = namedtuple("Config", ["version", "debug",
-                               "awidth", "aheight", "fdpi",
-                               "ptype", "ari_max",
-                               "freq_plot_type", "clean",
-                               "prior", "copula_spec",
-                               "exclude", "awra_covariate",
-                               "group", "ari"])
     awidth = 6
     aheight = 5
     fdpi = 300
+
     ptype = "gumbel"
     ari_max = 500
     freq_plot_type = "gumbel"
@@ -360,11 +343,25 @@ if __name__ == "__main__":
 
     ari = 100
 
+    opm = copulafit.get_options(version)
+    taskid = opm.find(prior=prior,
+                      copula_spec=copula_spec,
+                      exclude=exclude,
+                      awra_covariate=awra_covariate,
+                      group= f"^{group}$")
+    taskid = next(t for t in taskid)
+    task = opm.get_task(taskid)
+
+
+    CF = namedtuple("Config", ["version", "debug",
+                               "awidth", "aheight", "fdpi",
+                               "ptype", "ari_max",
+                               "freq_plot_type", "clean",
+                               "task", "ari"])
     config = CF(args.version,  args.debug,
                 awidth, aheight, fdpi, ptype, ari_max,
                 freq_plot_type, args.clean,
-                prior, copula_spec, exclude,
-                awra_covariate, group, ari)
+                task, ari)
 
     # Baseline
     source_file = Path(__file__).resolve()
