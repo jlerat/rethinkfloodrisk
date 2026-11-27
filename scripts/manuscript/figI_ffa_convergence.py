@@ -37,7 +37,7 @@ from pyrethink import datahub, processing
 import importlib.util
 
 from figA_impact_of_period_on_FFA import copulafit
-from figB_ffa_sum import get_logger
+from figB_ffa_sum import get_logger, get_task
 
 def get_script_paths(config, source_file):
     froot = source_file.parent.parent.parent
@@ -45,7 +45,8 @@ def get_script_paths(config, source_file):
     fsum = froot / "outputs" / f"copulaprocess2_v{config.version}"
 
     basename = source_file.stem
-    fimg = froot / "images" / "manuscript" / basename
+    taskid = config.task.taskid
+    fimg = froot / "images" / "manuscript" / basename / f"TASK{taskid}"
 
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
@@ -67,22 +68,8 @@ def get_script_paths(config, source_file):
 
 
 def get_data(config, script_paths, logger):
-    opm = copulafit.get_options(config.version)
-
-    prior = config.prior
-    copula_spec = config.copula_spec
-    exclude = config.exclude
-    awra_covariate = config.awra_covariate
-    #group = config.group
-    #stationids = group.split("-")
-    taskid = opm.find(prior=prior,
-                      copula_spec=copula_spec,
-                      exclude=exclude,
-                      awra_covariate=awra_covariate,
-                      group= f"^{group}$")
-    taskid = next(t for t in taskid)
-    task = opm.get_task(taskid)
-
+    task = config.task
+    taskid = task.taskid
     obs_data, _, _, stations = datahub.get_ams_concat()
 
     # Config FFA
@@ -229,7 +216,8 @@ def process(config, script_paths, loogger, data):
         ax.legend(loc=1, framealpha=0.)
 
         # save
-        fp = f"{script_paths.basename}_v{config.version}_{stationid}_ARI{ari}.png"
+        cs = task.copula_spec
+        fp = f"{script_paths.basename}_v{config.version}_{stationid}_ARI{ari}_{cs}.png"
         fp = script_paths.fimg / fp
         fp.parent.mkdir(exist_ok=True)
         fig.savefig(fp, dpi=config.fdpi)
@@ -249,18 +237,21 @@ if __name__ == "__main__":
     parser.add_argument("-rc", "--rating_curve",
                         help="Convert flow to h using rating lean image folder",
                         action="store_true", default=False)
+    parser.add_argument("-cs", "--copula_spec", help="Copula specification",
+                        type=str, default="Gaussian",
+                        choices=["Gaussian", "Student_3", "Student_5"])
     args = parser.parse_args()
     use_rating_curve = args.rating_curve
     ari = args.ari
+    version = args.version
+    copula_spec = args.copula_spec
 
     # Config
     CF = namedtuple("Config", ["version",
                                "awidth", "aheight", "fdpi",
                                "ptype", "ari_max",
                                "freq_plot_type", "clean",
-                               "prior", "copula_spec",
-                               "exclude", "awra_covariate",
-                               "group", "ari",
+                               "task", "ari",
                                "nreplicates", "nvalues",
                                "use_rating_curve"])
     awidth = 7
@@ -271,7 +262,6 @@ if __name__ == "__main__":
     freq_plot_type = "gumbel"
 
     prior = "uninformative"
-    copula_spec = "Gaussian"
     exclude = "NONE"
     awra_covariate = True
     group = "203010-203014-203024"
@@ -280,11 +270,14 @@ if __name__ == "__main__":
     nreplicates = 1000
     nvalues = [200, 500, 1000, 2000, 5000, 10000]
 
+    task = get_task(version, prior, copula_spec,
+                    exclude, awra_covariate,
+                    group)
+
     config = CF(args.version,
                 awidth, aheight, fdpi, ptype, ari_max,
                 freq_plot_type, args.clean,
-                prior, copula_spec, exclude,
-                awra_covariate, group, ari,
+                task, ari,
                 nreplicates, nvalues,
                 use_rating_curve)
 

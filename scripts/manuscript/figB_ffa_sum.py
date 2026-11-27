@@ -51,7 +51,7 @@ def get_script_paths(config, source_file):
 
     basename = source_file.stem
     taskid = config.task.taskid
-    fimg = froot / "images" / "manuscript" / basename
+    fimg = froot / "images" / "manuscript" / basename / f"TASK{taskid}"
 
     SP = namedtuple("ScriptPaths",
                     ["source_file", "basename",
@@ -82,6 +82,7 @@ def get_data(config, script_paths, logger):
     task = config.task
     stationids = task.group.split("-")
     obs_data, _, _, stations = datahub.get_ams_concat()
+    taskid = task.taskid
 
     fs = script_paths.fsum / f"TASK{taskid}" / \
         f"copulaprocess_sum_samples_TASK{taskid}.csv"
@@ -160,18 +161,17 @@ def get_data(config, script_paths, logger):
 
     DT = namedtuple("Data", ["stations", "obs_data",
                              "sum_samples", "sum_ffa",
-                             "options", "samples_cond"])
+                             "samples_cond"])
     return DT(stations, obs_data,
               sum_samples, sum_ffa,
-              opm, samples_cond)
+              samples_cond.astype(float))
 
 
 def process(config, script_paths, logger, data):
-    group = config.group
+    group = config.task.group
     stationids = group.split("-")
     stations = data.stations.loc[stationids]
 
-    options = data.options
     obs_data = data.obs_data
     sum_samples = data.sum_samples
 
@@ -301,10 +301,24 @@ def process(config, script_paths, logger, data):
                                             kwargs_text=kwt)
     ax.legend(loc=2, framealpha=1.)
     # save
-    fp = f"{script_paths.basename}_v{config.version}.png"
+    copula_spec = config.task.copula_spec
+    fp = f"{script_paths.basename}_v{config.version}_{copula_spec}.png"
     fp = script_paths.fimg / fp
     fp.parent.mkdir(exist_ok=True)
     fig.savefig(fp, dpi=config.fdpi)
+
+
+def get_task(version, prior, copula_spec,
+             exclude, awra_covariate, group):
+
+    opm = copulafit.get_options(version)
+    taskid = opm.find(prior=prior,
+                      copula_spec=copula_spec,
+                      exclude=exclude,
+                      awra_covariate=awra_covariate,
+                      group= f"^{group}$")
+    taskid = next(t for t in taskid)
+    return opm.get_task(taskid)
 
 
 if __name__ == "__main__":
@@ -318,10 +332,9 @@ if __name__ == "__main__":
                         action="store_true", default=False)
     parser.add_argument("-c", "--clean", help="Clean image folder",
                         action="store_true", default=False)
-    #parser.add_argument("-a", "--use_awra", help="Use copula including awra covariate",
-    #                    action="store_true", default=False)
-    #parser.add_argument("-i", "--use_informative", help="Use copula including informative prior",
-    #                    action="store_true", default=False)
+    parser.add_argument("-cs", "--copula_spec", help="Copula specification",
+                        type=str, default="Gaussian",
+                        choices=["Gaussian", "Student_3", "Student_5"])
     args = parser.parse_args()
 
     version = args.version
@@ -336,22 +349,16 @@ if __name__ == "__main__":
     freq_plot_type = "gumbel"
 
     prior = "uninformative"
-    copula_spec = "Gaussian"
+    copula_spec = args.copula_spec
     exclude = "NONE"
     awra_covariate = True
     group = "203010-203014-203024"
 
     ari = 100
 
-    opm = copulafit.get_options(version)
-    taskid = opm.find(prior=prior,
-                      copula_spec=copula_spec,
-                      exclude=exclude,
-                      awra_covariate=awra_covariate,
-                      group= f"^{group}$")
-    taskid = next(t for t in taskid)
-    task = opm.get_task(taskid)
-
+    task = get_task(version, prior, copula_spec,
+                    exclude, awra_covariate,
+                    group)
 
     CF = namedtuple("Config", ["version", "debug",
                                "awidth", "aheight", "fdpi",
