@@ -183,6 +183,7 @@ def process(config, script_paths, logger, data):
                 group = stationid if model == "Univariate" else grp_mv
                 awra_covariate = False if model == "Univariate" else not config.do_not_use_awra
 
+                # Task of current config
                 taskid = options.find(prior=prior,
                                       copula_spec=cs,
                                       exclude=exclude,
@@ -193,6 +194,14 @@ def process(config, script_paths, logger, data):
                 task = options.get_task(taskid)
                 pcensor = task.pcensor
 
+                # Task of same config, but exclude the event
+                taskid_exclude = options.find(prior=prior,
+                                              copula_spec=cs,
+                                              exclude=excludes[0],
+                                              awra_covariate=awra_covariate,
+                                              group= f"^{group}$")
+                taskid_exclude = next(t for t in taskid_exclude)
+
                 # Get ffa data
                 idx = ffa.STATIONID == stationid
                 idx &= ffa.TASKID == taskid
@@ -200,18 +209,22 @@ def process(config, script_paths, logger, data):
                 if idx.sum() == 0:
                     continue
 
-                df = ffa.loc[idx].copy()
+                df = ffa.loc[idx].copy().reset_index(drop=True)
                 ERI = df.VARIABLE.replace(".*ERI|\\.$", "", regex=True)
                 df.loc[:, "ERI"] = ERI.astype(float)
+
+                idx = ffa.STATIONID == stationid
+                idx &= ffa.TASKID == taskid_exclude
+                idx &= ffa.VARIABLE.str.contains("DESIGN")
+                tmp = ffa.loc[idx].copy().reset_index(drop=True)
+                tmp.loc[:, "ERI"] = ERI.astype(float)
+                tmp.columns = [f"EXCLUDE_{cn}" for cn in tmp.columns]
+                df = pd.concat([df, tmp], axis=1)
 
                 # Get data
                 peaks_excluded = peaks.copy()
                 if exclude != "NONE":
                     peaks_excluded.loc[int(exclude)] = np.nan
-
-                # Fit GEV
-                gev = marginals.factory("GEV")
-                gev.fit_lh_moments(peaks_excluded, eta=2)
 
                 # Plot obs data
                 x, y = freqplots.plot_data(ax, peaks_excluded, fptype, zorder=10)
@@ -309,16 +322,29 @@ def process(config, script_paths, logger, data):
                           fontdict = {"family": "monospace"})
                 ax.text(0.03, ytxt, txt, **kw)
 
-                txt = f"Flow [1% AEP] = {design.loc[cn_pp, 'q']:0.0f}"
+                txt = f"Flow [1:100 AEP] = {design.loc[cn_pp, 'q']:0.0f}"
                 txt += f" $\\pm$ {design.loc['CI90', 'q']/2:0.0f} $m^3.s^{{{-1}}}$"
                 dy = 0.06
                 ytxt -= dy
                 ax.text(0.03, ytxt, txt, **kw)
 
-                txt = f"Stage[1% AEP] = {design.loc[cn_pp, 'h']:0.1f}"
+                txt = f"Stage[1:100 AEP] = {design.loc[cn_pp, 'h']:0.1f}"
                 txt += f" $\\pm$ {design.loc['CI90', 'h']/2:0.1f} $m$"
                 ytxt -= dy
                 ax.text(0.03, ytxt, txt, fontweight="bold", **kw)
+
+                if exclude == "NONE":
+                    i100 = df.ERI == 100
+                    q_ex = quantiles.loc[i100, f"EXCLUDE_{cn_pp}"].squeeze()
+                    h_ex = processing.linear_interpolation(q_ex, rc_q, rc_h)
+
+                    pp = quantiles.ERI
+                    qq = quantiles.loc[:, cn_pp]
+                    pp_ex = processing.linear_interpolation(q_ex, qq, pp)
+
+                    txt = f"Stage[1:{pp_ex:3.0f} AEP] = {h_ex:0.1f}"
+                    ytxt -= 2 * dy
+                    ax.text(0.03, ytxt, txt, fontstyle="italic", **kw)
 
                 iplot += 1
 
